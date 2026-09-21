@@ -35,6 +35,7 @@ export default function DevAdminDashboardPreview() {
     isTenant: false,
     isOwner: false,
     isAdmin: true,
+    isSuperAdmin: true,
     login: async () => null,
     logout: async () => {
       console.info('وضع المعاينة: تم استدعاء تسجيل الخروج (Development Preview Logout)');
