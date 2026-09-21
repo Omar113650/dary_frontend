@@ -1,0 +1,104 @@
+/* ==========================================================================
+   DARY CALL TO ACTION — MINIMAL SINGLE-LINE SECTION
+   ========================================================================== */
+
+.cta-section {
+  padding-block: 2.25rem 3.5rem;
+  background-color: var(--color-white);
+}
+
+.cta-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.875rem;
+  background-color: #0B2A4A;
+  border-radius: 24px;
+  padding: 2rem 2rem;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px -4px rgba(11, 42, 74, 0.12),
+              0 2px 8px rgba(11, 42, 74, 0.04);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+}
+
+.cta-card:hover {
+  background-color: #0e3256;
+  border-color: rgba(47, 107, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 32px -4px rgba(11, 42, 74, 0.18),
+              0 4px 12px rgba(47, 107, 255, 0.12);
+}
+
+.cta-card:active {
+  transform: translateY(0);
+}
+
+/* Same visual level/weight as other section headings on the Home Page */
+.cta-text {
+  font-size: clamp(1.25rem, 2.2vw, 1.625rem);
+  font-weight: 700;
+  color: #FFFFFF;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  transition: color 0.2s ease;
+}
+
+/* Subtle arrow icon */
+.cta-icon {
+  width: 20px;
+  height: 20px;
+  color: #2F6BFF;
+  flex-shrink: 0;
+  transition: transform 0.25s ease, color 0.25s ease;
+}
+
+.cta-card:hover .cta-icon {
+  color: #FFFFFF;
+  transform: translateX(4px);
+}
+
+[dir="rtl"] .cta-icon {
+  transform: scaleX(-1);
+}
+
+[dir="rtl"] .cta-card:hover .cta-icon {
+  transform: scaleX(-1) translateX(4px);
+}
+
+/* Tablet */
+@media (max-width: 1024px) {
+  .cta-section {
+    padding-block: 2rem 3rem;
+  }
+
+  .cta-card {
+    padding: 1.85rem 1.75rem;
+    border-radius: 20px;
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .cta-section {
+    padding-block: 1.75rem 2.5rem;
+  }
+
+  .cta-card {
+    padding: 1.5rem 1.25rem;
+    gap: 0.625rem;
+    border-radius: 18px;
+  }
+
+  .cta-text {
+    font-size: 1.125rem;
+    text-align: center;
+  }
+
+  .cta-icon {
+    width: 18px;
+    height: 18px;
+  }
+}

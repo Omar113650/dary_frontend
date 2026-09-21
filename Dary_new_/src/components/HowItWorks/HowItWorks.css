@@ -1,0 +1,101 @@
+/* ==========================================================================
+   HOW DARY WORKS SECTION
+   ========================================================================== */
+
+.how-section {
+  background-color: var(--color-soft-neutral);
+  padding-block: 4.75rem 4.5rem;
+}
+
+.how-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2rem;
+}
+
+.how-card {
+  text-align: start;
+  padding: 2.5rem 2.25rem;
+  border-radius: 24px;
+  border: 1px solid rgba(11, 42, 74, 0.08);
+  background: var(--color-white);
+  box-shadow: 0 4px 20px rgba(11, 42, 74, 0.03);
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.how-card:hover {
+  transform: translateY(-4px);
+  border-color: rgba(47, 107, 255, 0.25);
+  box-shadow: 0 12px 32px rgba(11, 42, 74, 0.07);
+}
+
+.how-step-indicator {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+.how-step-num {
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--color-blue);
+  background-color: rgba(47, 107, 255, 0.08);
+  border: 1px solid rgba(47, 107, 255, 0.2);
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.04em;
+}
+
+.how-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background-color: var(--color-soft-neutral);
+  border: 1px solid rgba(11, 42, 74, 0.08);
+  color: var(--color-navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 1.35rem;
+  transition: all 0.25s ease;
+}
+
+.how-card:hover .how-icon-wrap {
+  background-color: rgba(47, 107, 255, 0.1);
+  border-color: rgba(47, 107, 255, 0.3);
+  color: var(--color-blue);
+  transform: scale(1.04);
+}
+
+.how-card-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: var(--color-navy);
+  margin-bottom: 0.65rem;
+  line-height: 1.35;
+}
+
+.how-card-desc {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+@media (max-width: 992px) {
+  .how-section {
+    padding-block: 3.75rem 3.25rem;
+  }
+
+  .how-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .how-card {
+    padding: 2rem 1.75rem;
+  }
+}

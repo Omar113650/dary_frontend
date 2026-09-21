@@ -1,0 +1,134 @@
+/* Featured Properties Section */
+.featured-section {
+  background-color: var(--color-soft-neutral);
+  overflow: hidden; /* Prevent horizontal overflow on the entire webpage */
+  position: relative;
+}
+
+/* Header Row: Title on start side, navigation controls on end side */
+.featured-header-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.featured-header-row .section-header {
+  margin-bottom: 0;
+  text-align: start;
+}
+
+/* Carousel Navigation Arrow Controls */
+.featured-carousel-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.featured-carousel-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--color-white);
+  border: 1px solid var(--color-border);
+  color: var(--color-navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(11, 42, 74, 0.04);
+  transition: all 0.2s ease;
+}
+
+.featured-carousel-btn:hover:not(:disabled) {
+  border-color: var(--color-blue);
+  color: var(--color-blue);
+  box-shadow: 0 4px 12px rgba(47, 107, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.featured-carousel-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Single Horizontal Row / Carousel Container */
+.featured-carousel {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 1.75rem;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  padding-top: 0.5rem;
+  padding-bottom: 1.5rem;
+  padding-inline: 4px;
+  margin-inline: -4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(11, 42, 74, 0.18) rgba(11, 42, 74, 0.04);
+}
+
+.featured-carousel::-webkit-scrollbar {
+  height: 6px;
+}
+
+.featured-carousel::-webkit-scrollbar-track {
+  background: rgba(11, 42, 74, 0.04);
+  border-radius: var(--radius-pill);
+}
+
+.featured-carousel::-webkit-scrollbar-thumb {
+  background: rgba(11, 42, 74, 0.18);
+  border-radius: var(--radius-pill);
+  transition: background 0.2s ease;
+}
+
+.featured-carousel::-webkit-scrollbar-thumb:hover {
+  background: var(--color-blue);
+}
+
+/* Desktop: ~3 cards visible at a time */
+.featured-carousel-item {
+  flex: 0 0 calc((100% - 2 * 1.75rem) / 3);
+  min-width: 320px;
+  scroll-snap-align: start;
+}
+
+/* Tablet (769px–1024px): ~2 cards visible */
+@media (max-width: 1024px) {
+  .featured-carousel {
+    gap: 1.5rem;
+  }
+
+  .featured-carousel-item {
+    flex: 0 0 calc((100% - 1.5rem) / 2);
+    min-width: 280px;
+  }
+}
+
+/* Mobile (<= 768px): ~1 card visible + small portion of next card */
+@media (max-width: 768px) {
+  .featured-header-row {
+    margin-bottom: 1.5rem;
+  }
+
+  .featured-carousel-controls {
+    display: none; /* Mobile users swipe horizontally */
+  }
+
+  .featured-carousel {
+    gap: 1rem;
+    padding-bottom: 1.25rem;
+  }
+
+  .featured-carousel-item {
+    flex: 0 0 84%; /* Shows 1 card + 16% of next card to indicate scrollability */
+    min-width: 270px;
+    max-width: 340px;
+  }
+}

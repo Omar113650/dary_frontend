@@ -1,0 +1,320 @@
+/* Full-Viewport 100vh Cinematic Hero Section */
+.hero-section {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 680px;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding-top: 5.5rem;
+  padding-bottom: 2rem;
+}
+
+/* Full-bleed Photo Coverage — Covers entire viewport edge-to-edge */
+.hero-media-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.hero-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 38%;
+  display: block;
+}
+
+/* Subtle Directional Soft Light Overlay — Natural daylight, keeps photo bright */
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.58) 0%,
+    rgba(255, 255, 255, 0.36) 30%,
+    rgba(255, 255, 255, 0.08) 50%,
+    transparent 65%
+  );
+}
+
+[dir="rtl"] .hero-overlay {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.6) 0%,
+    rgba(255, 255, 255, 0.38) 32%,
+    rgba(255, 255, 255, 0.1) 52%,
+    transparent 68%
+  );
+}
+
+/* Content Container — Left Portion (~40-45%) on Desktop */
+.hero-content-container {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 1400px;
+  margin-inline: auto;
+  padding-inline: clamp(1.5rem, 5vw, 4rem);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  height: 100%;
+}
+
+/* Hero Content Column — All items vertically aligned on left */
+.hero-content-column {
+  width: 100%;
+  max-width: 590px;
+  margin-left: 0;
+  margin-right: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1.5rem;
+  box-sizing: border-box;
+}
+
+[dir="rtl"] .hero-content-column {
+  margin-left: 0;
+  margin-right: auto;
+  align-items: flex-start;
+}
+
+/* Hero Text Card */
+.hero-text-card {
+  width: 100%;
+  text-align: start;
+}
+
+[dir="rtl"] .hero-text-card {
+  text-align: right;
+}
+
+/* Eyebrow with subtle Gold accent dot */
+.hero-kicker-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.65rem;
+}
+
+.hero-kicker-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--color-gold);
+  flex-shrink: 0;
+}
+
+.hero-kicker {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--color-navy);
+  letter-spacing: 0.03em;
+}
+
+/* Headline */
+.hero-headline {
+  font-size: 3rem;
+  font-weight: 800;
+  line-height: 1.18;
+  letter-spacing: -0.02em;
+  color: var(--color-navy);
+  margin-bottom: 0.85rem;
+}
+
+[dir="rtl"] .hero-headline {
+  letter-spacing: normal;
+  text-shadow: 0 1px 16px rgba(255, 255, 255, 0.95), 0 0 3px rgba(255, 255, 255, 0.7);
+}
+
+/* Supporting Text */
+.hero-subtitle {
+  font-size: 1.0625rem;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--color-navy);
+  opacity: 0.85;
+  max-width: 480px;
+  margin: 0;
+}
+
+[dir="rtl"] .hero-subtitle {
+  text-shadow: 0 1px 12px rgba(255, 255, 255, 0.9);
+}
+
+/* Integrated Search Wrap (sits directly beneath text) */
+.hero-search-wrap {
+  width: 100%;
+  max-width: 590px;
+  box-sizing: border-box;
+}
+
+/* Trust Features Wrap (directly beneath search) */
+.hero-trust-wrap {
+  width: 100%;
+  max-width: 590px;
+  box-sizing: border-box;
+  padding-top: 0.25rem;
+}
+
+/* Subtle Floating Scroll Down Indicator */
+.hero-scroll-indicator {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(11, 42, 74, 0.12);
+  color: var(--color-navy);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(11, 42, 74, 0.08);
+  transition: background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  animation: heroScrollFloat 2.4s ease-in-out infinite;
+}
+
+.hero-scroll-indicator:hover {
+  background-color: #FFFFFF;
+  box-shadow: 0 6px 18px rgba(11, 42, 74, 0.15);
+}
+
+@keyframes heroScrollFloat {
+  0%, 100% {
+    transform: translate(-50%, 0);
+  }
+  50% {
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* Tablet Responsiveness (769px–1024px) */
+@media (max-width: 1024px) {
+  .hero-section {
+    height: auto;
+    min-height: 640px;
+    padding-top: 6rem;
+    padding-bottom: 3.5rem;
+  }
+
+  .hero-content-column {
+    max-width: 520px;
+    gap: 1.25rem;
+  }
+
+  .hero-headline {
+    font-size: 2.35rem;
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
+  }
+}
+
+/* Mobile Responsiveness (<= 768px) */
+@media (max-width: 768px) {
+  .hero-section {
+    height: auto;
+    min-height: 100vh;
+    padding-top: 5.5rem;
+    padding-bottom: 3rem;
+    padding-inline: 1rem;
+  }
+
+  .hero-image {
+    object-position: 65% 25%;
+  }
+
+  .hero-overlay {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.72) 0%,
+      rgba(255, 255, 255, 0.52) 50%,
+      rgba(255, 255, 255, 0.25) 100%
+    );
+  }
+
+  [dir="rtl"] .hero-overlay {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.72) 0%,
+      rgba(255, 255, 255, 0.52) 50%,
+      rgba(255, 255, 255, 0.25) 100%
+    );
+  }
+
+  .hero-content-container {
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .hero-content-column {
+    max-width: 100%;
+    align-items: center;
+    text-align: center;
+    gap: 1.25rem;
+  }
+
+  .hero-text-card {
+    text-align: center;
+  }
+
+  [dir="rtl"] .hero-text-card {
+    text-align: center;
+  }
+
+  .hero-kicker-wrap {
+    justify-content: center;
+  }
+
+  .hero-headline {
+    font-size: 1.85rem;
+    line-height: 1.25;
+    margin-bottom: 0.5rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    max-width: 340px;
+    margin-inline: auto;
+  }
+
+  .hero-search-wrap,
+  .hero-trust-wrap {
+    max-width: 100%;
+  }
+
+  .hero-scroll-indicator {
+    display: none;
+  }
+}
+
+@media (max-width: 390px) {
+  .hero-headline {
+    font-size: 1.625rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-scroll-indicator {
+    animation: none;
+  }
+}

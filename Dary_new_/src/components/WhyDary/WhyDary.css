@@ -1,0 +1,124 @@
+/* ==========================================================================
+   WHY STUDENTS CHOOSE DARY SECTION
+   ========================================================================== */
+
+.why-section {
+  background-color: var(--color-white);
+  padding-block: 4.75rem 4.5rem;
+}
+
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.75rem;
+}
+
+.why-card {
+  display: flex;
+  flex-direction: column;
+  padding: 2.5rem 2.25rem;
+  border-radius: 24px;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Variant 1: Navy Card */
+.why-card--navy {
+  background-color: var(--color-navy);
+  border: 1px solid rgba(11, 42, 74, 0.15);
+  color: #FFFFFF;
+  box-shadow: 0 10px 32px rgba(11, 42, 74, 0.12);
+}
+
+.why-card--navy:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 42px rgba(11, 42, 74, 0.2);
+}
+
+.why-icon-wrap--navy {
+  background-color: rgba(47, 107, 255, 0.2);
+  border: 1px solid rgba(47, 107, 255, 0.35);
+  color: #60A5FA;
+}
+
+.why-card-title--navy {
+  color: #FFFFFF;
+}
+
+.why-card-desc--navy {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+/* Variant 2: White Card */
+.why-card--white {
+  background-color: var(--color-soft-neutral);
+  border: 1px solid rgba(11, 42, 74, 0.08);
+  color: var(--color-text-primary);
+  box-shadow: 0 4px 18px rgba(11, 42, 74, 0.03);
+}
+
+.why-card--white:hover {
+  transform: translateY(-4px);
+  border-color: rgba(47, 107, 255, 0.25);
+  box-shadow: 0 12px 32px rgba(11, 42, 74, 0.07);
+}
+
+.why-icon-wrap--white {
+  background-color: var(--color-white);
+  border: 1px solid rgba(11, 42, 74, 0.1);
+  color: var(--color-navy);
+  box-shadow: 0 2px 8px rgba(11, 42, 74, 0.04);
+}
+
+.why-card--white:hover .why-icon-wrap--white {
+  color: var(--color-blue);
+  border-color: rgba(47, 107, 255, 0.3);
+  transform: scale(1.04);
+}
+
+.why-card-title--white {
+  color: var(--color-navy);
+}
+
+.why-card-desc--white {
+  color: var(--color-text-secondary);
+}
+
+.why-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  margin-bottom: 1.35rem;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.why-card-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  margin-bottom: 0.65rem;
+  line-height: 1.35;
+}
+
+.why-card-desc {
+  font-size: 0.95rem;
+  line-height: 1.75;
+  margin: 0;
+}
+
+@media (max-width: 992px) {
+  .why-section {
+    padding-block: 3.75rem 3.25rem;
+  }
+
+  .why-grid {
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+
+  .why-card {
+    padding: 2rem 1.75rem;
+  }
+}
