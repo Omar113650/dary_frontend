@@ -1,4 +1,6 @@
 import { ApiClient } from './apiClient';
+import type { NotificationItem } from './notificationService';
+import type { SupportTicketItem, TicketMessageItem } from './supportTicketService';
 
 export interface RentalBooking {
   id: string;
@@ -63,45 +65,6 @@ export interface SavedSearchItem {
   maxPrice?: number;
   rooms?: number;
   createdAt?: string;
-  [key: string]: any;
-}
-
-export interface NotificationItem {
-  id: string;
-  title?: string;
-  message?: string;
-  body?: string;
-  content?: string;
-  isRead?: boolean;
-  read?: boolean;
-  channel?: string;
-  event?: string;
-  createdAt?: string;
-  [key: string]: any;
-}
-
-export interface SupportTicketItem {
-  id: string;
-  category?: string;
-  subject?: string;
-  description?: string;
-  status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | 'CLOSED' | string;
-  createdAt?: string;
-  updatedAt?: string;
-  messages?: any[];
-  [key: string]: any;
-}
-
-export interface TicketMessageItem {
-  id: string;
-  ticketId?: string;
-  senderId?: string;
-  senderRole?: string;
-  senderName?: string;
-  message?: string;
-  content?: string;
-  createdAt?: string;
-  attachments?: any[];
   [key: string]: any;
 }
 

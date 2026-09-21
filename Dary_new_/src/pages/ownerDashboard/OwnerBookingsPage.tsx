@@ -10,7 +10,7 @@ export default function OwnerBookingsPage() {
   const { locale } = useLocale();
 
   // Booking status breakdown
-  const [bookingStatusData, setBookingStatusData] = useState<any>(null);
+  const [, setBookingStatusData] = useState<any>(null);
   const [loadingStatus, setLoadingStatus] = useState(true);
   const [statusError, setStatusError] = useState<string | null>(null);
 

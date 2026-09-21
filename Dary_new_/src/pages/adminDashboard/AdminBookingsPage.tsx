@@ -132,7 +132,11 @@ export default function AdminBookingsPage() {
     }
   }, [actionMessage]);
 
-  const handleUpdateStatus = async (bookingId: string, status: string, note?: string) => {
+  const handleUpdateStatus = async (
+    bookingId: string,
+    status: 'CONTACTED' | 'CLOSED' | 'CANCELLED',
+    note?: string
+  ) => {
     setActionLoading(true);
     setActionMessage(null);
     try {
@@ -352,7 +356,7 @@ export default function AdminBookingsPage() {
                           {b.property?.title || 'عقار جامعي'}
                         </div>
                         <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
-                          {b.room?.roomType ? `غرفة ${b.room.roomType}` : b.property?.city || 'غرفة دراسية'}
+                          {b.room?.roomType ? `غرفة ${b.room.roomType}` : b.room?.type ? `غرفة ${b.room.type}` : b.property?.city || 'غرفة دراسية'}
                         </div>
                       </td>
 
@@ -363,7 +367,13 @@ export default function AdminBookingsPage() {
                       </td>
 
                       <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: '#0B2A4A' }}>
-                        {b.totalPrice !== undefined ? `${b.totalPrice.toLocaleString()} ${revenueCurrency}` : (b.room?.pricePerBed || b.room?.monthlyRent) ? `${Number(b.room.pricePerBed || b.room.monthlyRent).toLocaleString()} ${revenueCurrency}` : '—'}
+                        {b.totalPrice !== undefined
+                          ? `${b.totalPrice.toLocaleString()} ${revenueCurrency}`
+                          : (b.room?.pricePerBed || b.room?.monthlyRent)
+                          ? `${Number(
+                              b.room?.pricePerBed || b.room?.monthlyRent
+                            ).toLocaleString()} ${revenueCurrency}`
+                          : '—'}
                       </td>
 
                       <td style={{ padding: '0.85rem 1rem' }}>

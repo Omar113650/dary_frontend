@@ -12,3 +12,6 @@ export * from './notificationService';
 export * from './tenantService';
 export * from './ownerService';
 export * from './adminService';
+
+export type { NotificationItem } from './notificationService';
+export type { SupportTicketItem, TicketMessageItem } from './supportTicketService';

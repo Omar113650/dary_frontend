@@ -1,5 +1,6 @@
 import { ApiClient } from './apiClient';
-import type { Property } from '../types/property';
+import type { Property, PropertyResponse } from '../types/property';
+export type { PropertyResponse };
 
 export interface PropertyFilterParams {
   search?: string;

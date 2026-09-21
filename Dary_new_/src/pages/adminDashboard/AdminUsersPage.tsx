@@ -371,13 +371,13 @@ export default function AdminUsersPage() {
                 <tbody>
                   {users.map((u) => {
                     const fullName = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
-                    const directRole =
+                    const directRole: string =
                       u.role ||
                       (Array.isArray(u.roles) && (
-                        u.roles.includes('super_admin') ? 'super_admin' :
-                        u.roles.includes('admin') ? 'admin' :
-                        u.roles.includes('owner') ? 'owner' :
-                        u.roles[0]
+                        u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'super_admin') ? 'super_admin' :
+                        u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'admin') ? 'admin' :
+                        u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'owner') ? 'owner' :
+                        (typeof u.roles[0] === 'string' ? u.roles[0] : (u.roles[0]?.name || u.roles[0]?.role?.name))
                       )) ||
                       'tenant';
 

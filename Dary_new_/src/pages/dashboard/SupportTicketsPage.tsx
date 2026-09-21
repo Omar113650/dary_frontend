@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
-import type { SupportTicketItem, TicketMessageItem } from '../../services/tenantService';
+import type { SupportTicketItem, TicketMessageItem } from '../../services/supportTicketService';
 
 export default function SupportTicketsPage() {
   const { locale } = useLocale();

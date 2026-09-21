@@ -3,6 +3,7 @@ export const API_BASE_URL =
 
 export interface RequestOptions extends RequestInit {
   data?: any;
+  params?: Record<string, any> | URLSearchParams;
   _retry?: boolean;
 }
 
@@ -124,7 +125,7 @@ export class ApiClient {
   }
 
   static async request<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
-    const { data, headers: customHeaders, _retry = false, ...customOptions } = options;
+    const { data, params, headers: customHeaders, _retry = false, ...customOptions } = options;
 
     const isFormData = typeof FormData !== 'undefined' && data instanceof FormData;
     const headers = new Headers(customHeaders);
@@ -155,7 +156,21 @@ export class ApiClient {
       }
     }
 
-    const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+    let url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
+    if (params) {
+      const searchParams =
+        params instanceof URLSearchParams
+          ? params
+          : new URLSearchParams(
+              Object.entries(params)
+                .filter(([_, v]) => v !== undefined && v !== null)
+                .map(([k, v]) => [k, String(v)])
+            );
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += (url.includes('?') ? '&' : '?') + queryString;
+      }
+    }
 
     try {
       const response = await fetch(url, config);

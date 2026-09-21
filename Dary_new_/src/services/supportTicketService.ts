@@ -8,13 +8,14 @@ export interface CreateTicketPayload {
 
 export interface SupportTicketItem {
   id: string;
-  userId: string;
+  userId?: string;
   assignedAdminId?: string | null;
   category: string;
   subject: string;
   description: string;
-  status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | string;
+  status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | 'CLOSED' | string;
   createdAt?: string;
+  updatedAt?: string;
   resolvedAt?: string | null;
   user?: any;
   assignedAdmin?: any;
@@ -24,11 +25,14 @@ export interface SupportTicketItem {
 
 export interface TicketMessageItem {
   id: string;
-  ticketId: string;
-  senderId: string;
-  message: string;
+  ticketId?: string;
+  senderId?: string;
+  senderRole?: string;
+  senderName?: string;
+  message?: string;
+  content?: string;
   createdAt?: string;
-  attachments?: Array<{ url: string; type?: string; publicId?: string }>;
+  attachments?: Array<{ url: string; type?: string; publicId?: string } | any>;
   sender?: any;
   [key: string]: any;
 }
