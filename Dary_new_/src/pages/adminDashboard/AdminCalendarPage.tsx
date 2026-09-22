@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminCalendarBookingEvent } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminCalendarPage() {
   const { locale } = useLocale();
@@ -135,7 +136,9 @@ export default function AdminCalendarPage() {
             📅
           </div>
           <div>
-            <h3 className="dary-metric-number">{summary?.totalBookings ?? events.length}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={summary?.totalBookings ?? events.length} loading={loading} />
+            </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي الحجوزات بالتقويم' : 'Calendar Bookings'}</p>
           </div>
         </div>
@@ -147,7 +150,10 @@ export default function AdminCalendarPage() {
           </div>
           <div>
             <h3 className="dary-metric-number" style={{ color: '#15803D' }}>
-              {summary?.activeBookings ?? events.filter((e: any) => e.status === 'CONTACTED' || e.status === 'CLOSED').length}
+              <AnimatedCounter
+                value={summary?.activeBookings ?? events.filter((e: any) => e.status === 'CONTACTED' || e.status === 'CLOSED').length}
+                loading={loading}
+              />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'حجوزات سارية / متواصل معها' : 'Active Occupancies'}</p>
           </div>
@@ -160,7 +166,10 @@ export default function AdminCalendarPage() {
           </div>
           <div>
             <h3 className="dary-metric-number" style={{ color: '#B45309' }}>
-              {summary?.upcomingBookings ?? events.filter((e: any) => e.status === 'PENDING').length}
+              <AnimatedCounter
+                value={summary?.upcomingBookings ?? events.filter((e: any) => e.status === 'PENDING').length}
+                loading={loading}
+              />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'طلبات قيد المراجعة' : 'Pending Requests'}</p>
           </div>
@@ -173,7 +182,11 @@ export default function AdminCalendarPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {summary?.occupancyRate !== undefined ? `${summary.occupancyRate}%` : '66%'}
+              <AnimatedCounter
+                value={summary?.occupancyRate !== undefined ? summary.occupancyRate : 66}
+                loading={loading}
+                suffix="%"
+              />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'معدل الإشغال الإجمالي' : 'Occupancy Rate'}</p>
           </div>

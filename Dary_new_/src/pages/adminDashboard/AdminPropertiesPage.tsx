@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminPropertyItem, AdminStatusCount } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminPropertiesPage() {
   const { locale } = useLocale();
@@ -251,7 +252,7 @@ export default function AdminPropertiesPage() {
             </div>
             <div>
               <h3 className="dary-metric-number">
-                {loadingStatus ? '...' : item.count}
+                <AnimatedCounter value={item.count} loading={loadingStatus} />
               </h3>
               <p className="dary-metric-label">{item.status}</p>
             </div>

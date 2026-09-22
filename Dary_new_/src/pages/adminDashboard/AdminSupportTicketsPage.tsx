@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { SupportTicketService } from '../../services/supportTicketService';
 import type { SupportTicketItem, TicketMessageItem } from '../../services/supportTicketService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminSupportTicketsPage() {
   const { locale } = useLocale();
@@ -331,7 +332,9 @@ export default function AdminSupportTicketsPage() {
             📋
           </div>
           <div>
-            <h3 className="dary-metric-number">{loading ? '...' : counts.ALL}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={counts.ALL} loading={loading} />
+            </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي التذاكر' : 'Total Tickets'}</p>
           </div>
         </div>
@@ -345,7 +348,9 @@ export default function AdminSupportTicketsPage() {
             ⏳
           </div>
           <div>
-            <h3 className="dary-metric-number">{loading ? '...' : counts.OPEN}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={counts.OPEN} loading={loading} />
+            </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'مفتوحة (جديدة)' : 'Open'}</p>
           </div>
         </div>
@@ -359,7 +364,9 @@ export default function AdminSupportTicketsPage() {
             🔍
           </div>
           <div>
-            <h3 className="dary-metric-number">{loading ? '...' : counts.INVESTIGATING}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={counts.INVESTIGATING} loading={loading} />
+            </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'قيد المتابعة' : 'In Progress'}</p>
           </div>
         </div>
@@ -373,7 +380,9 @@ export default function AdminSupportTicketsPage() {
             ✓
           </div>
           <div>
-            <h3 className="dary-metric-number">{loading ? '...' : counts.RESOLVED}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={counts.RESOLVED} loading={loading} />
+            </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'تم الحل' : 'Resolved'}</p>
           </div>
         </div>

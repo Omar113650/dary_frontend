@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
 import type { OwnerPropertyItem } from '../../services/ownerService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
@@ -153,7 +154,9 @@ export default function OwnerPropertiesPage() {
             🏢
           </div>
           <div>
-            <h3 className="dary-metric-number">{stats.total}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={stats.total} loading={loading} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي العقارات المسجلة' : 'Total Properties'}
             </p>
@@ -165,7 +168,9 @@ export default function OwnerPropertiesPage() {
             ✓
           </div>
           <div>
-            <h3 className="dary-metric-number">{stats.approved}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={stats.approved} loading={loading} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'معتمدة ومنشورة للطلاب' : 'Approved & Live'}
             </p>
@@ -177,7 +182,9 @@ export default function OwnerPropertiesPage() {
             ⏳
           </div>
           <div>
-            <h3 className="dary-metric-number">{stats.pending}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={stats.pending} loading={loading} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'قيد مراجعة الإدارة' : 'Pending Review'}
             </p>

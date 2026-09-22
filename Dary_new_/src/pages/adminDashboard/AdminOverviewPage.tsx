@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminStatusCount, AdminReportItem } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminOverviewPage() {
   const { user } = useAuth();
@@ -291,7 +292,11 @@ export default function AdminOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingUsers ? '...' : usersError ? '—' : totalUsers.toLocaleString()}
+              <AnimatedCounter
+                value={usersError ? null : totalUsers}
+                loading={loadingUsers}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي المستخدمين' : 'Total Users'}
@@ -309,7 +314,11 @@ export default function AdminOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingProps ? '...' : propsError ? '—' : totalProps.toLocaleString()}
+              <AnimatedCounter
+                value={propsError ? null : totalProps}
+                loading={loadingProps}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'العقارات المسجلة' : 'Registered Properties'}
@@ -327,7 +336,11 @@ export default function AdminOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingBookings ? '...' : bookingsError ? '—' : totalBookings.toLocaleString()}
+              <AnimatedCounter
+                value={bookingsError ? null : totalBookings}
+                loading={loadingBookings}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي الحجوزات' : 'Total Bookings'}
@@ -345,15 +358,12 @@ export default function AdminOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingRevenue ? (
-                '...'
-              ) : revenueError ? (
-                '—'
-              ) : parsedRevenue !== null ? (
-                `${parsedRevenue.toLocaleString()} ${revenueCurrency}`
-              ) : (
-                '0'
-              )}
+              <AnimatedCounter
+                value={revenueError ? null : parsedRevenue}
+                loading={loadingRevenue}
+                suffix={` ${revenueCurrency}`}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Platform Revenue'}
@@ -372,7 +382,11 @@ export default function AdminOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingReportsStatus ? '...' : reportsStatusError ? '—' : totalReports.toLocaleString()}
+              <AnimatedCounter
+                value={reportsStatusError ? null : totalReports}
+                loading={loadingReportsStatus}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'البلاغات والشكاوى' : 'Active Reports'}
@@ -522,21 +536,33 @@ export default function AdminOverviewPage() {
               <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                 <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'معدل الإشغال الإجمالي' : 'Occupancy Rate'}</div>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.occupancyRate !== undefined ? `${analyticsData.occupancyRate}%` : '—'}
+                  {analyticsData?.occupancyRate !== undefined ? (
+                    <AnimatedCounter value={analyticsData.occupancyRate} suffix="%" />
+                  ) : (
+                    '—'
+                  )}
                 </div>
               </div>
 
               <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                 <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'النشاط اليومي (Daily Active Users)' : 'Daily Active Users'}</div>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.dailyActiveUsers !== undefined ? analyticsData.dailyActiveUsers.toLocaleString() : '—'}
+                  {analyticsData?.dailyActiveUsers !== undefined ? (
+                    <AnimatedCounter value={analyticsData.dailyActiveUsers} />
+                  ) : (
+                    '—'
+                  )}
                 </div>
               </div>
 
               <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
                 <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'حجم الحجوزات المسجلة' : 'Booking Volume'}</div>
                 <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.bookingVolume !== undefined ? analyticsData.bookingVolume.toLocaleString() : '—'}
+                  {analyticsData?.bookingVolume !== undefined ? (
+                    <AnimatedCounter value={analyticsData.bookingVolume} />
+                  ) : (
+                    '—'
+                  )}
                 </div>
               </div>
             </div>

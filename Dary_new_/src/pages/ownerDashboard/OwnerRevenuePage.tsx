@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function OwnerRevenuePage() {
   const { locale } = useLocale();
@@ -99,7 +100,7 @@ export default function OwnerRevenuePage() {
                   {locale === 'ar' ? 'إجمالي الحصيلة المالية المحققة' : 'Total Earned Revenue'}
                 </span>
                 <div style={{ fontSize: '2.75rem', fontWeight: 900, color: '#FFFFFF', letterSpacing: '-0.5px', lineHeight: 1 }}>
-                  {Number(parsedTotal).toLocaleString()}
+                  <AnimatedCounter value={Number(parsedTotal)} />
                   <span style={{ fontSize: '1.25rem', marginInlineStart: '0.6rem', color: '#FDE047', fontWeight: 700 }}>
                     {currency}
                   </span>
@@ -137,7 +138,7 @@ export default function OwnerRevenuePage() {
                   ✅ {locale === 'ar' ? 'الحجوزات المكتملة والمحصلة' : 'Completed Bookings'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
-                  {completedBookings}
+                  <AnimatedCounter value={completedBookings} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#16A34A' }}>
                   {locale === 'ar' ? 'حجوزات تم إتمامها وتسكينها' : 'Fully completed bookings'}
@@ -149,7 +150,7 @@ export default function OwnerRevenuePage() {
                   ⏳ {locale === 'ar' ? 'حجوزات قيد المعالجة' : 'Pending Bookings'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
-                  {pendingBookings}
+                  <AnimatedCounter value={pendingBookings} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#CA8A04' }}>
                   {locale === 'ar' ? 'طلبات حجز بانتظار التأكيد' : 'Requests in progress'}
@@ -161,7 +162,7 @@ export default function OwnerRevenuePage() {
                   🏢 {locale === 'ar' ? 'العقارات المؤجرة' : 'Total Properties'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
-                  {totalProperties}
+                  <AnimatedCounter value={totalProperties} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#2563EB' }}>
                   {locale === 'ar' ? 'عقارات مسجلة بحسابك' : 'Active listings'}
@@ -173,7 +174,7 @@ export default function OwnerRevenuePage() {
                   📈 {locale === 'ar' ? 'متوسط الإيراد لكل سكن' : 'Avg Revenue / Property'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
-                  {avgRevenuePerProperty.toLocaleString()} {currency}
+                  <AnimatedCounter value={avgRevenuePerProperty} suffix={` ${currency}`} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#9333EA' }}>
                   {locale === 'ar' ? 'متوسط العائد لكل وحدة' : 'Average return per unit'}

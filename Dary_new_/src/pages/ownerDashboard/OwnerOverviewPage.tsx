@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function OwnerOverviewPage() {
   const { user } = useAuth();
@@ -253,15 +254,12 @@ export default function OwnerOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingRevenue ? (
-                '...'
-              ) : revenueError ? (
-                '—'
-              ) : parsedRevenue !== null ? (
-                `${parsedRevenue.toLocaleString()} ${revenueCurrency}`
-              ) : (
-                '0'
-              )}
+              <AnimatedCounter
+                value={revenueError ? null : parsedRevenue}
+                loading={loadingRevenue}
+                suffix={` ${revenueCurrency}`}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي الإيرادات المحققة' : 'Total Revenue'}
@@ -276,7 +274,11 @@ export default function OwnerOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingProps ? '...' : propsError ? '—' : totalOwnerProps}
+              <AnimatedCounter
+                value={propsError ? null : totalOwnerProps}
+                loading={loadingProps}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي العقارات المسجلة' : 'Total Properties'}
@@ -291,7 +293,11 @@ export default function OwnerOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingBookings ? '...' : bookingsError ? '—' : totalOwnerBookings}
+              <AnimatedCounter
+                value={bookingsError ? null : totalOwnerBookings}
+                loading={loadingBookings}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي طلبات الحجز' : 'Total Bookings'}
@@ -306,7 +312,11 @@ export default function OwnerOverviewPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingCalendar ? '...' : calendarError ? '—' : occupiedBeds}
+              <AnimatedCounter
+                value={calendarError ? null : occupiedBeds}
+                loading={loadingCalendar}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'الأسرّة المشغولة حاليًا' : 'Occupied Beds'}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminAnalyticsPage() {
   const { locale } = useLocale();
@@ -148,7 +149,9 @@ export default function AdminAnalyticsPage() {
                 🏢
               </div>
               <div>
-                <h3 className="dary-metric-number">{occupancyRate}%</h3>
+                <h3 className="dary-metric-number">
+                  <AnimatedCounter value={occupancyRate} suffix="%" />
+                </h3>
                 <p className="dary-metric-label">{locale === 'ar' ? 'معدل الإشغال الإجمالي' : 'Occupancy Rate'}</p>
               </div>
             </div>
@@ -159,7 +162,9 @@ export default function AdminAnalyticsPage() {
                 👥
               </div>
               <div>
-                <h3 className="dary-metric-number">{dau.toLocaleString()}</h3>
+                <h3 className="dary-metric-number">
+                  <AnimatedCounter value={dau} />
+                </h3>
                 <p className="dary-metric-label">{locale === 'ar' ? 'المستخدمين النشطين يومياً' : 'Daily Active Users'}</p>
               </div>
             </div>
@@ -170,7 +175,9 @@ export default function AdminAnalyticsPage() {
                 📋
               </div>
               <div>
-                <h3 className="dary-metric-number">{bookingVolume.toLocaleString()}</h3>
+                <h3 className="dary-metric-number">
+                  <AnimatedCounter value={bookingVolume} />
+                </h3>
                 <p className="dary-metric-label">{locale === 'ar' ? 'حجم الحجوزات المسجلة' : 'Booking Volume'}</p>
               </div>
             </div>
@@ -182,7 +189,11 @@ export default function AdminAnalyticsPage() {
               </div>
               <div>
                 <h3 className="dary-metric-number">
-                  {totalRevenue !== null ? `${totalRevenue.toLocaleString()} ${currency}` : '—'}
+                  <AnimatedCounter
+                    value={totalRevenue}
+                    suffix={` ${currency}`}
+                    fallback="—"
+                  />
                 </h3>
                 <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Total Revenue'}</p>
               </div>

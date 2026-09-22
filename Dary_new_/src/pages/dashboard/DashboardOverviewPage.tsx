@@ -10,6 +10,7 @@ import type {
   FavoriteItem,
   SavedSearchItem,
 } from '../../services/tenantService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function DashboardOverviewPage() {
   const { user } = useAuth();
@@ -157,7 +158,9 @@ export default function DashboardOverviewPage() {
             </svg>
           </div>
           <div>
-            <h3 className="dary-metric-number">{rentals.length}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={rentals.length} loading={loadingRentals} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إجمالي الحجوزات' : 'Total Bookings'}
             </p>
@@ -171,7 +174,9 @@ export default function DashboardOverviewPage() {
             </svg>
           </div>
           <div>
-            <h3 className="dary-metric-number">{favorites.length}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={favorites.length} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'العقارات المفضلة' : 'Saved Favorites'}
             </p>
@@ -186,7 +191,9 @@ export default function DashboardOverviewPage() {
             </svg>
           </div>
           <div>
-            <h3 className="dary-metric-number">{savedSearches.length}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={savedSearches.length} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'عمليات البحث المحفوظة' : 'Saved Searches'}
             </p>
@@ -201,7 +208,9 @@ export default function DashboardOverviewPage() {
             </svg>
           </div>
           <div>
-            <h3 className="dary-metric-number">{unreadNotifications}</h3>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter value={unreadNotifications} />
+            </h3>
             <p className="dary-metric-label">
               {locale === 'ar' ? 'إشعارات غير مقروءة' : 'Unread Alerts'}
             </p>

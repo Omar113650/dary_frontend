@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminBookingItem, AdminStatusCount } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminBookingsPage() {
   const { locale } = useLocale();
@@ -240,7 +241,12 @@ export default function AdminBookingsPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              {loadingMetrics ? '...' : parsedRevenue !== null ? `${parsedRevenue.toLocaleString()} ${revenueCurrency}` : '—'}
+              <AnimatedCounter
+                value={parsedRevenue}
+                loading={loadingMetrics}
+                suffix={` ${revenueCurrency}`}
+                fallback="—"
+              />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي الحصيلة المالية' : 'Total Revenue'}</p>
           </div>
@@ -253,7 +259,9 @@ export default function AdminBookingsPage() {
               📋
             </div>
             <div>
-              <h3 className="dary-metric-number">{loadingMetrics ? '...' : item.count}</h3>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter value={item.count} loading={loadingMetrics} />
+              </h3>
               <p className="dary-metric-label">{item.status}</p>
             </div>
           </div>

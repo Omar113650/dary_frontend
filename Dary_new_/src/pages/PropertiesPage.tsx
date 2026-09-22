@@ -4,6 +4,7 @@ import { useLocale } from '../utils/LocaleContext';
 import { propertyService } from '../services/propertyService';
 import type { Property } from '../types/property';
 import PropertyCard from '../components/PropertyCard/PropertyCard';
+import AnimatedCounter from '../components/common/AnimatedCounter';
 import './PropertiesPage.css';
 
 interface PriceRangeOption {
@@ -363,7 +364,10 @@ export default function PropertiesPage() {
           <div className="properties-count-wrap">
             {!loading && !error && (
               <span className="properties-count">
-                <strong>{sortedProperties.length}</strong> {t.properties_results_count}
+                <strong>
+                  <AnimatedCounter value={sortedProperties.length} duration={900} />
+                </strong>{' '}
+                {t.properties_results_count}
               </span>
             )}
           </div>

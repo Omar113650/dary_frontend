@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminReportItem, AdminStatusCount } from '../../services/adminService';
+import AnimatedCounter from '../../components/common/AnimatedCounter';
 
 export default function AdminReportsPage() {
   const { locale } = useLocale();
@@ -209,7 +210,9 @@ export default function AdminReportsPage() {
               🛡️
             </div>
             <div>
-              <h3 className="dary-metric-number">{loadingStatus ? '...' : item.count}</h3>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter value={item.count} loading={loadingStatus} />
+              </h3>
               <p className="dary-metric-label">{item.status}</p>
             </div>
           </div>
