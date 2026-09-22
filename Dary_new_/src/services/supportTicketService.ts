@@ -71,7 +71,7 @@ export class SupportTicketService {
   }
 
   /**
-   * 4. GET /support-ticket
+   * 4. GET /support-ticket (or fallback /tickets, /dashboard/tickets)
    * Get All Tickets (Admin)
    */
   static async getAllTickets(params?: { page?: number; limit?: number; status?: string; category?: string }): Promise<any> {
@@ -81,8 +81,40 @@ export class SupportTicketService {
     if (params?.status) query.append('status', params.status);
     if (params?.category) query.append('category', params.category);
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/support-ticket${queryStr}`);
-    return res?.data || res;
+    try {
+      const res = await ApiClient.get<any>(`/support-ticket${queryStr}`);
+      return res?.data?.tickets || res?.data?.items || res?.data || res?.tickets || res;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/tickets${queryStr}`);
+          return res?.data?.tickets || res?.data?.items || res?.data || res?.tickets || res;
+        } catch {
+          const res = await ApiClient.get<any>(`/dashboard/tickets${queryStr}`);
+          return res?.data?.tickets || res?.data?.items || res?.data || res?.tickets || res;
+        }
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * 4b. GET ticket messages (thread)
+   */
+  static async getTicketMessages(ticketId: string): Promise<TicketMessageItem[]> {
+    try {
+      const res = await ApiClient.get<any>(`/support-ticket/${ticketId}`);
+      const data = res?.data?.ticket?.messages || res?.data?.messages || res?.ticket?.messages || res?.messages || res?.data || res;
+      return Array.isArray(data) ? data : [];
+    } catch {
+      try {
+        const res = await ApiClient.get<any>(`/tickets/${ticketId}`);
+        const data = res?.data?.ticket?.messages || res?.data?.messages || res?.ticket?.messages || res?.messages || res?.data || res;
+        return Array.isArray(data) ? data : [];
+      } catch {
+        return [];
+      }
+    }
   }
 
   /**
@@ -95,16 +127,32 @@ export class SupportTicketService {
     if (attachments && attachments.length > 0) {
       attachments.forEach((file) => formData.append('attachments', file));
     }
-    const res = await ApiClient.post<any>(`/support-ticket/${ticketId}/messages`, formData);
-    return res?.data || res;
+    try {
+      const res = await ApiClient.post<any>(`/support-ticket/${ticketId}/messages`, formData);
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        const res = await ApiClient.post<any>(`/tickets/${ticketId}/messages`, formData);
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 
   /**
    * 6. PATCH /support-ticket/:id/status
-   * Update Ticket Status (OPEN, INVESTIGATING, RESOLVED, ARCHIVED)
+   * Update Ticket Status (OPEN, INVESTIGATING, RESOLVED, ARCHIVED, CLOSED)
    */
-  static async updateTicketStatus(id: string, status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | string): Promise<any> {
-    const res = await ApiClient.patch<any>(`/support-ticket/${id}/status`, { status });
-    return res?.data || res;
+  static async updateTicketStatus(id: string, status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | 'CLOSED' | string): Promise<any> {
+    try {
+      const res = await ApiClient.patch<any>(`/support-ticket/${id}/status`, { status });
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        const res = await ApiClient.patch<any>(`/tickets/${id}/status`, { status });
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 }

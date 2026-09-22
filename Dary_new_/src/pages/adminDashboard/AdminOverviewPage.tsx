@@ -271,6 +271,9 @@ export default function AdminOverviewPage() {
           <Link to={`${basePath}/reports`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
             <span>{locale === 'ar' ? 'معالجة البلاغات' : 'Triage Reports'}</span>
           </Link>
+          <Link to={`${basePath}/tickets`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
+            <span>{locale === 'ar' ? 'تذاكر الدعم' : 'Support Tickets'}</span>
+          </Link>
         </div>
       </div>
 

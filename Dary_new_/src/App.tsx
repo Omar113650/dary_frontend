@@ -32,6 +32,7 @@ import AdminUsersPage from './pages/adminDashboard/AdminUsersPage';
 import AdminPropertiesPage from './pages/adminDashboard/AdminPropertiesPage';
 import AdminBookingsPage from './pages/adminDashboard/AdminBookingsPage';
 import AdminReportsPage from './pages/adminDashboard/AdminReportsPage';
+import AdminSupportTicketsPage from './pages/adminDashboard/AdminSupportTicketsPage';
 import AdminAnalyticsPage from './pages/adminDashboard/AdminAnalyticsPage';
 import AdminCalendarPage from './pages/adminDashboard/AdminCalendarPage';
 import AdminProfilePage from './pages/adminDashboard/AdminProfilePage';
@@ -152,6 +153,8 @@ export default function App() {
               <Route path="properties" element={<AdminPropertiesPage />} />
               <Route path="bookings" element={<AdminBookingsPage />} />
               <Route path="reports" element={<AdminReportsPage />} />
+              <Route path="tickets" element={<AdminSupportTicketsPage />} />
+              <Route path="support" element={<AdminSupportTicketsPage />} />
               <Route path="analytics" element={<AdminAnalyticsPage />} />
               <Route path="calendar" element={<AdminCalendarPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
@@ -166,6 +169,8 @@ export default function App() {
                 <Route path="properties" element={<AdminPropertiesPage />} />
                 <Route path="bookings" element={<AdminBookingsPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />
+                <Route path="tickets" element={<AdminSupportTicketsPage />} />
+                <Route path="support" element={<AdminSupportTicketsPage />} />
                 <Route path="analytics" element={<AdminAnalyticsPage />} />
                 <Route path="calendar" element={<AdminCalendarPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
