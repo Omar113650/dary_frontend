@@ -63,9 +63,51 @@ export function isUserAdmin(user: any): boolean {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<User | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cached = localStorage.getItem('dary_user');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [role, setRole] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const cached = localStorage.getItem('dary_user');
+      return cached ? extractUserRole(JSON.parse(cached)) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  // Fast start: if no token exists, or if user is already cached, don't show full-page blocking spinner
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    const token = localStorage.getItem('dary_access_token');
+    const cached = localStorage.getItem('dary_user');
+    // If no token, user is definitely guest -> don't block
+    if (!token) return false;
+    // If we have both token and cached user, render instantly! (Revalidate in background)
+    if (cached) return false;
+    // Token exists but no cached profile -> need to load
+    return true;
+  });
+
+  const saveUserLocally = (userData: User | null) => {
+    if (typeof window === 'undefined') return;
+    if (userData && userData.id) {
+      try {
+        localStorage.setItem('dary_user', JSON.stringify(userData));
+      } catch {}
+    } else {
+      try {
+        localStorage.removeItem('dary_user');
+      } catch {}
+    }
+  };
 
   const refreshUser = useCallback(async () => {
     try {
@@ -73,13 +115,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (userData && userData.id) {
         setUser(userData);
         setRole(extractUserRole(userData));
+        saveUserLocally(userData);
       } else {
         setUser(null);
         setRole(null);
+        saveUserLocally(null);
       }
     } catch {
-      setUser(null);
-      setRole(null);
+      // If request failed and there is no stored token, clear session
+      const token = typeof window !== 'undefined' ? localStorage.getItem('dary_access_token') : null;
+      if (!token) {
+        setUser(null);
+        setRole(null);
+        saveUserLocally(null);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -91,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleExpired = () => {
       setUser(null);
       setRole(null);
+      saveUserLocally(null);
     };
 
     window.addEventListener('auth:expired', handleExpired);
@@ -115,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (authenticatedUser && authenticatedUser.id) {
         setUser(authenticatedUser);
         setRole(extractUserRole(authenticatedUser));
+        saveUserLocally(authenticatedUser);
       } else {
         await refreshUser();
       }
@@ -131,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setUser(null);
       setRole(null);
+      saveUserLocally(null);
       setIsLoading(false);
     }
   };

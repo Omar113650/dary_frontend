@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
@@ -16,6 +16,7 @@ export default function DashboardOverviewPage() {
   const { locale } = useLocale();
   const location = useLocation();
   const basePath = location.pathname.startsWith('/dashboard-preview') ? '/dashboard-preview' : '/dashboard';
+  const outletCtx = useOutletContext<{ unreadCount?: number }>() || {};
 
   const [loadingRentals, setLoadingRentals] = useState(true);
   const [rentals, setRentals] = useState<RentalBooking[]>([]);
@@ -23,7 +24,7 @@ export default function DashboardOverviewPage() {
 
   const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
   const [savedSearches, setSavedSearches] = useState<SavedSearchItem[]>([]);
-  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(outletCtx.unreadCount ?? 0);
 
   const [featuredProperties, setFeaturedProperties] = useState<Property[]>([]);
   const [loadingProperties, setLoadingProperties] = useState<boolean>(true);
@@ -63,14 +64,6 @@ export default function DashboardOverviewPage() {
       .then(setSavedSearches)
       .catch((err) => console.warn('[Overview] Saved searches error:', err));
 
-    TenantService.getNotifications(1, 10)
-      .then((res) => {
-        const items = Array.isArray(res) ? res : (res?.items || []);
-        const unread = items.filter((n: any) => !n.isRead && !n.read).length;
-        setUnreadNotifications(unread);
-      })
-      .catch((err) => console.warn('[Overview] Notifications load error:', err));
-
     setLoadingProperties(true);
     propertyService
       .getProperties({ limit: 6 })
@@ -80,6 +73,12 @@ export default function DashboardOverviewPage() {
       .catch((err) => console.warn('[Overview] Properties load error:', err))
       .finally(() => setLoadingProperties(false));
   }, []);
+
+  useEffect(() => {
+    if (outletCtx.unreadCount !== undefined) {
+      setUnreadNotifications(outletCtx.unreadCount);
+    }
+  }, [outletCtx.unreadCount]);
 
   useEffect(() => {
     fetchRentals();

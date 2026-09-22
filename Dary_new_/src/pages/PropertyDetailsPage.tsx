@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
 import { propertyService } from '../services/propertyService';
 import { TenantService } from '../services/tenantService';
+import { ReportService } from '../services/reportService';
 import { useAuth } from '../context/AuthContext';
 import type { Property } from '../types/property';
 
@@ -43,6 +44,56 @@ export default function PropertyDetailsPage() {
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [bookingWhatsappUrl, setBookingWhatsappUrl] = useState<string | null>(null);
   const [bookingError, setBookingError] = useState<string | null>(null);
+
+  // Report Property state
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportReason, setReportReason] = useState('الصور لا تطابق الواقع.');
+  const [reportDescription, setReportDescription] = useState('');
+  const [reportPriority, setReportPriority] = useState<'low' | 'medium' | 'high'>('high');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+
+  function handleOpenReportModal() {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+    setReportError(null);
+    setReportSuccess(false);
+    setReportModalOpen(true);
+  }
+
+  async function handleReportSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!id) return;
+    setReportLoading(true);
+    setReportError(null);
+    try {
+      const fullDesc = reportDescription.trim()
+        ? `${reportReason} - ${reportDescription.trim()}`
+        : reportReason;
+
+      await ReportService.createReport({
+        reportedType: 'property',
+        reportedPropertyId: id,
+        description: fullDesc,
+        priority: reportPriority,
+      });
+
+      setReportSuccess(true);
+    } catch (err: any) {
+      console.error('[PropertyDetailsPage] createReport failed:', err);
+      setReportError(
+        err?.message ||
+          (locale === 'ar'
+            ? 'فشل إرسال البلاغ. يرجى المحاولة مرة أخرى لاحقًا.'
+            : 'Failed to submit report. Please try again later.')
+      );
+    } finally {
+      setReportLoading(false);
+    }
+  }
 
   // Auto-select first room when property loads
   useEffect(() => {
@@ -538,6 +589,30 @@ export default function PropertyDetailsPage() {
                     ? (locale === 'ar' ? '❤️ محفوظ في المفضلة' : '❤️ Saved')
                     : (locale === 'ar' ? '🤍 حفظ في المفضلة' : '🤍 Save to Favorites')}
                 </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenReportModal}
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem',
+                    borderRadius: '10px',
+                    background: '#FEF2F2',
+                    color: '#DC2626',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    border: '1px solid #FECACA',
+                    cursor: 'pointer',
+                    marginTop: '0.65rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <span>⚠️</span>
+                  <span>{locale === 'ar' ? 'إبلاغ عن هذا العقار' : 'Report this property'}</span>
+                </button>
               </>
             )}
           </div>
@@ -781,6 +856,227 @@ export default function PropertyDetailsPage() {
                     }}
                   >
                     {bookingLoading ? (locale === 'ar' ? 'جاري الإرسال...' : 'Sending...') : (locale === 'ar' ? 'تأكيد طلب الحجز 🚀' : 'Confirm Request 🚀')}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Report Property Modal */}
+      {reportModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '20px',
+              padding: '2rem',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.25)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#DC2626', margin: 0, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>⚠️</span>
+                <span>{locale === 'ar' ? 'إبلاغ عن عقار أو محتوى غير لائق' : 'Report Property or Inappropriate Content'}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setReportModalOpen(false)}
+                style={{ fontSize: '1.2rem', color: '#94A3B8', cursor: 'pointer', border: 'none', background: 'none' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {reportSuccess ? (
+              <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+                <div style={{ fontSize: '3rem', marginBottom: '0.75rem' }}>🛡️</div>
+                <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#16A34A', marginBottom: '0.5rem' }}>
+                  {locale === 'ar' ? 'تم استلام بلاغك بنجاح' : 'Report Submitted Successfully'}
+                </h4>
+                <p style={{ color: 'var(--color-text-muted)', fontSize: '0.9rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+                  {locale === 'ar'
+                    ? 'شكراً لحرصك على أمان المنصة. ستقوم إدارة داري بمراجعة البلاغ واتخاذ الإجراءات اللازمة فوراً.'
+                    : 'Thank you for helping keep our platform safe. Dary administration will review this report and take necessary actions promptly.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReportModalOpen(false);
+                    setReportSuccess(false);
+                    setReportDescription('');
+                  }}
+                  style={{
+                    padding: '0.75rem 2rem',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--color-navy)',
+                    color: '#FFFFFF',
+                    fontWeight: 700,
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {locale === 'ar' ? 'إغلاق' : 'Close'}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleReportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {reportError && (
+                  <div
+                    style={{
+                      padding: '0.85rem',
+                      borderRadius: '10px',
+                      backgroundColor: '#FEF2F2',
+                      border: '1px solid #FECACA',
+                      color: '#DC2626',
+                      fontSize: '0.85rem',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    ⚠️ {reportError}
+                  </div>
+                )}
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.4rem' }}>
+                    {locale === 'ar' ? 'سبب البلاغ' : 'Reason for Report'} *
+                  </label>
+                  <select
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '10px',
+                      border: '1px solid #E2E8F0',
+                      fontSize: '0.9rem',
+                      outline: 'none',
+                      backgroundColor: '#F8FAFC',
+                    }}
+                  >
+                    <option value="الصور لا تطابق الواقع.">الصور لا تطابق الواقع (Photos do not match reality)</option>
+                    <option value="معلومات أو أسعار مضللة أو خاطئة.">معلومات أو أسعار مضللة أو خاطئة (Misleading/wrong info or price)</option>
+                    <option value="احتيال أو طلب تحويل مالي خارج المنصة.">احتيال أو طلب تحويل مالي خارج المنصة (Fraud or off-platform payment request)</option>
+                    <option value="العقار غير متاح أو وهمي.">العقار غير متاح أو وهمي (Property fake or unavailable)</option>
+                    <option value="سوء سلوك أو إساءة من المالك.">سوء سلوك أو إساءة من المالك (Owner misconduct or harassment)</option>
+                    <option value="سبب آخر.">سبب آخر (Other reason)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.4rem' }}>
+                    {locale === 'ar' ? 'درجة الأولوية / خطورة المشكلة' : 'Priority / Severity'}
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                    {(['low', 'medium', 'high'] as const).map((p) => {
+                      const isSelected = reportPriority === p;
+                      const labelMap: Record<string, { ar: string; en: string }> = {
+                        low: { ar: 'منخفضة', en: 'Low' },
+                        medium: { ar: 'متوسطة', en: 'Medium' },
+                        high: { ar: 'عالية / عاجل', en: 'High' },
+                      };
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setReportPriority(p)}
+                          style={{
+                            padding: '0.6rem 0.5rem',
+                            borderRadius: '8px',
+                            border: `2px solid ${isSelected ? (p === 'high' ? '#DC2626' : p === 'medium' ? '#F59E0B' : '#3B82F6') : '#E2E8F0'}`,
+                            backgroundColor: isSelected ? (p === 'high' ? '#FEF2F2' : p === 'medium' ? '#FEF3C7' : '#EFF6FF') : '#FFFFFF',
+                            color: isSelected ? (p === 'high' ? '#DC2626' : p === 'medium' ? '#D97706' : '#2563EB') : '#64748B',
+                            fontWeight: isSelected ? 800 : 600,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {locale === 'ar' ? labelMap[p].ar : labelMap[p].en}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.4rem' }}>
+                    {locale === 'ar' ? 'تفاصيل إضافية أو توضيح (اختياري)' : 'Additional details (optional)'}
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={reportDescription}
+                    onChange={(e) => setReportDescription(e.target.value)}
+                    placeholder={
+                      locale === 'ar'
+                        ? 'وضح ما حدث بالتفصيل لمساعدة الإدارة في اتخاذ الإجراء المناسب...'
+                        : 'Explain what happened in detail to help the administration take action...'
+                    }
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      borderRadius: '10px',
+                      border: '1px solid #E2E8F0',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                      resize: 'vertical',
+                      boxSizing: 'border-box',
+                      fontFamily: 'inherit',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setReportModalOpen(false)}
+                    style={{
+                      padding: '0.7rem 1.25rem',
+                      borderRadius: '10px',
+                      backgroundColor: '#F1F5F9',
+                      color: 'var(--color-navy)',
+                      fontWeight: 600,
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                      border: 'none',
+                    }}
+                  >
+                    {locale === 'ar' ? 'إلغاء' : 'Cancel'}
+                  </button>
+
+                  <button
+                    type="submit"
+                    disabled={reportLoading}
+                    style={{
+                      padding: '0.7rem 1.5rem',
+                      borderRadius: '10px',
+                      backgroundColor: reportLoading ? '#94A3B8' : '#DC2626',
+                      color: '#FFFFFF',
+                      fontWeight: 800,
+                      fontSize: '0.9rem',
+                      cursor: reportLoading ? 'not-allowed' : 'pointer',
+                      border: 'none',
+                      boxShadow: '0 4px 12px rgba(220, 38, 38, 0.25)',
+                    }}
+                  >
+                    {reportLoading
+                      ? (locale === 'ar' ? 'جاري الإرسال...' : 'Submitting...')
+                      : (locale === 'ar' ? 'إرسال البلاغ 🛡️' : 'Submit Report 🛡️')}
                   </button>
                 </div>
               </form>

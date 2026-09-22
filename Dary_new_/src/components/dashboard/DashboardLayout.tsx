@@ -62,7 +62,7 @@ export default function DashboardLayout({ basePath: customBasePath }: DashboardL
         />
 
         <main className="dary-content-outlet">
-          <Outlet />
+          <Outlet context={{ unreadCount, setUnreadCount }} />
         </main>
       </div>
     </div>

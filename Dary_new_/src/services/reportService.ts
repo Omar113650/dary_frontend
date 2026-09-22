@@ -29,22 +29,43 @@ export interface ReportItem {
 
 export class ReportService {
   /**
-   * 1. POST /report
+   * 1. POST /report (with fallback /reports)
    * Create a new report
    */
   static async createReport(payload: CreateReportPayload): Promise<any> {
-    const res = await ApiClient.post<any>('/report', payload);
-    return res?.data || res;
+    try {
+      const res = await ApiClient.post<any>('/report', payload);
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404) {
+        const res = await ApiClient.post<any>('/reports', payload);
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 
   /**
-   * 2. GET /report/my
+   * 2. GET /report/my (with fallback /reports/my)
    * Get My Reports
    */
   static async getMyReports(): Promise<ReportItem[]> {
-    const res = await ApiClient.get<any>('/report/my');
-    const list = res?.data?.reports || res?.data || res?.reports || res;
-    return Array.isArray(list) ? list : [];
+    try {
+      const res = await ApiClient.get<any>('/report/my');
+      const list = res?.data?.reports || res?.data || res?.reports || res;
+      return Array.isArray(list) ? list : [];
+    } catch (e: any) {
+      if (e?.status === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/reports/my`);
+          const list = res?.data?.reports || res?.data || res?.reports || res;
+          return Array.isArray(list) ? list : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    }
   }
 
   /**

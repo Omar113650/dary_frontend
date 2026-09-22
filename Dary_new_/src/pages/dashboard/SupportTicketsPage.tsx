@@ -1,13 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
+import { ReportService, type ReportItem } from '../../services/reportService';
 import type { SupportTicketItem, TicketMessageItem } from '../../services/supportTicketService';
 
 export default function SupportTicketsPage() {
   const { locale } = useLocale();
+  const [activeTab, setActiveTab] = useState<'tickets' | 'reports'>('tickets');
+
   const [tickets, setTickets] = useState<SupportTicketItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Reports state
+  const [reports, setReports] = useState<ReportItem[]>([]);
+  const [loadingReports, setLoadingReports] = useState(false);
+  const [reportsError, setReportsError] = useState<string | null>(null);
 
   // New ticket modal
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
@@ -44,9 +53,34 @@ export default function SupportTicketsPage() {
     }
   }, [locale]);
 
+  const fetchReports = useCallback(async () => {
+    setLoadingReports(true);
+    setReportsError(null);
+    try {
+      const data = await ReportService.getMyReports();
+      setReports(data);
+    } catch (err: any) {
+      console.error('[SupportTicketsPage] getMyReports failed:', err);
+      setReportsError(
+        err?.message ||
+          (locale === 'ar'
+            ? 'تعذر تحميل قائمة البلاغات من الخادم.'
+            : 'Could not load your reports from the server.')
+      );
+    } finally {
+      setLoadingReports(false);
+    }
+  }, [locale]);
+
   useEffect(() => {
     fetchTickets();
   }, [fetchTickets]);
+
+  useEffect(() => {
+    if (activeTab === 'reports') {
+      fetchReports();
+    }
+  }, [activeTab, fetchReports]);
 
   // Open ticket messages
   async function handleOpenThread(ticket: SupportTicketItem) {
@@ -173,112 +207,374 @@ export default function SupportTicketsPage() {
   return (
     <div>
       <div className="dary-section-card">
-        <div className="dary-section-header">
+        <div className="dary-section-header" style={{ flexWrap: 'wrap', gap: '1rem' }}>
           <div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--dary-navy)', margin: 0 }}>
-              {locale === 'ar' ? 'الدعم الفني والمساعدة' : 'Support & Help Desk'}
+              {activeTab === 'tickets'
+                ? (locale === 'ar' ? 'الدعم الفني والمساعدة' : 'Support & Help Desk')
+                : (locale === 'ar' ? 'بلاغاتي وشكاوى العقارات' : 'My Reports & Disputes')}
             </h2>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.875rem', color: 'var(--dary-muted)' }}>
-              {locale === 'ar'
-                ? 'فريق داري هنا لمساعدتك في أي استفسار حول الحجوزات، الدفع، أو السكن.'
-                : 'The DARY team is here to help with bookings, payments, or housing inquiries.'}
+              {activeTab === 'tickets'
+                ? (locale === 'ar'
+                    ? 'فريق داري هنا لمساعدتك في أي استفسار حول الحجوزات، الدفع، أو السكن.'
+                    : 'The DARY team is here to help with bookings, payments, or housing inquiries.')
+                : (locale === 'ar'
+                    ? 'متابعة البلاغات والشكاوى التي رفعتها حول العقارات غير المطابقة أو المخالفة.'
+                    : 'Track reports and disputes you submitted against misleading or violating properties.')}
             </p>
           </div>
 
-          <button
-            type="button"
-            className="dary-primary-btn"
-            style={{ padding: '0.6rem 1.15rem' }}
-            onClick={() => {
-              setIsNewTicketOpen(true);
-              setCreateError(null);
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span>{locale === 'ar' ? 'فتح تذكرة جديدة' : 'New Ticket'}</span>
-          </button>
-        </div>
-
-        {loading ? (
-          <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--dary-muted)' }}>
-            <div style={{ width: '36px', height: '36px', border: '3px solid #E2E8F0', borderTopColor: '#0B2A4A', borderRadius: '50%', margin: '0 auto 1rem', animation: 'spin 0.8s linear infinite' }} />
-            <p style={{ margin: 0, fontSize: '0.9rem' }}>
-              {locale === 'ar' ? 'جاري تحميل التذاكر...' : 'Loading tickets...'}
-            </p>
-          </div>
-        ) : error ? (
-          <div className="dary-error-state">
-            <p className="dary-error-title">{locale === 'ar' ? 'خطأ في جلب البيانات' : 'API Error'}</p>
-            <p className="dary-error-desc">{error}</p>
-            <button type="button" className="dary-retry-btn" onClick={fetchTickets}>
-              {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-            </button>
-          </div>
-        ) : tickets.length === 0 ? (
-          <div className="dary-empty-state">
-            <div className="dary-empty-icon">🎧</div>
-            <h4 className="dary-empty-title">{locale === 'ar' ? 'لا توجد تذاكر دعم سابقة' : 'No Support Tickets'}</h4>
-            <p className="dary-empty-desc">
-              {locale === 'ar'
-                ? 'إذا واجهتك أي مشكلة في الحجز أو التواصل، يمكنك فتح تذكرة دعم وسيتولى فريقنا متابعتها على الفور.'
-                : 'If you encounter any issues with bookings or accommodations, create a ticket and our team will assist you.'}
-            </p>
+          {activeTab === 'tickets' ? (
             <button
               type="button"
               className="dary-primary-btn"
-              onClick={() => setIsNewTicketOpen(true)}
+              style={{ padding: '0.6rem 1.15rem' }}
+              onClick={() => {
+                setIsNewTicketOpen(true);
+                setCreateError(null);
+              }}
             >
-              {locale === 'ar' ? 'فتح تذكرة الآن' : 'Create a Ticket'}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              <span>{locale === 'ar' ? 'فتح تذكرة جديدة' : 'New Ticket'}</span>
             </button>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {tickets.map((ticket) => (
-              <div
-                key={ticket.id}
-                onClick={() => handleOpenThread(ticket)}
+          ) : (
+            <Link
+              to="/properties"
+              className="dary-primary-btn"
+              style={{ padding: '0.6rem 1.15rem', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            >
+              <span>🏠</span>
+              <span>{locale === 'ar' ? 'تصفح العقارات للإبلاغ' : 'Browse Properties'}</span>
+            </Link>
+          )}
+        </div>
+
+        {/* Tab Navigation */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '0.75rem',
+            borderBottom: '1px solid #E2E8F0',
+            paddingBottom: '0.85rem',
+            marginBottom: '1.5rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab('tickets')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.15rem',
+              borderRadius: '10px',
+              border: 'none',
+              backgroundColor: activeTab === 'tickets' ? 'var(--dary-navy)' : '#F1F5F9',
+              color: activeTab === 'tickets' ? '#FFFFFF' : '#475569',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>🎫</span>
+            <span>{locale === 'ar' ? 'تذاكر الدعم الفني والمحادثات' : 'Support Tickets'}</span>
+            <span
+              style={{
+                backgroundColor: activeTab === 'tickets' ? 'rgba(255,255,255,0.25)' : '#E2E8F0',
+                padding: '0.15rem 0.5rem',
+                borderRadius: '999px',
+                fontSize: '0.75rem',
+              }}
+            >
+              {tickets.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('reports')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.15rem',
+              borderRadius: '10px',
+              border: 'none',
+              backgroundColor: activeTab === 'reports' ? '#DC2626' : '#F1F5F9',
+              color: activeTab === 'reports' ? '#FFFFFF' : '#475569',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span>⚠️</span>
+            <span>{locale === 'ar' ? 'بلاغاتي وشكاوى العقارات' : 'My Reports & Disputes'}</span>
+            {reports.length > 0 && (
+              <span
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '1.25rem',
-                  border: '1px solid var(--dary-border)',
-                  borderRadius: '12px',
-                  backgroundColor: '#FFFFFF',
-                  cursor: 'pointer',
-                  flexWrap: 'wrap',
-                  gap: '1rem',
-                  transition: 'border-color 0.2s',
+                  backgroundColor: activeTab === 'reports' ? 'rgba(255,255,255,0.25)' : '#E2E8F0',
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: '999px',
+                  fontSize: '0.75rem',
                 }}
               >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
-                    <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
-                      {ticket.subject || (locale === 'ar' ? 'تذكرة بدون عنوان' : 'Untitled Ticket')}
-                    </h3>
-                    {getStatusBadge(ticket.status)}
-                    {ticket.category && (
-                      <span style={{ fontSize: '0.75rem', backgroundColor: '#F1F5F9', color: '#475569', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
-                        {ticket.category}
-                      </span>
-                    )}
-                  </div>
-                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--dary-muted)' }}>
-                    {ticket.description?.slice(0, 100) || ''}
-                    {ticket.createdAt ? ` • ${new Date(ticket.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}` : ''}
-                  </p>
-                </div>
+                {reports.length}
+              </span>
+            )}
+          </button>
+        </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--dary-blue)', fontSize: '0.85rem', fontWeight: 600 }}>
-                  <span>{locale === 'ar' ? 'عرض المحادثة' : 'View Thread'}</span>
-                  <span>→</span>
-                </div>
+        {/* Tab 1: Tickets */}
+        {activeTab === 'tickets' && (
+          <>
+            {loading ? (
+              <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--dary-muted)' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid #E2E8F0', borderTopColor: '#0B2A4A', borderRadius: '50%', margin: '0 auto 1rem', animation: 'spin 0.8s linear infinite' }} />
+                <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                  {locale === 'ar' ? 'جاري تحميل التذاكر...' : 'Loading tickets...'}
+                </p>
               </div>
-            ))}
-          </div>
+            ) : error ? (
+              <div className="dary-error-state">
+                <p className="dary-error-title">{locale === 'ar' ? 'خطأ في جلب البيانات' : 'API Error'}</p>
+                <p className="dary-error-desc">{error}</p>
+                <button type="button" className="dary-retry-btn" onClick={fetchTickets}>
+                  {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                </button>
+              </div>
+            ) : tickets.length === 0 ? (
+              <div className="dary-empty-state">
+                <div className="dary-empty-icon">🎧</div>
+                <h4 className="dary-empty-title">{locale === 'ar' ? 'لا توجد تذاكر دعم سابقة' : 'No Support Tickets'}</h4>
+                <p className="dary-empty-desc">
+                  {locale === 'ar'
+                    ? 'إذا واجهتك أي مشكلة في الحجز أو التواصل، يمكنك فتح تذكرة دعم وسيتولى فريقنا متابعتها على الفور.'
+                    : 'If you encounter any issues with bookings or accommodations, create a ticket and our team will assist you.'}
+                </p>
+                <button
+                  type="button"
+                  className="dary-primary-btn"
+                  onClick={() => setIsNewTicketOpen(true)}
+                >
+                  {locale === 'ar' ? 'فتح تذكرة الآن' : 'Create a Ticket'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {tickets.map((ticket) => (
+                  <div
+                    key={ticket.id}
+                    onClick={() => handleOpenThread(ticket)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '1.25rem',
+                      border: '1px solid var(--dary-border)',
+                      borderRadius: '12px',
+                      backgroundColor: '#FFFFFF',
+                      cursor: 'pointer',
+                      flexWrap: 'wrap',
+                      gap: '1rem',
+                      transition: 'border-color 0.2s',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
+                        <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
+                          {ticket.subject || (locale === 'ar' ? 'تذكرة بدون عنوان' : 'Untitled Ticket')}
+                        </h3>
+                        {getStatusBadge(ticket.status)}
+                        {ticket.category && (
+                          <span style={{ fontSize: '0.75rem', backgroundColor: '#F1F5F9', color: '#475569', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                            {ticket.category}
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--dary-muted)' }}>
+                        {ticket.description?.slice(0, 100) || ''}
+                        {ticket.createdAt ? ` • ${new Date(ticket.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}` : ''}
+                      </p>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--dary-blue)', fontSize: '0.85rem', fontWeight: 600 }}>
+                      <span>{locale === 'ar' ? 'عرض المحادثة' : 'View Thread'}</span>
+                      <span>→</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Tab 2: Reports */}
+        {activeTab === 'reports' && (
+          <>
+            {loadingReports ? (
+              <div style={{ padding: '3rem 0', textAlign: 'center', color: 'var(--dary-muted)' }}>
+                <div style={{ width: '36px', height: '36px', border: '3px solid #E2E8F0', borderTopColor: '#DC2626', borderRadius: '50%', margin: '0 auto 1rem', animation: 'spin 0.8s linear infinite' }} />
+                <p style={{ margin: 0, fontSize: '0.9rem' }}>
+                  {locale === 'ar' ? 'جاري تحميل البلاغات...' : 'Loading reports...'}
+                </p>
+              </div>
+            ) : reportsError ? (
+              <div className="dary-error-state">
+                <p className="dary-error-title">{locale === 'ar' ? 'خطأ في جلب البيانات' : 'API Error'}</p>
+                <p className="dary-error-desc">{reportsError}</p>
+                <button type="button" className="dary-retry-btn" onClick={fetchReports}>
+                  {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                </button>
+              </div>
+            ) : reports.length === 0 ? (
+              <div className="dary-empty-state">
+                <div className="dary-empty-icon">🛡️</div>
+                <h4 className="dary-empty-title">{locale === 'ar' ? 'لا توجد بلاغات مرفوعة' : 'No Reports Submitted'}</h4>
+                <p className="dary-empty-desc">
+                  {locale === 'ar'
+                    ? 'لم تقم بتقديم أي بلاغات حتى الآن. إذا لاحظت عقاراً وهمياً، صوراً مضللة أو سوء معاملة، يمكنك الإبلاغ مباشرة عبر صفحة تفاصيل العقار وسيقوم فريق الإدارة بمراجعته فوراً.'
+                    : 'You have not submitted any reports yet. If you notice misleading photos, fake listings, or misconduct, report it directly from the property details page.'}
+                </p>
+                <Link
+                  to="/properties"
+                  className="dary-primary-btn"
+                  style={{ textDecoration: 'none', display: 'inline-block' }}
+                >
+                  {locale === 'ar' ? 'تصفح العقارات' : 'Browse Properties'}
+                </Link>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                {reports.map((report) => {
+                  const isResolved = report.status?.toUpperCase() === 'RESOLVED';
+                  const priorityKey = (report.priority || '').toLowerCase();
+                  const isHigh = priorityKey === 'high' || priorityKey === 'urgent';
+                  const isMed = priorityKey === 'medium';
+
+                  return (
+                    <div
+                      key={report.id}
+                      style={{
+                        padding: '1.25rem',
+                        border: isResolved ? '1px solid #BBF7D0' : '1px solid #FECACA',
+                        borderRadius: '14px',
+                        backgroundColor: '#FFFFFF',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.85rem',
+                      }}
+                    >
+                      {/* Report Card Header */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <span style={{ fontSize: '0.78rem', fontFamily: 'monospace', backgroundColor: '#F1F5F9', color: '#64748B', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                            #{report.id?.slice(0, 8)}
+                          </span>
+
+                          <span
+                            style={{
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              padding: '0.2rem 0.65rem',
+                              borderRadius: '999px',
+                              backgroundColor: isResolved ? '#DCFCE7' : '#FEF3C7',
+                              color: isResolved ? '#166534' : '#B45309',
+                            }}
+                          >
+                            {isResolved
+                              ? (locale === 'ar' ? '✓ تم حل البلاغ' : 'Resolved')
+                              : (locale === 'ar' ? '⏳ قيد المراجعة والمعالجة' : 'Pending Review')}
+                          </span>
+
+                          <span
+                            style={{
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              padding: '0.2rem 0.55rem',
+                              borderRadius: '6px',
+                              backgroundColor: isHigh ? '#FEE2E2' : isMed ? '#FEF3C7' : '#EFF6FF',
+                              color: isHigh ? '#B91C1C' : isMed ? '#D97706' : '#1D4ED8',
+                            }}
+                          >
+                            {isHigh
+                              ? (locale === 'ar' ? 'أولوية عالية / عاجل' : 'High Priority')
+                              : isMed
+                              ? (locale === 'ar' ? 'أولوية متوسطة' : 'Medium Priority')
+                              : (locale === 'ar' ? 'أولوية عادية' : 'Low Priority')}
+                          </span>
+                        </div>
+
+                        {report.createdAt && (
+                          <span style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
+                            📅 {new Date(report.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Property info */}
+                      {report.reportedProperty?.title && (
+                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--dary-navy)' }}>
+                          <span>🏠 {locale === 'ar' ? 'العقار المبلغ عنه:' : 'Reported Property:'} </span>
+                          {report.reportedPropertyId ? (
+                            <Link
+                              to={`/properties/${report.reportedPropertyId}`}
+                              style={{ color: 'var(--dary-blue)', textDecoration: 'underline' }}
+                            >
+                              {report.reportedProperty.title}
+                            </Link>
+                          ) : (
+                            <span>{report.reportedProperty.title}</span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Reason and details */}
+                      <div style={{ fontSize: '0.88rem', color: '#334155', lineHeight: 1.6, backgroundColor: '#F8FAFC', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                        <span style={{ fontWeight: 700, color: '#DC2626' }}>
+                          {locale === 'ar' ? 'تفاصيل البلاغ:' : 'Report Details:'}{' '}
+                        </span>
+                        <span>{report.description || (locale === 'ar' ? 'بدون تفاصيل إضافية' : 'No description')}</span>
+                      </div>
+
+                      {/* Admin Resolution Section */}
+                      {isResolved && (
+                        <div
+                          style={{
+                            padding: '0.85rem 1rem',
+                            borderRadius: '10px',
+                            backgroundColor: '#F0FDF4',
+                            border: '1px solid #BBF7D0',
+                            fontSize: '0.86rem',
+                            color: '#166534',
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          <div style={{ fontWeight: 800, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span>🛡️</span>
+                            <span>{locale === 'ar' ? 'إجراء وقرار إدارة داري:' : 'Dary Admin Resolution:'}</span>
+                          </div>
+                          <div>
+                            {report.resolutionNotes ||
+                              (locale === 'ar'
+                                ? 'تمت مراجعة العقار واتخاذ الإجراء اللازم من قبل المشرفين.'
+                                : 'The property has been reviewed and appropriate actions were taken by administrators.')}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
 
