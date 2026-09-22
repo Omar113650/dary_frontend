@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
 import { propertyService } from '../services/propertyService';
@@ -24,6 +24,9 @@ export default function PropertyDetailsPage() {
   // Gallery state
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [imageFitMode, setImageFitMode] = useState<'contain' | 'cover'>('contain');
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const thumbnailsRef = useRef<HTMLDivElement>(null);
 
   // Favorites state
   const [isFavorite, setIsFavorite] = useState(false);
@@ -358,11 +361,13 @@ export default function PropertyDetailsPage() {
     setActiveImageIndex((prev) => (prev === allImages.length - 1 ? 0 : prev + 1));
   };
 
-  // Keyboard navigation for Lightbox
+  // Keyboard navigation for Gallery & Lightbox
   useEffect(() => {
-    if (!isLightboxOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsLightboxOpen(false);
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === 'Escape' && isLightboxOpen) {
+        setIsLightboxOpen(false);
+      }
       if (e.key === 'ArrowRight') {
         locale === 'ar' ? handlePrevImage() : handleNextImage();
       }
@@ -373,6 +378,37 @@ export default function PropertyDetailsPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isLightboxOpen, allImages.length, locale]);
+
+  // Auto-scroll thumbnails when active image changes
+  useEffect(() => {
+    if (thumbnailsRef.current) {
+      const activeBtn = thumbnailsRef.current.children[activeImageIndex] as HTMLElement;
+      if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, [activeImageIndex]);
+
+  // Touch Swipe handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartX - touchEndX;
+    if (Math.abs(diff) > 40) {
+      if (diff > 0) {
+        // Swiped left
+        locale === 'ar' ? handlePrevImage() : handleNextImage();
+      } else {
+        // Swiped right
+        locale === 'ar' ? handleNextImage() : handlePrevImage();
+      }
+    }
+    setTouchStartX(null);
+  };
 
   const getCategoryLabel = (cat?: string) => {
     if (!cat) return null;
@@ -411,29 +447,91 @@ export default function PropertyDetailsPage() {
 
         {/* ── Multi-Image Interactive Gallery ──────────────────────────────── */}
         <div style={{ marginBottom: '2rem' }}>
-          {/* Main Photo Viewport */}
+          {/* Main Photo Viewport with Ambient Blurred Backdrop & Full Uncropped Image */}
           <div
-            onClick={() => setIsLightboxOpen(true)}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
             style={{
               position: 'relative',
-              borderRadius: '20px',
+              borderRadius: '24px',
               overflow: 'hidden',
               aspectRatio: '16/9',
-              maxHeight: '480px',
-              background: '#0B2A4A',
-              cursor: 'zoom-in',
-              boxShadow: '0 8px 30px rgba(11, 42, 74, 0.12)',
+              minHeight: '340px',
+              maxHeight: '520px',
+              backgroundColor: '#071829',
+              boxShadow: '0 12px 36px rgba(11, 42, 74, 0.16)',
+              userSelect: 'none',
             }}
           >
+            {/* Ambient Blurred Backdrop (Ensures empty letterbox space is vibrant and matches image colors) */}
+            <img
+              src={currentImage.url}
+              alt=""
+              aria-hidden="true"
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                filter: 'blur(35px) brightness(0.45)',
+                transform: 'scale(1.25)',
+                pointerEvents: 'none',
+              }}
+            />
+
+            {/* Main Crisp Foreground Image (100% visible, no parts cropped) */}
             <img
               src={currentImage.url}
               alt={`${displayTitle} - ${activeImageIndex + 1}`}
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transition: 'opacity 0.25s ease' }}
+              onClick={() => setIsLightboxOpen(true)}
+              style={{
+                position: 'relative',
+                zIndex: 1,
+                width: '100%',
+                height: '100%',
+                objectFit: imageFitMode,
+                display: 'block',
+                cursor: 'zoom-in',
+                transition: 'transform 0.25s ease',
+              }}
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).src =
                   'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=900&h=506&fit=crop';
               }}
             />
+
+            {/* Left & Right Subtle Click Zones for fast navigation */}
+            {allImages.length > 1 && (
+              <>
+                <div
+                  onClick={handlePrevImage}
+                  title={locale === 'ar' ? 'الصورة السابقة' : 'Previous Photo'}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    insetInlineStart: 0,
+                    width: '18%',
+                    zIndex: 2,
+                    cursor: 'pointer',
+                  }}
+                />
+                <div
+                  onClick={handleNextImage}
+                  title={locale === 'ar' ? 'الصورة التالية' : 'Next Photo'}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    bottom: 0,
+                    insetInlineEnd: 0,
+                    width: '18%',
+                    zIndex: 2,
+                    cursor: 'pointer',
+                  }}
+                />
+              </>
+            )}
 
             {/* Top-start: Image Counter Badge & Category */}
             <div
@@ -444,22 +542,24 @@ export default function PropertyDetailsPage() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                zIndex: 2,
+                zIndex: 3,
+                pointerEvents: 'auto',
               }}
             >
               <span
                 style={{
-                  backgroundColor: 'rgba(11, 42, 74, 0.82)',
-                  backdropFilter: 'blur(8px)',
+                  backgroundColor: 'rgba(11, 42, 74, 0.85)',
+                  backdropFilter: 'blur(10px)',
                   color: '#FFFFFF',
-                  padding: '0.4rem 0.85rem',
+                  padding: '0.45rem 0.95rem',
                   borderRadius: '999px',
                   fontSize: '0.85rem',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   display: 'flex',
                   alignItems: 'center',
                   gap: '6px',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+                  border: '1px solid rgba(255,255,255,0.15)',
                 }}
               >
                 <span>📷</span>
@@ -469,14 +569,14 @@ export default function PropertyDetailsPage() {
               {getCategoryLabel(currentImage.category) && (
                 <span
                   style={{
-                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.95)',
                     backdropFilter: 'blur(8px)',
                     color: 'var(--color-navy)',
-                    padding: '0.4rem 0.75rem',
+                    padding: '0.45rem 0.85rem',
                     borderRadius: '999px',
                     fontSize: '0.8rem',
-                    fontWeight: 700,
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                    fontWeight: 800,
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
                   }}
                 >
                   {getCategoryLabel(currentImage.category)}
@@ -484,7 +584,7 @@ export default function PropertyDetailsPage() {
               )}
             </div>
 
-            {/* Top-end: Zoom Button & Favorite Toggle */}
+            {/* Top-end: Fit Mode Toggle, Zoom, Favorite Buttons */}
             <div
               style={{
                 position: 'absolute',
@@ -493,9 +593,45 @@ export default function PropertyDetailsPage() {
                 display: 'flex',
                 alignItems: 'center',
                 gap: '10px',
-                zIndex: 2,
+                zIndex: 3,
+                pointerEvents: 'auto',
               }}
             >
+              {/* Fit Mode Toggle Button */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setImageFitMode((prev) => (prev === 'contain' ? 'cover' : 'contain'));
+                }}
+                title={
+                  imageFitMode === 'contain'
+                    ? (locale === 'ar' ? 'تكبير لملء الإطار بالكامل' : 'Cover frame')
+                    : (locale === 'ar' ? 'إظهار الصورة كاملة بدون قص' : 'Fit full uncropped image')
+                }
+                style={{
+                  height: '42px',
+                  padding: '0 0.85rem',
+                  borderRadius: '999px',
+                  background: 'rgba(255, 255, 255, 0.92)',
+                  backdropFilter: 'blur(8px)',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  color: 'var(--color-navy)',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+                  transition: 'transform 0.15s ease',
+                }}
+              >
+                <span>{imageFitMode === 'contain' ? '⤢' : '⤡'}</span>
+                <span>{imageFitMode === 'contain' ? (locale === 'ar' ? 'الصورة كاملة' : 'Full') : (locale === 'ar' ? 'ملء الإطار' : 'Cover')}</span>
+              </button>
+
+              {/* Fullscreen Lightbox Button */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -507,21 +643,22 @@ export default function PropertyDetailsPage() {
                   width: '42px',
                   height: '42px',
                   borderRadius: '50%',
-                  background: 'rgba(255, 255, 255, 0.9)',
-                  backdropFilter: 'blur(6px)',
+                  background: 'rgba(255, 255, 255, 0.92)',
+                  backdropFilter: 'blur(8px)',
                   border: 'none',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: 'pointer',
-                  fontSize: '1.1rem',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+                  fontSize: '1.15rem',
+                  boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
                   transition: 'transform 0.15s ease',
                 }}
               >
                 🔍
               </button>
 
+              {/* Favorite Button */}
               {!isAdmin && !isOwner && (
                 <button
                   type="button"
@@ -535,15 +672,15 @@ export default function PropertyDetailsPage() {
                     width: '42px',
                     height: '42px',
                     borderRadius: '50%',
-                    background: 'rgba(255, 255, 255, 0.9)',
-                    backdropFilter: 'blur(6px)',
+                    background: 'rgba(255, 255, 255, 0.92)',
+                    backdropFilter: 'blur(8px)',
                     border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    fontSize: '1.2rem',
-                    boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+                    fontSize: '1.25rem',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
                     opacity: favLoading ? 0.6 : 1,
                   }}
                 >
@@ -552,35 +689,35 @@ export default function PropertyDetailsPage() {
               )}
             </div>
 
-            {/* Left & Right Navigation Arrows */}
+            {/* Left & Right Prominent Navigation Arrows */}
             {allImages.length > 1 && (
               <>
                 <button
                   type="button"
                   onClick={handlePrevImage}
-                  title={locale === 'ar' ? 'الصورة السابقة' : 'Previous Photo'}
+                  title={locale === 'ar' ? 'الصورة السابقة (أو اضغط السهم الأيمن)' : 'Previous Photo'}
                   style={{
                     position: 'absolute',
                     top: '50%',
-                    insetInlineStart: '16px',
+                    insetInlineStart: '18px',
                     transform: 'translateY(-50%)',
-                    width: '46px',
-                    height: '46px',
+                    width: '52px',
+                    height: '52px',
                     borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-                    backdropFilter: 'blur(6px)',
-                    border: 'none',
+                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                    backdropFilter: 'blur(10px)',
+                    border: '2px solid rgba(11, 42, 74, 0.08)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+                    boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
                     color: 'var(--color-navy)',
-                    zIndex: 2,
-                    transition: 'transform 0.15s ease, background-color 0.2s',
+                    zIndex: 3,
+                    transition: 'all 0.2s ease',
                   }}
                 >
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
                     {locale === 'ar' ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
                   </svg>
                 </button>
@@ -588,100 +725,149 @@ export default function PropertyDetailsPage() {
                 <button
                   type="button"
                   onClick={handleNextImage}
-                  title={locale === 'ar' ? 'الصورة التالية' : 'Next Photo'}
+                  title={locale === 'ar' ? 'الصورة التالية (أو اضغط السهم الأيسر)' : 'Next Photo'}
                   style={{
                     position: 'absolute',
                     top: '50%',
-                    insetInlineEnd: '16px',
+                    insetInlineEnd: '18px',
                     transform: 'translateY(-50%)',
-                    width: '46px',
-                    height: '46px',
+                    width: '52px',
+                    height: '52px',
                     borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.88)',
-                    backdropFilter: 'blur(6px)',
-                    border: 'none',
+                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                    backdropFilter: 'blur(10px)',
+                    border: '2px solid rgba(11, 42, 74, 0.08)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+                    boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
                     color: 'var(--color-navy)',
-                    zIndex: 2,
-                    transition: 'transform 0.15s ease, background-color 0.2s',
+                    zIndex: 3,
+                    transition: 'all 0.2s ease',
                   }}
                 >
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round">
                     {locale === 'ar' ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
                   </svg>
                 </button>
               </>
             )}
-          </div>
 
-          {/* Thumbnails Row */}
-          {allImages.length > 1 && (
-            <div
-              style={{
-                display: 'flex',
-                gap: '0.75rem',
-                overflowX: 'auto',
-                paddingTop: '0.85rem',
-                paddingBottom: '0.4rem',
-                scrollbarWidth: 'thin',
-              }}
-            >
-              {allImages.map((img, idx) => {
-                const isSelected = activeImageIndex === idx;
-                return (
+            {/* Bottom Dots Indicator */}
+            {allImages.length > 1 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '16px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  display: 'flex',
+                  gap: '7px',
+                  alignItems: 'center',
+                  zIndex: 3,
+                  backgroundColor: 'rgba(7, 24, 41, 0.7)',
+                  backdropFilter: 'blur(8px)',
+                  padding: '6px 14px',
+                  borderRadius: '999px',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                }}
+              >
+                {allImages.map((_, idx) => (
                   <button
                     key={idx}
                     type="button"
-                    onClick={() => setActiveImageIndex(idx)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveImageIndex(idx);
+                    }}
                     style={{
-                      position: 'relative',
-                      width: '100px',
-                      height: '68px',
-                      flexShrink: 0,
-                      borderRadius: '12px',
-                      overflow: 'hidden',
-                      border: isSelected ? '3px solid var(--color-blue)' : '2px solid #E2E8F0',
-                      opacity: isSelected ? 1 : 0.65,
-                      transform: isSelected ? 'scale(1.03)' : 'scale(1)',
-                      transition: 'all 0.2s ease',
+                      width: activeImageIndex === idx ? '24px' : '8px',
+                      height: '8px',
+                      borderRadius: '999px',
+                      backgroundColor: activeImageIndex === idx ? 'var(--color-blue)' : 'rgba(255, 255, 255, 0.55)',
+                      border: 'none',
                       cursor: 'pointer',
                       padding: 0,
-                      backgroundColor: '#0F172A',
+                      transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                     }}
-                  >
-                    <img
-                      src={img.url}
-                      alt={`Thumb ${idx + 1}`}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={(e) => {
-                        (e.currentTarget as HTMLImageElement).src =
-                          'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=200&h=130&fit=crop';
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Thumbnails Row with Auto-scroll */}
+          {allImages.length > 1 && (
+            <div style={{ marginTop: '1rem' }}>
+              <div
+                ref={thumbnailsRef}
+                style={{
+                  display: 'flex',
+                  gap: '0.85rem',
+                  overflowX: 'auto',
+                  paddingBottom: '0.5rem',
+                  scrollbarWidth: 'thin',
+                }}
+              >
+                {allImages.map((img, idx) => {
+                  const isSelected = activeImageIndex === idx;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setActiveImageIndex(idx)}
+                      style={{
+                        position: 'relative',
+                        width: '110px',
+                        height: '75px',
+                        flexShrink: 0,
+                        borderRadius: '14px',
+                        overflow: 'hidden',
+                        border: isSelected ? '3px solid var(--color-blue)' : '2px solid #E2E8F0',
+                        opacity: isSelected ? 1 : 0.65,
+                        transform: isSelected ? 'scale(1.04)' : 'scale(1)',
+                        transition: 'all 0.2s ease',
+                        cursor: 'pointer',
+                        padding: 0,
+                        backgroundColor: '#0F172A',
+                        boxShadow: isSelected ? '0 4px 14px rgba(47, 107, 255, 0.3)' : 'none',
                       }}
-                    />
-                    {getCategoryLabel(img.category) && (
-                      <span
-                        style={{
-                          position: 'absolute',
-                          bottom: '3px',
-                          insetInlineEnd: '3px',
-                          fontSize: '0.65rem',
-                          padding: '2px 5px',
-                          borderRadius: '4px',
-                          backgroundColor: 'rgba(0,0,0,0.7)',
-                          color: '#fff',
-                          fontWeight: 600,
+                    >
+                      <img
+                        src={img.url}
+                        alt={`Thumb ${idx + 1}`}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => {
+                          (e.currentTarget as HTMLImageElement).src =
+                            'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=200&h=130&fit=crop';
                         }}
-                      >
-                        {getCategoryLabel(img.category)}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
+                      />
+                      {getCategoryLabel(img.category) && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            bottom: '3px',
+                            insetInlineEnd: '3px',
+                            fontSize: '0.65rem',
+                            padding: '2px 5px',
+                            borderRadius: '4px',
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            color: '#fff',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {getCategoryLabel(img.category)}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.4rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                <span>💡 {locale === 'ar' ? 'يمكنك التمرير أو استخدام أسهم لوحة المفاتيح ↔️ للتنقل بين الصور' : 'Swipe, click thumbnails, or use arrow keys ↔️ to browse photos'}</span>
+                <span>{allImages.length} {locale === 'ar' ? 'صور متوفرة' : 'photos available'}</span>
+              </div>
             </div>
           )}
         </div>
@@ -1400,24 +1586,27 @@ export default function PropertyDetailsPage() {
           {/* Centered Large Image with Nav Buttons */}
           <div
             onClick={(e) => e.stopPropagation()}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
             style={{
               position: 'relative',
-              maxWidth: '92vw',
-              maxHeight: '75vh',
+              maxWidth: '94vw',
+              maxHeight: '76vh',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              userSelect: 'none',
             }}
           >
             <img
               src={currentImage.url}
               alt={`${displayTitle} - Fullscreen`}
               style={{
-                maxWidth: '90vw',
-                maxHeight: '74vh',
+                maxWidth: '92vw',
+                maxHeight: '75vh',
                 objectFit: 'contain',
-                borderRadius: '12px',
-                boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+                borderRadius: '14px',
+                boxShadow: '0 12px 48px rgba(0,0,0,0.6)',
               }}
             />
 
@@ -1429,21 +1618,24 @@ export default function PropertyDetailsPage() {
                   style={{
                     position: 'absolute',
                     top: '50%',
-                    insetInlineStart: '-55px',
+                    insetInlineStart: '16px',
                     transform: 'translateY(-50%)',
-                    width: '48px',
-                    height: '48px',
+                    width: '52px',
+                    height: '52px',
                     borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                    backdropFilter: 'blur(8px)',
                     color: '#fff',
-                    border: 'none',
+                    border: '1px solid rgba(255,255,255,0.2)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
+                    zIndex: 5,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
                   }}
                 >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
                     {locale === 'ar' ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
                   </svg>
                 </button>
@@ -1454,21 +1646,24 @@ export default function PropertyDetailsPage() {
                   style={{
                     position: 'absolute',
                     top: '50%',
-                    insetInlineEnd: '-55px',
+                    insetInlineEnd: '16px',
                     transform: 'translateY(-50%)',
-                    width: '48px',
-                    height: '48px',
+                    width: '52px',
+                    height: '52px',
                     borderRadius: '50%',
-                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                    backdropFilter: 'blur(8px)',
                     color: '#fff',
-                    border: 'none',
+                    border: '1px solid rgba(255,255,255,0.2)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
+                    zIndex: 5,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
                   }}
                 >
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8">
                     {locale === 'ar' ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
                   </svg>
                 </button>
