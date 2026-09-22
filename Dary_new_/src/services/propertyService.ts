@@ -24,16 +24,25 @@ export function normalizeProperty(raw: any): Property {
       ? { ar: raw.title.ar || raw.title.en || '', en: raw.title.en || raw.title.ar || '' }
       : { ar: String(raw.title || ''), en: String(raw.title || '') };
 
+  const governorate = raw.governorate || '';
+  const city = raw.city || '';
+  const district = raw.district || '';
+  const address = raw.address || '';
+  const nearestUniversity = raw.nearestUniversity || '';
+  const distanceToUniversity =
+    raw.distanceToUniversity !== undefined && raw.distanceToUniversity !== ''
+      ? Number(raw.distanceToUniversity)
+      : undefined;
+
   let locAr = '';
   let locEn = '';
   if (typeof raw.location === 'object' && raw.location !== null) {
     locAr = raw.location.ar || (typeof raw.location.city === 'object' ? raw.location.city.ar : raw.location.city) || '';
     locEn = raw.location.en || (typeof raw.location.city === 'object' ? raw.location.city.en : raw.location.city) || '';
   } else {
-    const city = raw.city || '';
-    const district = raw.district || raw.governorate || '';
-    locAr = [city, district].filter(Boolean).join(', ') || String(raw.location || '');
-    locEn = [city, district].filter(Boolean).join(', ') || String(raw.location || '');
+    const locParts = [city, district, governorate].filter((val, idx, arr) => Boolean(val) && arr.indexOf(val) === idx);
+    locAr = locParts.join('، ') || String(raw.location || '');
+    locEn = locParts.join(', ') || String(raw.location || '');
   }
 
   const rawType = raw.propertyType || raw.type || '';
@@ -43,6 +52,8 @@ export function normalizeProperty(raw: any): Property {
     studio: { ar: 'استوديو', en: 'Studio' },
     room: { ar: 'غرفة', en: 'Room' },
     private_room: { ar: 'غرفة خاصة', en: 'Private Room' },
+    shared_room: { ar: 'غرفة مشتركة', en: 'Shared Room' },
+    entire_apartment: { ar: 'شقة كاملة', en: 'Entire Apartment' },
     dormitory: { ar: 'سكن طلابي', en: 'Dormitory' },
     villa: { ar: 'فيلا', en: 'Villa' },
   };
@@ -55,25 +66,116 @@ export function normalizeProperty(raw: any): Property {
   const price = Number(raw.price || raw.startingPrice || 0);
   const currency = String(raw.currency || 'EGP');
 
-  const bedrooms = Number(raw.bedrooms || raw.rooms || (Array.isArray(raw.roomsConfig) ? raw.roomsConfig.length : 1) || 1);
+  // Rooms parsing
+  let rooms_: any[] = raw.rooms_ || raw.rooms || raw.roomsConfig || [];
+  if (typeof rooms_ === 'string') {
+    try {
+      rooms_ = JSON.parse(rooms_);
+    } catch {
+      rooms_ = [];
+    }
+  }
+  if (!Array.isArray(rooms_)) rooms_ = [];
+
+  const bedrooms = Number(raw.bedrooms || (rooms_.length > 0 ? rooms_.length : 1));
   const bathrooms = Number(raw.bathrooms || 1);
 
-  let image = '';
+  // Amenities parsing
+  let amenities: string[] = [];
+  if (Array.isArray(raw.amenities)) {
+    amenities = raw.amenities;
+  } else if (typeof raw.amenities === 'string') {
+    try {
+      const parsed = JSON.parse(raw.amenities);
+      if (Array.isArray(parsed)) amenities = parsed;
+      else amenities = raw.amenities.split(',').map((s: string) => s.trim()).filter(Boolean);
+    } catch {
+      amenities = raw.amenities.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+  }
+
+  // Collect all images across all possible backend payload properties
+  const collectedImages: Array<{ url: string; category?: string; isPrimary?: boolean }> = [];
+  const seenUrls = new Set<string>();
+
+  const addImageUrl = (urlOrObj: any, defaultCategory = 'general') => {
+    if (!urlOrObj) return;
+    const url = typeof urlOrObj === 'string' ? urlOrObj : urlOrObj?.url;
+    if (!url || typeof url !== 'string' || url.startsWith('file://')) return;
+    if (seenUrls.has(url)) return;
+    seenUrls.add(url);
+    collectedImages.push({
+      url,
+      category: typeof urlOrObj === 'object' && urlOrObj.category ? urlOrObj.category : defaultCategory,
+      isPrimary: typeof urlOrObj === 'object' ? Boolean(urlOrObj.isPrimary) : false,
+    });
+  };
+
   if (raw.image && typeof raw.image === 'string') {
+    addImageUrl(raw.image, 'general');
+  }
+  if (Array.isArray(raw.images)) {
+    raw.images.forEach((img: any) => addImageUrl(img, 'general'));
+  }
+  if (Array.isArray(raw.photos)) {
+    raw.photos.forEach((img: any) => addImageUrl(img, 'general'));
+  }
+  if (Array.isArray(raw.imageUrls)) {
+    raw.imageUrls.forEach((img: any) => addImageUrl(img, 'general'));
+  }
+  if (Array.isArray(raw.roomPhotos)) {
+    raw.roomPhotos.forEach((img: any) => addImageUrl(img, 'room'));
+  }
+  if (Array.isArray(raw.kitchenPhotos)) {
+    raw.kitchenPhotos.forEach((img: any) => addImageUrl(img, 'kitchen'));
+  }
+  if (Array.isArray(raw.bathroomPhotos)) {
+    raw.bathroomPhotos.forEach((img: any) => addImageUrl(img, 'bathroom'));
+  }
+  if (Array.isArray(raw.livingRoomPhotos)) {
+    raw.livingRoomPhotos.forEach((img: any) => addImageUrl(img, 'livingRoom'));
+  }
+  rooms_.forEach((r: any) => {
+    if (r?.photoUrl) addImageUrl(r.photoUrl, 'room');
+  });
+
+  // Assign primary image
+  let image = '';
+  if (raw.image && typeof raw.image === 'string' && !raw.image.startsWith('file://')) {
     image = raw.image;
-  } else if (Array.isArray(raw.images) && raw.images.length > 0) {
-    const primary = raw.images.find((img: any) => img.isPrimary) || raw.images[0];
-    image = typeof primary === 'string' ? primary : primary?.url || '';
-  } else if (Array.isArray(raw.rooms_) && raw.rooms_.length > 0 && raw.rooms_[0]?.photoUrl) {
-    image = raw.rooms_[0].photoUrl;
-  } else if (Array.isArray(raw.roomPhotos) && raw.roomPhotos.length > 0) {
-    image = raw.roomPhotos[0];
-  } else if (raw.photos && Array.isArray(raw.photos) && raw.photos.length > 0) {
-    image = raw.photos[0];
+  } else if (collectedImages.length > 0) {
+    const primary = collectedImages.find((img) => img.isPrimary) || collectedImages[0];
+    image = primary.url;
   }
   if (!image || image.startsWith('file://')) {
     image = 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=600&h=400&fit=crop';
+    if (collectedImages.length === 0) {
+      collectedImages.push({ url: image, isPrimary: true, category: 'general' });
+    }
   }
+
+  // Normalize rooms items
+  const normalizedRooms = rooms_.map((r: any, idx: number) => ({
+    id: String(r.id || r._id || `room-${idx + 1}`),
+    roomType: r.roomType || 'SINGLE',
+    pricePerBed: Number(r.pricePerBed || raw.price || 0),
+    totalBeds: Number(r.totalBeds || 1),
+    availableBeds: Number(r.availableBeds !== undefined ? r.availableBeds : r.totalBeds || 1),
+    photoUrl: r.photoUrl || (Array.isArray(raw.roomPhotos) ? raw.roomPhotos[idx] : undefined),
+    status: r.status || 'AVAILABLE',
+  }));
+
+  const isFurnished = raw.isFurnished !== undefined ? Boolean(raw.isFurnished) : true;
+  const electricityIncluded = Boolean(raw.electricityIncluded);
+  const waterIncluded = Boolean(raw.waterIncluded);
+  const internetIncluded = raw.internetIncluded !== undefined ? Boolean(raw.internetIncluded) : true;
+  const propertyClass = raw.propertyClass || 'STANDARD';
+  const targetTenantType = raw.targetTenantType || 'STUDENT';
+  const genderAllowed = raw.genderAllowed || 'any';
+  const deposit = raw.deposit !== undefined ? Number(raw.deposit) : (raw.securityDeposit !== undefined ? Number(raw.securityDeposit) : undefined);
+  const floor = raw.floor !== undefined ? raw.floor : (raw.floorNumber !== undefined ? raw.floorNumber : undefined);
+  const area = raw.area !== undefined ? Number(raw.area) : (raw.squareMeters !== undefined ? Number(raw.squareMeters) : undefined);
+  const rules = raw.rules || raw.houseRules || undefined;
 
   return {
     ...raw,
@@ -86,15 +188,32 @@ export function normalizeProperty(raw: any): Property {
     bedrooms,
     bathrooms,
     image,
+    images: collectedImages,
     description: raw.description || '',
-    amenities: Array.isArray(raw.amenities) ? raw.amenities : [],
-    rooms_: Array.isArray(raw.rooms_) ? raw.rooms_ : [],
-    images: Array.isArray(raw.images) ? raw.images : [],
+    amenities,
+    rooms_: normalizedRooms,
+    governorate,
+    city,
+    district,
+    address,
+    nearestUniversity,
+    distanceToUniversity,
+    isFurnished,
+    electricityIncluded,
+    waterIncluded,
+    internetIncluded,
+    propertyClass,
+    targetTenantType,
+    genderAllowed,
+    deposit,
+    floor,
+    area,
+    rules,
     owner: raw.owner || null,
     rating: Number(raw.rating || raw.averageRating || 4.8),
     reviewCount: Number(raw.reviewCount || raw.reviewsCount || 0),
     featured: Boolean(raw.featured || raw.isFeatured),
-    billsIncluded: Boolean(raw.billsIncluded || raw.electricityIncluded || raw.waterIncluded),
+    billsIncluded: Boolean(raw.billsIncluded || electricityIncluded || waterIncluded),
     verified: Boolean(raw.isVerified || raw.verified),
     createdAt: raw.createdAt || new Date().toISOString(),
   };

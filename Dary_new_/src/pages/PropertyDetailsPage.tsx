@@ -21,6 +21,10 @@ export default function PropertyDetailsPage() {
     user?.id && property && (user.id === property.ownerId || user.id === property.owner?.id)
   );
 
+  // Gallery state
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+
   // Favorites state
   const [isFavorite, setIsFavorite] = useState(false);
   const [favLoading, setFavLoading] = useState(false);
@@ -286,9 +290,113 @@ export default function PropertyDetailsPage() {
   const calculatedMonths = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24 * 30)));
   const estimatedTotal = roomPricePerBed * bedsRequested * calculatedMonths;
 
+  // ── Collect and deduplicate all property images ─────────────────────────────
+  const allImages: Array<{ url: string; category?: string }> = (() => {
+    const list: Array<{ url: string; category?: string }> = [];
+    const seen = new Set<string>();
+
+    const add = (item: any, defaultCat = 'general') => {
+      if (!item) return;
+      const url = typeof item === 'string' ? item : item?.url;
+      if (!url || typeof url !== 'string' || url.startsWith('file://') || seen.has(url)) return;
+      seen.add(url);
+      list.push({
+        url,
+        category: (typeof item === 'object' && item?.category) || defaultCat,
+      });
+    };
+
+    // Primary image
+    if (property.image) add(property.image, 'main');
+    // Multiple images
+    if (Array.isArray(property.images)) {
+      property.images.forEach((img: any) => add(img));
+    }
+    // Photos arrays
+    if (Array.isArray(property.photos)) {
+      property.photos.forEach((img: any) => add(img));
+    }
+    if (Array.isArray(property.imageUrls)) {
+      property.imageUrls.forEach((img: any) => add(img));
+    }
+    if (Array.isArray(property.kitchenPhotos)) {
+      property.kitchenPhotos.forEach((img: any) => add(img, 'kitchen'));
+    }
+    if (Array.isArray(property.bathroomPhotos)) {
+      property.bathroomPhotos.forEach((img: any) => add(img, 'bathroom'));
+    }
+    if (Array.isArray(property.livingRoomPhotos)) {
+      property.livingRoomPhotos.forEach((img: any) => add(img, 'livingRoom'));
+    }
+    if (Array.isArray(property.roomPhotos)) {
+      property.roomPhotos.forEach((img: any) => add(img, 'room'));
+    }
+    // Room-specific photos
+    if (Array.isArray(property.rooms_)) {
+      property.rooms_.forEach((r: any) => {
+        if (r?.photoUrl) add(r.photoUrl, 'room');
+      });
+    }
+
+    if (list.length === 0 && property.image) {
+      list.push({ url: property.image, category: 'main' });
+    }
+    return list;
+  })();
+
+  const currentImage = allImages[activeImageIndex] || allImages[0] || { url: property.image, category: 'main' };
+
+  const handlePrevImage = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allImages.length <= 1) return;
+    setActiveImageIndex((prev) => (prev === 0 ? allImages.length - 1 : prev - 1));
+  };
+
+  const handleNextImage = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allImages.length <= 1) return;
+    setActiveImageIndex((prev) => (prev === allImages.length - 1 ? 0 : prev + 1));
+  };
+
+  // Keyboard navigation for Lightbox
+  useEffect(() => {
+    if (!isLightboxOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsLightboxOpen(false);
+      if (e.key === 'ArrowRight') {
+        locale === 'ar' ? handlePrevImage() : handleNextImage();
+      }
+      if (e.key === 'ArrowLeft') {
+        locale === 'ar' ? handleNextImage() : handlePrevImage();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLightboxOpen, allImages.length, locale]);
+
+  const getCategoryLabel = (cat?: string) => {
+    if (!cat) return null;
+    const catMap: Record<string, { ar: string; en: string }> = {
+      room: { ar: 'غرفة', en: 'Room' },
+      kitchen: { ar: 'مطبخ', en: 'Kitchen' },
+      bathroom: { ar: 'حمام', en: 'Bathroom' },
+      livingRoom: { ar: 'غرفة معيشة', en: 'Living Room' },
+      main: { ar: 'الواجهة الرئيسية', en: 'Main' },
+      general: { ar: 'عام', en: 'General' },
+    };
+    const c = catMap[cat];
+    return c ? (locale === 'ar' ? c.ar : c.en) : cat;
+  };
+
+  // Owner details helper
+  const ownerName = property.owner?.firstName
+    ? `${property.owner.firstName} ${property.owner.lastName || ''}`.trim()
+    : property.owner?.name || (locale === 'ar' ? 'مالك موثق في داري' : 'Verified Dary Host');
+  const ownerPhone = property.owner?.whatsappPhone || property.owner?.phone;
+
   return (
     <main className="page" style={{ paddingTop: '7rem', paddingBottom: '4rem' }}>
-      <div className="container" style={{ maxWidth: '900px' }}>
+      <div className="container" style={{ maxWidth: '1080px' }}>
 
         {/* Back link */}
         <Link
@@ -301,87 +409,516 @@ export default function PropertyDetailsPage() {
           {locale === 'ar' ? 'العودة إلى القائمة' : 'Back to listings'}
         </Link>
 
-        {/* Hero Image */}
-        <div style={{ position: 'relative', borderRadius: '20px', overflow: 'hidden', marginBottom: '2rem', aspectRatio: '16/9', background: '#F1F5F9' }}>
-          <img
-            src={property.image}
-            alt={displayTitle}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            onError={(e) => {
-              (e.currentTarget as HTMLImageElement).src =
-                'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=900&h=506&fit=crop';
+        {/* ── Multi-Image Interactive Gallery ──────────────────────────────── */}
+        <div style={{ marginBottom: '2rem' }}>
+          {/* Main Photo Viewport */}
+          <div
+            onClick={() => setIsLightboxOpen(true)}
+            style={{
+              position: 'relative',
+              borderRadius: '20px',
+              overflow: 'hidden',
+              aspectRatio: '16/9',
+              maxHeight: '480px',
+              background: '#0B2A4A',
+              cursor: 'zoom-in',
+              boxShadow: '0 8px 30px rgba(11, 42, 74, 0.12)',
             }}
-          />
+          >
+            <img
+              src={currentImage.url}
+              alt={`${displayTitle} - ${activeImageIndex + 1}`}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block', transition: 'opacity 0.25s ease' }}
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src =
+                  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=900&h=506&fit=crop';
+              }}
+            />
 
-          {/* Favorite button overlay (tenants and guests only) */}
-          {!isAdmin && !isOwner && (
-            <button
-              type="button"
-              onClick={handleToggleFavorite}
-              disabled={favLoading}
-              aria-label={isFavorite ? (locale === 'ar' ? 'إزالة من المفضلة' : 'Remove from favorites') : (locale === 'ar' ? 'إضافة للمفضلة' : 'Add to favorites')}
+            {/* Top-start: Image Counter Badge & Category */}
+            <div
               style={{
                 position: 'absolute',
                 top: '16px',
-                insetInlineEnd: '16px',
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                background: '#fff',
-                border: 'none',
+                insetInlineStart: '16px',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.15)',
-                color: isFavorite ? '#EF4444' : '#9CA3AF',
-                fontSize: '1.2rem',
-                transition: 'color 0.2s, transform 0.15s',
-                opacity: favLoading ? 0.6 : 1,
+                gap: '8px',
+                zIndex: 2,
               }}
             >
-              {isFavorite ? '❤️' : '🤍'}
-            </button>
-          )}
-        </div>
-
-        {/* Property Info */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '2rem', alignItems: 'start', flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.5rem', lineHeight: 1.25 }}>
-              {displayTitle}
-            </h1>
-
-            <p style={{ fontSize: '1rem', color: 'var(--color-text-secondary)', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
-                <circle cx="12" cy="10" r="3" />
-              </svg>
-              {displayLocation}
-            </p>
-
-            {/* Specs row */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-navy)', background: '#F1F5F9', padding: '0.4rem 0.9rem', borderRadius: '999px' }}>
-                🏠 {displayType}
+              <span
+                style={{
+                  backgroundColor: 'rgba(11, 42, 74, 0.82)',
+                  backdropFilter: 'blur(8px)',
+                  color: '#FFFFFF',
+                  padding: '0.4rem 0.85rem',
+                  borderRadius: '999px',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                }}
+              >
+                <span>📷</span>
+                <span>{activeImageIndex + 1} / {allImages.length}</span>
               </span>
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem', fontWeight: 600, color: 'var(--color-navy)', background: '#F1F5F9', padding: '0.4rem 0.9rem', borderRadius: '999px' }}>
-                🛏 {property.rooms_?.length || property.bedrooms} {locale === 'ar' ? 'غرف' : 'Rooms'}
-              </span>
-              {property.status && property.status !== 'APPROVED' && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 700, color: '#D97706', background: '#FEF3C7', padding: '0.4rem 0.9rem', borderRadius: '999px' }}>
-                  ⏳ {property.status === 'PENDING' ? (locale === 'ar' ? 'قيد مراجعة الإدارة' : 'Pending Review') : property.status}
+
+              {getCategoryLabel(currentImage.category) && (
+                <span
+                  style={{
+                    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+                    backdropFilter: 'blur(8px)',
+                    color: 'var(--color-navy)',
+                    padding: '0.4rem 0.75rem',
+                    borderRadius: '999px',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  }}
+                >
+                  {getCategoryLabel(currentImage.category)}
                 </span>
               )}
             </div>
 
+            {/* Top-end: Zoom Button & Favorite Toggle */}
+            <div
+              style={{
+                position: 'absolute',
+                top: '16px',
+                insetInlineEnd: '16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                zIndex: 2,
+              }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsLightboxOpen(true);
+                }}
+                title={locale === 'ar' ? 'عرض الصور بحجم كامل' : 'View Fullscreen'}
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '50%',
+                  background: 'rgba(255, 255, 255, 0.9)',
+                  backdropFilter: 'blur(6px)',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: '1.1rem',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+                  transition: 'transform 0.15s ease',
+                }}
+              >
+                🔍
+              </button>
+
+              {!isAdmin && !isOwner && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleToggleFavorite();
+                  }}
+                  disabled={favLoading}
+                  aria-label={isFavorite ? (locale === 'ar' ? 'إزالة من المفضلة' : 'Remove from favorites') : (locale === 'ar' ? 'إضافة للمفضلة' : 'Add to favorites')}
+                  style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '50%',
+                    background: 'rgba(255, 255, 255, 0.9)',
+                    backdropFilter: 'blur(6px)',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    fontSize: '1.2rem',
+                    boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+                    opacity: favLoading ? 0.6 : 1,
+                  }}
+                >
+                  {isFavorite ? '❤️' : '🤍'}
+                </button>
+              )}
+            </div>
+
+            {/* Left & Right Navigation Arrows */}
+            {allImages.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrevImage}
+                  title={locale === 'ar' ? 'الصورة السابقة' : 'Previous Photo'}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    insetInlineStart: '16px',
+                    transform: 'translateY(-50%)',
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+                    backdropFilter: 'blur(6px)',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+                    color: 'var(--color-navy)',
+                    zIndex: 2,
+                    transition: 'transform 0.15s ease, background-color 0.2s',
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    {locale === 'ar' ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleNextImage}
+                  title={locale === 'ar' ? 'الصورة التالية' : 'Next Photo'}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    insetInlineEnd: '16px',
+                    transform: 'translateY(-50%)',
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.88)',
+                    backdropFilter: 'blur(6px)',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.25)',
+                    color: 'var(--color-navy)',
+                    zIndex: 2,
+                    transition: 'transform 0.15s ease, background-color 0.2s',
+                  }}
+                >
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    {locale === 'ar' ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Thumbnails Row */}
+          {allImages.length > 1 && (
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.75rem',
+                overflowX: 'auto',
+                paddingTop: '0.85rem',
+                paddingBottom: '0.4rem',
+                scrollbarWidth: 'thin',
+              }}
+            >
+              {allImages.map((img, idx) => {
+                const isSelected = activeImageIndex === idx;
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => setActiveImageIndex(idx)}
+                    style={{
+                      position: 'relative',
+                      width: '100px',
+                      height: '68px',
+                      flexShrink: 0,
+                      borderRadius: '12px',
+                      overflow: 'hidden',
+                      border: isSelected ? '3px solid var(--color-blue)' : '2px solid #E2E8F0',
+                      opacity: isSelected ? 1 : 0.65,
+                      transform: isSelected ? 'scale(1.03)' : 'scale(1)',
+                      transition: 'all 0.2s ease',
+                      cursor: 'pointer',
+                      padding: 0,
+                      backgroundColor: '#0F172A',
+                    }}
+                  >
+                    <img
+                      src={img.url}
+                      alt={`Thumb ${idx + 1}`}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).src =
+                          'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=200&h=130&fit=crop';
+                      }}
+                    />
+                    {getCategoryLabel(img.category) && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: '3px',
+                          insetInlineEnd: '3px',
+                          fontSize: '0.65rem',
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          backgroundColor: 'rgba(0,0,0,0.7)',
+                          color: '#fff',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {getCategoryLabel(img.category)}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Main Two-Column Layout ───────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: '2rem', alignItems: 'start' }}>
+          <div>
+            {/* Header: Title & Badges */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                {property.status && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      padding: '0.35rem 0.8rem',
+                      borderRadius: '999px',
+                      backgroundColor: property.status === 'APPROVED' ? '#DCFCE7' : '#FEF3C7',
+                      color: property.status === 'APPROVED' ? '#15803D' : '#D97706',
+                    }}
+                  >
+                    {property.status === 'APPROVED'
+                      ? (locale === 'ar' ? '✓ معتمد وموثق من داري' : '✓ Verified Listing')
+                      : property.status === 'PENDING'
+                      ? (locale === 'ar' ? '⏳ قيد مراجعة الإدارة' : 'Pending Review')
+                      : property.status}
+                  </span>
+                )}
+
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    padding: '0.35rem 0.8rem',
+                    borderRadius: '999px',
+                    backgroundColor: property.propertyClass === 'LUXURY' ? '#FEF9C3' : '#F1F5F9',
+                    color: property.propertyClass === 'LUXURY' ? '#A16207' : 'var(--color-navy)',
+                  }}
+                >
+                  {property.propertyClass === 'LUXURY'
+                    ? (locale === 'ar' ? '⭐ فئة فاخرة (Luxury)' : '⭐ Luxury Class')
+                    : (locale === 'ar' ? '🏷️ فئة اقتصادية قياسية' : 'Standard Class')}
+                </span>
+
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    padding: '0.35rem 0.8rem',
+                    borderRadius: '999px',
+                    backgroundColor: property.genderAllowed === 'female_only' ? '#FCE7F3' : property.genderAllowed === 'male_only' ? '#E0F2FE' : '#F3E8FF',
+                    color: property.genderAllowed === 'female_only' ? '#BE185D' : property.genderAllowed === 'male_only' ? '#0369A1' : '#6B21A8',
+                  }}
+                >
+                  {property.genderAllowed === 'female_only'
+                    ? (locale === 'ar' ? '👩‍🎓 سكن طالبات (إناث فقط)' : 'Female Only 👩‍🎓')
+                    : property.genderAllowed === 'male_only'
+                    ? (locale === 'ar' ? '👨‍🎓 سكن طلاب (شباب فقط)' : 'Male Only 👨‍🎓')
+                    : (locale === 'ar' ? '👥 متاح للجميع' : 'Open to All 👥')}
+                </span>
+
+                {property.targetTenantType === 'STUDENT' && (
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      padding: '0.35rem 0.8rem',
+                      borderRadius: '999px',
+                      backgroundColor: '#EFF6FF',
+                      color: 'var(--color-blue)',
+                    }}
+                  >
+                    📚 {locale === 'ar' ? 'مخصص للطلاب والدارسين' : 'Students Only'}
+                  </span>
+                )}
+              </div>
+
+              <h1 style={{ fontSize: '1.95rem', fontWeight: 900, color: 'var(--color-navy)', marginBottom: '0.65rem', lineHeight: 1.3 }}>
+                {displayTitle}
+              </h1>
+
+              <p style={{ fontSize: '1rem', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '0.45rem', margin: 0 }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'var(--color-blue)', flexShrink: 0 }}>
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                  <circle cx="12" cy="10" r="3" />
+                </svg>
+                <span>{displayLocation}</span>
+              </p>
+            </div>
+
+            {/* Detailed Location & Proximity Box */}
+            {(property.address || property.nearestUniversity) && (
+              <div
+                style={{
+                  backgroundColor: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  borderRadius: '16px',
+                  padding: '1.15rem 1.25rem',
+                  marginBottom: '1.75rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem',
+                }}
+              >
+                {property.address && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: 'var(--color-navy)' }}>
+                    <span style={{ fontSize: '1.1rem' }}>📍</span>
+                    <span style={{ fontWeight: 700 }}>{locale === 'ar' ? 'العنوان التفصيلي:' : 'Detailed Address:'}</span>
+                    <span style={{ color: 'var(--color-text-secondary)' }}>{property.address}</span>
+                  </div>
+                )}
+
+                {property.nearestUniversity && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: '#1E40AF' }}>
+                    <span style={{ fontSize: '1.1rem' }}>🎓</span>
+                    <span style={{ fontWeight: 700 }}>{locale === 'ar' ? 'الجامعة الأقرب:' : 'Nearest University:'}</span>
+                    <span style={{ fontWeight: 600 }}>{property.nearestUniversity}</span>
+                    {property.distanceToUniversity !== undefined && (
+                      <span style={{ backgroundColor: '#DBEAFE', color: '#1E40AF', padding: '2px 8px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700 }}>
+                        {property.distanceToUniversity} {locale === 'ar' ? 'كم' : 'km'}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Key Specifications Grid (6 Tiles) ─────────────────────────── */}
+            <div style={{ marginBottom: '1.75rem' }}>
+              <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.9rem' }}>
+                {locale === 'ar' ? '📊 مواصفات وبيانات السكن' : '📊 Property Specifications'}
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.85rem' }}>
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'نوع العقار' : 'Property Type'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    🏠 {displayType}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'حالة الفرش' : 'Furnishing'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    🛋️ {property.isFurnished ? (locale === 'ar' ? 'مفروش بالكامل' : 'Fully Furnished') : (locale === 'ar' ? 'غير مفروش' : 'Unfurnished')}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'عدد الغرف' : 'Bedrooms'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    🛏️ {property.rooms_?.length || property.bedrooms} {locale === 'ar' ? 'غرف' : 'Rooms'}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'دورات المياه' : 'Bathrooms'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    🚿 {property.bathrooms || 1} {locale === 'ar' ? 'حمامات' : 'Baths'}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'الطابق / الدور' : 'Floor'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    🏢 {property.floor !== undefined && property.floor !== '' ? (locale === 'ar' ? `الدور ${property.floor}` : `Floor ${property.floor}`) : (locale === 'ar' ? 'طابق ملائم' : 'Standard')}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.9rem 1rem', borderRadius: '12px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600, marginBottom: '0.25rem' }}>
+                    {locale === 'ar' ? 'المساحة الإجمالية' : 'Total Area'}
+                  </div>
+                  <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                    📐 {property.area ? `${property.area} ${locale === 'ar' ? 'م²' : 'sqm'}` : (locale === 'ar' ? 'مساحة مناسبة' : 'Ample Space')}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Utilities & Bills Inclusions Card ─────────────────────────── */}
+            <div
+              style={{
+                backgroundColor: '#F0FDF4',
+                border: '1px solid #BBF7D0',
+                borderRadius: '16px',
+                padding: '1.25rem',
+                marginBottom: '1.75rem',
+              }}
+            >
+              <h4 style={{ fontSize: '1rem', fontWeight: 800, color: '#166534', margin: '0 0 0.85rem' }}>
+                💡 {locale === 'ar' ? 'المرافق والفواتير المشمولة في الإيجار' : 'Utilities & Inclusions in Rent'}
+              </h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 600, color: property.electricityIncluded ? '#15803D' : '#64748B' }}>
+                  <span>{property.electricityIncluded ? '⚡ ✓' : '⚡ ✕'}</span>
+                  <span>{property.electricityIncluded ? (locale === 'ar' ? 'الكهرباء مشمولة في الإيجار' : 'Electricity Included') : (locale === 'ar' ? 'الكهرباء غير مشمولة (على المستأجر)' : 'Electricity Not Included')}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 600, color: property.waterIncluded ? '#15803D' : '#64748B' }}>
+                  <span>{property.waterIncluded ? '💧 ✓' : '💧 ✕'}</span>
+                  <span>{property.waterIncluded ? (locale === 'ar' ? 'المياه مشمولة في الإيجار' : 'Water Included') : (locale === 'ar' ? 'المياه غير مشمولة (على المستأجر)' : 'Water Not Included')}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.85rem', fontWeight: 600, color: property.internetIncluded ? '#15803D' : '#64748B' }}>
+                  <span>{property.internetIncluded ? '🌐 ✓' : '🌐 ✕'}</span>
+                  <span>{property.internetIncluded ? (locale === 'ar' ? 'إنترنت WiFi عالي السرعة مشمول' : 'High-speed WiFi Included') : (locale === 'ar' ? 'الإنترنت غير مشمول' : 'Internet Not Included')}</span>
+                </div>
+              </div>
+            </div>
+
             {/* Description */}
             {property.description && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.5rem' }}>
-                  {locale === 'ar' ? 'عن السكن' : 'About Property'}
+              <div style={{ marginBottom: '1.75rem' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.65rem' }}>
+                  {locale === 'ar' ? '📝 عن السكن' : '📝 About Property'}
                 </h3>
-                <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.95rem' }}>
+                <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.8, fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-line' }}>
                   {property.description}
                 </p>
               </div>
@@ -389,84 +926,250 @@ export default function PropertyDetailsPage() {
 
             {/* Rooms list */}
             {Array.isArray(property.rooms_) && property.rooms_.length > 0 && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.75rem' }}>
+              <div style={{ marginBottom: '1.75rem' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.85rem' }}>
                   {locale === 'ar' ? '🛏️ خيارات الغرف والأسرّة المتاحة' : '🛏️ Available Rooms & Beds'}
                 </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-                  {property.rooms_.map((room: any, idx: number) => (
-                    <div
-                      key={room.id || idx}
-                      style={{
-                        padding: '1rem',
-                        borderRadius: '12px',
-                        border: '1px solid #E2E8F0',
-                        backgroundColor: '#F8FAFC',
-                      }}
-                    >
-                      {room.photoUrl && (
-                        <img
-                          src={room.photoUrl}
-                          alt={`Room ${idx + 1}`}
-                          style={{ width: '100%', height: '120px', objectFit: 'cover', borderRadius: '8px', marginBottom: '0.75rem' }}
-                        />
-                      )}
-                      <div style={{ fontWeight: 700, color: 'var(--color-navy)', fontSize: '0.95rem', marginBottom: '0.25rem' }}>
-                        {room.roomType === 'SINGLE' ? (locale === 'ar' ? 'غرفة فردية' : 'Single Room') :
-                         room.roomType === 'DOUBLE' ? (locale === 'ar' ? 'غرفة ثنائية' : 'Double Room') :
-                         room.roomType === 'TRIPLE' ? (locale === 'ar' ? 'غرفة ثلاثية' : 'Triple Room') :
-                         room.roomType === 'QUAD' ? (locale === 'ar' ? 'غرفة رباعية' : 'Quad Room') : room.roomType}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem' }}>
+                  {property.rooms_.map((room: any, idx: number) => {
+                    const roomName =
+                      room.roomType === 'SINGLE' ? (locale === 'ar' ? 'غرفة فردية' : 'Single Room') :
+                      room.roomType === 'DOUBLE' ? (locale === 'ar' ? 'غرفة ثنائية' : 'Double Room') :
+                      room.roomType === 'TRIPLE' ? (locale === 'ar' ? 'غرفة ثلاثية' : 'Triple Room') :
+                      room.roomType === 'QUAD' ? (locale === 'ar' ? 'غرفة رباعية' : 'Quad Room') : room.roomType;
+                    const isAvailable = room.availableBeds > 0;
+
+                    return (
+                      <div
+                        key={room.id || idx}
+                        style={{
+                          padding: '1rem',
+                          borderRadius: '14px',
+                          border: selectedRoomId === room.id ? '2px solid var(--color-blue)' : '1px solid #E2E8F0',
+                          backgroundColor: selectedRoomId === room.id ? '#EFF6FF' : '#F8FAFC',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          boxShadow: selectedRoomId === room.id ? '0 4px 14px rgba(47, 107, 255, 0.15)' : 'none',
+                          transition: 'all 0.2s ease',
+                        }}
+                      >
+                        <div>
+                          {room.photoUrl && (
+                            <img
+                              src={room.photoUrl}
+                              alt={roomName}
+                              style={{ width: '100%', height: '130px', objectFit: 'cover', borderRadius: '10px', marginBottom: '0.75rem' }}
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).src =
+                                  'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=300&h=200&fit=crop';
+                              }}
+                            />
+                          )}
+                          <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '1rem', marginBottom: '0.35rem' }}>
+                            {roomName}
+                          </div>
+                          <div style={{ color: 'var(--color-blue)', fontWeight: 900, fontSize: '1.15rem', marginBottom: '0.45rem' }}>
+                            {room.pricePerBed} {property.currency} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>/ {locale === 'ar' ? 'سرير شهرياً' : 'bed/mo'}</span>
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: isAvailable ? '#15803D' : '#DC2626', fontWeight: 700, marginBottom: '0.85rem' }}>
+                            {isAvailable
+                              ? (locale === 'ar' ? `✓ المتاح: ${room.availableBeds} من أصل ${room.totalBeds} أسرّة` : `✓ ${room.availableBeds} of ${room.totalBeds} beds available`)
+                              : (locale === 'ar' ? '✕ ممتلئة بالكامل' : '✕ Fully Booked')}
+                          </div>
+                        </div>
+
+                        {!isAdmin && !isOwner && isAvailable && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRoomId(room.id);
+                              handleOpenBookingModal();
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '0.6rem',
+                              borderRadius: '8px',
+                              backgroundColor: selectedRoomId === room.id ? 'var(--color-blue)' : '#FFFFFF',
+                              color: selectedRoomId === room.id ? '#FFFFFF' : 'var(--color-navy)',
+                              border: '1px solid ' + (selectedRoomId === room.id ? 'var(--color-blue)' : '#CBD5E1'),
+                              fontWeight: 700,
+                              fontSize: '0.85rem',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            {locale === 'ar' ? 'حجز هذه الغرفة ←' : 'Book this Room →'}
+                          </button>
+                        )}
                       </div>
-                      <div style={{ color: 'var(--color-blue)', fontWeight: 800, fontSize: '1.05rem', marginBottom: '0.35rem' }}>
-                        {room.pricePerBed} {property.currency} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>/ {locale === 'ar' ? 'سرير شهرياً' : 'bed/mo'}</span>
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>
-                        {locale === 'ar' ? `المتاح: ${room.availableBeds} من أصل ${room.totalBeds} أسرّة` : `${room.availableBeds} of ${room.totalBeds} beds available`}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
 
             {/* Amenities */}
             {Array.isArray(property.amenities) && property.amenities.length > 0 && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-navy)', marginBottom: '0.75rem' }}>
+              <div style={{ marginBottom: '1.75rem' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.85rem' }}>
                   {locale === 'ar' ? '✨ المرافق والخدمات المشمولة' : '✨ Amenities & Inclusions'}
                 </h3>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem' }}>
                   {property.amenities.map((item: string, i: number) => (
                     <span
                       key={i}
                       style={{
-                        padding: '0.35rem 0.85rem',
-                        borderRadius: '8px',
+                        padding: '0.45rem 0.95rem',
+                        borderRadius: '10px',
                         backgroundColor: '#EFF6FF',
                         color: 'var(--color-blue)',
-                        fontSize: '0.85rem',
-                        fontWeight: 600,
+                        fontSize: '0.88rem',
+                        fontWeight: 700,
+                        border: '1px solid #DBEAFE',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
                       }}
                     >
-                      ✓ {item}
+                      <span>✓</span>
+                      <span>{item}</span>
                     </span>
                   ))}
                 </div>
               </div>
             )}
+
+            {/* House Rules & Policies (if provided) */}
+            {property.rules && (
+              <div style={{ marginBottom: '1.75rem' }}>
+                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.65rem' }}>
+                  {locale === 'ar' ? '📋 شروط وقواعد السكن' : '📋 House Rules & Policies'}
+                </h3>
+                <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '1.15rem' }}>
+                  {Array.isArray(property.rules) ? (
+                    <ul style={{ margin: 0, paddingInlineStart: '1.25rem', color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.9rem' }}>
+                      {property.rules.map((rule: string, rIdx: number) => (
+                        <li key={rIdx}>{rule}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p style={{ margin: 0, color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.9rem', whiteSpace: 'pre-line' }}>
+                      {property.rules}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Owner / Host Information Card */}
+            <div
+              style={{
+                backgroundColor: '#FFFFFF',
+                border: '1px solid #E2E8F0',
+                borderRadius: '16px',
+                padding: '1.25rem',
+                marginBottom: '1rem',
+                boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '1rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div
+                  style={{
+                    width: '52px',
+                    height: '52px',
+                    borderRadius: '50%',
+                    backgroundColor: '#EFF6FF',
+                    color: 'var(--color-blue)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.35rem',
+                    fontWeight: 800,
+                    border: '2px solid #BFDBFE',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {property.owner?.avatar ? (
+                    <img src={property.owner.avatar} alt={ownerName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    ownerName.charAt(0) || '👤'
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                    {locale === 'ar' ? 'المالك / المعلن المسئول' : 'Host / Owner'}
+                  </div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-navy)' }}>
+                    {ownerName}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#16A34A', fontWeight: 600 }}>
+                    ✓ {locale === 'ar' ? 'حساب مالك معتمد وموثق لدى منصة داري' : 'Verified Host on Dary Platform'}
+                  </div>
+                </div>
+              </div>
+
+              {ownerPhone && (
+                <a
+                  href={`https://wa.me/${ownerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
+                    locale === 'ar'
+                      ? `مرحبًا، أنا مهتم بحجز السكن: ${displayTitle}`
+                      : `Hello, I am interested in booking: ${displayTitle}`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '10px',
+                    backgroundColor: '#25D366',
+                    color: '#FFFFFF',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    textDecoration: 'none',
+                    boxShadow: '0 3px 10px rgba(37, 211, 102, 0.25)',
+                  }}
+                >
+                  <span>💬</span>
+                  <span>{locale === 'ar' ? 'تواصل عبر واتساب' : 'Chat on WhatsApp'}</span>
+                </a>
+              )}
+            </div>
           </div>
 
-          {/* Price + CTA card */}
-          <div style={{ minWidth: '220px', border: '1px solid rgba(11,42,74,0.1)', borderRadius: '16px', padding: '1.5rem', background: '#fff', boxShadow: '0 4px 20px rgba(11,42,74,0.07)', flexShrink: 0 }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>
+          {/* ── Sidebar: Price & Booking Actions Card ────────────────────────── */}
+          <div style={{ position: 'sticky', top: '6rem', border: '1px solid rgba(11,42,74,0.1)', borderRadius: '20px', padding: '1.65rem', background: '#fff', boxShadow: '0 6px 24px rgba(11,42,74,0.08)' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '0.35rem' }}>
               {locale === 'ar' ? 'السعر الشهري' : 'Monthly Price'}
             </div>
-            <div style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--color-blue)', lineHeight: 1, marginBottom: '0.35rem' }}>
+            <div style={{ fontSize: '2.15rem', fontWeight: 900, color: 'var(--color-blue)', lineHeight: 1, marginBottom: '0.35rem' }}>
               {property.price.toLocaleString()}
             </div>
-            <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.5rem' }}>
-              {property.currency} / {locale === 'ar' ? 'شهر' : 'month'}
+            <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
+              {property.currency} / {locale === 'ar' ? 'شهرياً' : 'month'}
             </div>
+
+            {/* Deposit Breakdown */}
+            {property.deposit !== undefined && property.deposit > 0 && (
+              <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '0.75rem', marginBottom: '1.25rem' }}>
+                <div style={{ fontSize: '0.78rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                  {locale === 'ar' ? 'مبلغ التأمين المسترد:' : 'Security Deposit (Refundable):'}
+                </div>
+                <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-navy)' }}>
+                  🛡️ {property.deposit.toLocaleString()} {property.currency}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '2px' }}>
+                  {locale === 'ar' ? 'يُرد بالكامل عند انتهاء مدة الإقامة وتسليم الغرفة.' : 'Refunded upon checkout.'}
+                </div>
+              </div>
+            )}
 
             {isAdmin ? (
               <div style={{ backgroundColor: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '12px', padding: '1.25rem', textAlign: 'center', marginBottom: '0.75rem' }}>
@@ -553,19 +1256,24 @@ export default function PropertyDetailsPage() {
                   onClick={handleOpenBookingModal}
                   style={{
                     width: '100%',
-                    padding: '0.85rem',
-                    borderRadius: '10px',
+                    padding: '0.9rem',
+                    borderRadius: '12px',
                     background: 'var(--color-blue)',
                     color: '#fff',
-                    fontWeight: 700,
-                    fontSize: '0.95rem',
+                    fontWeight: 800,
+                    fontSize: '1rem',
                     border: 'none',
                     cursor: 'pointer',
                     marginBottom: '0.75rem',
-                    boxShadow: '0 4px 14px rgba(47, 107, 255, 0.3)',
+                    boxShadow: '0 4px 14px rgba(47, 107, 255, 0.35)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '8px',
                   }}
                 >
-                  {locale === 'ar' ? 'طلب حجز 📅' : 'Request to Book 📅'}
+                  <span>📅</span>
+                  <span>{locale === 'ar' ? 'طلب حجز سكن' : 'Request to Book'}</span>
                 </button>
 
                 <button
@@ -578,15 +1286,15 @@ export default function PropertyDetailsPage() {
                     borderRadius: '10px',
                     background: 'transparent',
                     color: isFavorite ? '#EF4444' : 'var(--color-navy)',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     fontSize: '0.9rem',
                     border: '1px solid rgba(11,42,74,0.15)',
                     cursor: 'pointer',
-                    marginTop: '0.5rem',
+                    marginTop: '0.35rem',
                   }}
                 >
                   {isFavorite
-                    ? (locale === 'ar' ? '❤️ محفوظ في المفضلة' : '❤️ Saved')
+                    ? (locale === 'ar' ? '❤️ محفوظ في المفضلة' : '❤️ Saved in Favorites')
                     : (locale === 'ar' ? '🤍 حفظ في المفضلة' : '🤍 Save to Favorites')}
                 </button>
 
@@ -620,13 +1328,192 @@ export default function PropertyDetailsPage() {
 
         {/* Footer Note (for students/guests only) */}
         {!isAdmin && !isOwner && (
-          <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '2rem', borderTop: '1px solid rgba(11,42,74,0.07)', paddingTop: '1rem' }}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)', marginTop: '2.5rem', borderTop: '1px solid rgba(11,42,74,0.07)', paddingTop: '1rem' }}>
             {locale === 'ar'
-              ? 'للحصول على مزيد من التفاصيل، قم بإرسال طلب الحجز وسيتواصل معك المشرف لتنسيق الحجز عبر الواتساب.'
-              : 'For more details, submit a booking request and an admin will coordinate with you via WhatsApp.'}
+              ? '💡 للحصول على مزيد من التفاصيل، قم بإرسال طلب الحجز وسيتواصل معك المشرف لتنسيق الحجز عبر الواتساب.'
+              : '💡 For more details, submit a booking request and an admin will coordinate with you via WhatsApp.'}
           </p>
         )}
       </div>
+
+      {/* ── Fullscreen Lightbox Modal ──────────────────────────────────────── */}
+      {isLightboxOpen && (
+        <div
+          onClick={() => setIsLightboxOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.94)',
+            backdropFilter: 'blur(10px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 99999,
+            padding: '1.5rem',
+          }}
+        >
+          {/* Lightbox Header Bar */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'absolute',
+              top: '20px',
+              insetInline: '24px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              zIndex: 10,
+            }}
+          >
+            <div style={{ color: '#FFFFFF', fontWeight: 700, fontSize: '1rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>📷</span>
+              <span>{activeImageIndex + 1} / {allImages.length}</span>
+              {getCategoryLabel(currentImage.category) && (
+                <span style={{ backgroundColor: 'rgba(255,255,255,0.2)', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>
+                  {getCategoryLabel(currentImage.category)}
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsLightboxOpen(false)}
+              style={{
+                width: '44px',
+                height: '44px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(255, 255, 255, 0.15)',
+                color: '#FFFFFF',
+                border: 'none',
+                fontSize: '1.4rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Centered Large Image with Nav Buttons */}
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'relative',
+              maxWidth: '92vw',
+              maxHeight: '75vh',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <img
+              src={currentImage.url}
+              alt={`${displayTitle} - Fullscreen`}
+              style={{
+                maxWidth: '90vw',
+                maxHeight: '74vh',
+                objectFit: 'contain',
+                borderRadius: '12px',
+                boxShadow: '0 10px 40px rgba(0,0,0,0.5)',
+              }}
+            />
+
+            {allImages.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={handlePrevImage}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    insetInlineStart: '-55px',
+                    transform: 'translateY(-50%)',
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    color: '#fff',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    {locale === 'ar' ? <polyline points="9 18 15 12 9 6" /> : <polyline points="15 18 9 12 15 6" />}
+                  </svg>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleNextImage}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    insetInlineEnd: '-55px',
+                    transform: 'translateY(-50%)',
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    color: '#fff',
+                    border: 'none',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    {locale === 'ar' ? <polyline points="15 18 9 12 15 6" /> : <polyline points="9 18 15 12 9 6" />}
+                  </svg>
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Bottom Thumbnails Strip in Lightbox */}
+          {allImages.length > 1 && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: 'absolute',
+                bottom: '20px',
+                display: 'flex',
+                gap: '8px',
+                overflowX: 'auto',
+                maxWidth: '90vw',
+                padding: '6px',
+              }}
+            >
+              {allImages.map((img, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => setActiveImageIndex(idx)}
+                  style={{
+                    width: '64px',
+                    height: '44px',
+                    borderRadius: '8px',
+                    overflow: 'hidden',
+                    border: activeImageIndex === idx ? '2px solid #3B82F6' : '1px solid rgba(255,255,255,0.3)',
+                    opacity: activeImageIndex === idx ? 1 : 0.5,
+                    cursor: 'pointer',
+                    padding: 0,
+                    backgroundColor: '#000',
+                  }}
+                >
+                  <img src={img.url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Booking Modal */}
       {bookingModalOpen && (

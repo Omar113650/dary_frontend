@@ -31,12 +31,23 @@ export interface Property {
   amenities?: string[];
   images?: Array<{ url: string; category?: string; isPrimary?: boolean } | string>;
   rooms_?: PropertyRoomItem[];
+  governorate?: string;
+  city?: string;
+  district?: string;
+  address?: string;
   nearestUniversity?: string;
   distanceToUniversity?: number;
   isFurnished?: boolean;
   electricityIncluded?: boolean;
   waterIncluded?: boolean;
   internetIncluded?: boolean;
+  propertyClass?: 'STANDARD' | 'LUXURY' | string;
+  targetTenantType?: 'STUDENT' | 'GENERAL' | 'ANY' | string;
+  genderAllowed?: 'male_only' | 'female_only' | 'any' | string;
+  deposit?: number;
+  floor?: number | string;
+  area?: number;
+  rules?: string[] | string;
   status?: string;
   owner?: {
     id?: string;
@@ -44,6 +55,9 @@ export interface Property {
     lastName?: string;
     avatar?: string;
     whatsappPhone?: string;
+    phone?: string;
+    email?: string;
+    name?: string;
   };
   [key: string]: any;
 }

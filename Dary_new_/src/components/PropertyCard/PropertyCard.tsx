@@ -20,6 +20,10 @@ export default function PropertyCard({ property }: PropertyCardProps) {
             alt={property.title[locale]}
             className="property-card-image"
             loading="lazy"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src =
+                'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=600&h=400&fit=crop';
+            }}
           />
           <span className="property-card-badge">{property.type[locale]}</span>
         </div>
