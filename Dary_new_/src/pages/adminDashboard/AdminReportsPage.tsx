@@ -155,7 +155,7 @@ export default function AdminReportsPage() {
   const statusMetrics = normalizeStatusList(reportsStatus);
 
   const filteredReports = priorityFilter
-    ? reports.filter((r) => r.priority === priorityFilter)
+    ? reports.filter((r) => String(r.priority || '').toUpperCase() === priorityFilter.toUpperCase())
     : reports;
 
   return (
