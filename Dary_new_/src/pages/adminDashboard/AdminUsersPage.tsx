@@ -3,14 +3,23 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminUserItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useAdminUsersStatus } from '../../hooks/useDashboardQueries';
+import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function AdminUsersPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
 
   const [users, setUsers] = useState<AdminUserItem[]>([]);
-  const [usersStatus, setUsersStatus] = useState<any>(null);
+  
+  // Cached: 30s staleTime
+  const {
+    data: usersStatus,
+    isLoading: loadingStatus,
+    refetch: fetchUsersStatus,
+  } = useAdminUsersStatus();
+  
   const [loading, setLoading] = useState(true);
-  const [loadingStatus, setLoadingStatus] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -31,30 +40,31 @@ export default function AdminUsersPage() {
   const [statusModalUser, setStatusModalUser] = useState<AdminUserItem | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<'ACTIVE' | 'INACTIVE' | 'SUSPENDED'>('ACTIVE');
 
-  // 1. Fetch Users Status counts
-  const fetchUsersStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    try {
-      const data = await AdminService.getUsersStatus();
-      setUsersStatus(data);
-    } catch (err: any) {
-      console.error('[AdminUsersPage] GET /dashboard/users/status failed:', err);
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, []);
-
   // 2. Fetch Users List
   const fetchUsers = useCallback(async () => {
-    setLoading(true);
+    const params: any = { page, limit: 10 };
+    if (search.trim()) params.search = search.trim();
+    if (roleFilter) params.role = roleFilter;
+    if (statusFilter) params.status = statusFilter;
+
+    const cacheKey = ['admin', 'users', params];
+    const cached = queryClient.getQueryData<any>(cacheKey);
+    if (cached) {
+      const list = cached?.users || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      setUsers(Array.isArray(list) ? list : []);
+      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
+      const limit = cached?.limit || 10;
+      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const params: any = { page, limit: 10 };
-      if (search.trim()) params.search = search.trim();
-      if (roleFilter) params.role = roleFilter;
-      if (statusFilter) params.status = statusFilter;
-
-      const data = await AdminService.getUsers(params);
+      const data = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => AdminService.getUsers(params),
+        staleTime: STALE_TIMES.LISTS,
+      });
       const list = data?.users || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setUsers(Array.isArray(list) ? list : []);
 
@@ -72,7 +82,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, search, roleFilter, statusFilter, locale]);
+  }, [page, search, roleFilter, statusFilter, locale, queryClient]);
 
   useEffect(() => {
     fetchUsersStatus();
@@ -100,6 +110,7 @@ export default function AdminUsersPage() {
         text: locale === 'ar' ? `تم تعيين الدور (${selectedRole}) بنجاح.` : `Role (${selectedRole}) assigned successfully.`,
       });
       setRoleModalUser(null);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       await Promise.all([fetchUsers(), fetchUsersStatus()]);
     } catch (err: any) {
       console.error('[AdminUsersPage] POST /roles/assign failed:', err);
@@ -131,6 +142,7 @@ export default function AdminUsersPage() {
         text: locale === 'ar' ? `تم تحديث حالة المستخدم إلى (${selectedStatus}) بنجاح.` : `User status updated to (${selectedStatus}) successfully.`,
       });
       setStatusModalUser(null);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
       await Promise.all([fetchUsers(), fetchUsersStatus()]);
     } catch (err: any) {
       console.error('[AdminUsersPage] PATCH /auth/users/:id/status failed:', err);

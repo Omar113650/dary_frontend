@@ -1,44 +1,36 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
 import type { RentalBooking } from '../../services/tenantService';
+import { useTenantRentals } from '../../hooks/useDashboardQueries';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function RentalsPage() {
   const { locale } = useLocale();
-  const [rentals, setRentals] = useState<RentalBooking[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  // Cached: 30s staleTime
+  const {
+    data: rawRentals,
+    isLoading: loading,
+    error: queryErr,
+    refetch: fetchRentals,
+  } = useTenantRentals();
+
+  const rentals: RentalBooking[] = Array.isArray(rawRentals) ? rawRentals : [];
+  const error = queryErr
+    ? (queryErr as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل الإيجارات والحجوزات من الخادم.'
+        : 'Could not load rentals and bookings from the server.')
+    : null;
 
   // Cancellation modal state
   const [cancellingBooking, setCancellingBooking] = useState<RentalBooking | null>(null);
   const [cancelNote, setCancelNote] = useState('');
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
-
-  const fetchRentals = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // STRICTLY GET /dashboard/rentals
-      const data = await TenantService.getRentals();
-      setRentals(data);
-    } catch (err: any) {
-      console.error('[RentalsPage] GET /dashboard/rentals failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل الإيجارات والحجوزات من الخادم.'
-            : 'Could not load rentals and bookings from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    fetchRentals();
-  }, [fetchRentals]);
 
   async function handleConfirmCancel() {
     if (!cancellingBooking) return;
@@ -55,6 +47,7 @@ export default function RentalsPage() {
     setCancelError(null);
     try {
       await TenantService.cancelBooking(cancellingBooking.id, cancelNote);
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'rentals'] });
       // Refresh list
       await fetchRentals();
       setCancellingBooking(null);

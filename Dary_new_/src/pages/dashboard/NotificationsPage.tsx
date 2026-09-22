@@ -1,13 +1,37 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { NotificationService } from '../../services/notificationService';
 import type { NotificationItem } from '../../services/notificationService';
+import { useNotifications } from '../../hooks/useDashboardQueries';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function NotificationsPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
+
+  // Cached: 10s staleTime (Live data)
+  const {
+    data: cachedNotifications,
+    isLoading: loading,
+    error: queryErr,
+    refetch: fetchNotifications,
+  } = useNotifications(1, 50);
+
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cachedNotifications) {
+      setNotifications(cachedNotifications);
+    }
+  }, [cachedNotifications]);
+
+  const error = queryErr
+    ? (queryErr as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل الإشعارات من الخادم.'
+        : 'Could not load notifications from the server.')
+    : null;
+
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const [isDeletingRead, setIsDeletingRead] = useState(false);
   const [filterTab, setFilterTab] = useState<'ALL' | 'UNREAD' | 'READ'>('ALL');
@@ -20,36 +44,13 @@ export default function NotificationsPage() {
     }
   }, [actionMessage]);
 
-  const fetchNotifications = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await NotificationService.getNotifications({ page: 1, limit: 50 });
-      const items = Array.isArray(res) ? res : (res?.items || []);
-      setNotifications(items);
-    } catch (err: any) {
-      console.error('[NotificationsPage] GET /notifications failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل الإشعارات من الخادم.'
-            : 'Could not load notifications from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
-
   async function handleMarkAsRead(id: string) {
     try {
       await NotificationService.markAsRead(id);
       setNotifications((prev) =>
         prev.map((n) => (n.id === id ? { ...n, isRead: true, read: true } : n))
       );
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     } catch (err) {
       console.error('[NotificationsPage] Mark as read error:', err);
     }
@@ -67,6 +68,7 @@ export default function NotificationsPage() {
         type: 'success',
         text: locale === 'ar' ? 'تم تحديد جميع الإشعارات كمقروءة.' : 'All notifications marked as read.',
       });
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
     } catch (err: any) {
       console.error('[NotificationsPage] Mark all read error:', err);
       setActionMessage({
@@ -82,6 +84,7 @@ export default function NotificationsPage() {
     try {
       await NotificationService.deleteNotification(id);
       setNotifications((prev) => prev.filter((n) => n.id !== id));
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
       setActionMessage({
         type: 'success',
         text: locale === 'ar' ? 'تم حذف الإشعار.' : 'Notification deleted.',

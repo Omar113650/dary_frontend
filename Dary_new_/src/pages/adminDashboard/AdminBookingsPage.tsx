@@ -3,15 +3,34 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminBookingItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useAdminBookingsStatus, useAdminRevenue } from '../../hooks/useDashboardQueries';
+import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function AdminBookingsPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
 
   const [bookings, setBookings] = useState<AdminBookingItem[]>([]);
-  const [bookingsStatus, setBookingsStatus] = useState<any>(null);
-  const [revenueData, setRevenueData] = useState<any>(null);
+  
+  // Cached metrics (5m)
+  const {
+    data: bookingsStatus,
+    isLoading: loadingStatus,
+    refetch: fetchBookingsStatus,
+  } = useAdminBookingsStatus();
+
+  const {
+    data: revenueData,
+    isLoading: loadingRevenue,
+    refetch: fetchRevenue,
+  } = useAdminRevenue();
+
+  const loadingMetrics = loadingStatus || loadingRevenue;
+  const fetchMetrics = useCallback(async () => {
+    await Promise.allSettled([fetchBookingsStatus(), fetchRevenue()]);
+  }, [fetchBookingsStatus, fetchRevenue]);
+
   const [loading, setLoading] = useState(true);
-  const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filters
@@ -19,33 +38,26 @@ export default function AdminBookingsPage() {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  // 1. Fetch Bookings Metrics & Revenue
-  const fetchMetrics = useCallback(async () => {
-    setLoadingMetrics(true);
-    try {
-      const [statusRes, revRes] = await Promise.allSettled([
-        AdminService.getBookingsStatus(),
-        AdminService.getBookingsRevenue(),
-      ]);
-      if (statusRes.status === 'fulfilled') {
-        setBookingsStatus(statusRes.value);
-      }
-      if (revRes.status === 'fulfilled') {
-        setRevenueData(revRes.value);
-      }
-    } catch (err: any) {
-      console.error('[AdminBookingsPage] metrics fetch failed:', err);
-    } finally {
-      setLoadingMetrics(false);
-    }
-  }, []);
-
   // 2. Fetch Bookings List
   const fetchBookings = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = ['admin', 'bookings', { page, limit: 10 }];
+    const cached = queryClient.getQueryData<any>(cacheKey);
+    if (cached) {
+      const list = cached?.bookings || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      setBookings(Array.isArray(list) ? list : []);
+      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
+      const limit = cached?.limit || 10;
+      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const data = await AdminService.getBookings({ page, limit: 10 });
+      const data = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => AdminService.getBookings({ page, limit: 10 }),
+        staleTime: STALE_TIMES.LISTS,
+      });
       const list = data?.bookings || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setBookings(Array.isArray(list) ? list : []);
 
@@ -63,7 +75,7 @@ export default function AdminBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale]);
+  }, [page, locale, queryClient]);
 
   useEffect(() => {
     fetchMetrics();
@@ -146,6 +158,8 @@ export default function AdminBookingsPage() {
         type: 'success',
         text: locale === 'ar' ? `تم تحديث حالة الحجز إلى "${status}" بنجاح.` : `Booking status updated to "${status}" successfully.`,
       });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
       await Promise.all([fetchBookings(), fetchMetrics()]);
     } catch (e: any) {
       setActionMessage({
@@ -169,6 +183,8 @@ export default function AdminBookingsPage() {
       });
       setCancelModalBookingId(null);
       setCancelReason('');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
       await Promise.all([fetchBookings(), fetchMetrics()]);
     } catch (e: any) {
       setActionMessage({

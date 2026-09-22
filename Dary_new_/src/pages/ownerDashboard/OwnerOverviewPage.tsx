@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
-import { OwnerService } from '../../services/ownerService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import {
+  useOwnerPropertiesStatus,
+  useOwnerMyProperties,
+  useOwnerBookingsStatus,
+  useOwnerRevenue,
+  useOwnerCalendar,
+} from '../../hooks/useDashboardQueries';
 
 export default function OwnerOverviewPage() {
   const { user } = useAuth();
@@ -19,128 +24,68 @@ export default function OwnerOverviewPage() {
     user?.email?.split('@')[0] ||
     (locale === 'ar' ? 'المالك' : 'Owner');
 
-  // 1. Property Status State
-  const [propertiesStatus, setPropertiesStatus] = useState<any>(null);
-  const [loadingProps, setLoadingProps] = useState(true);
-  const [propsError, setPropsError] = useState<string | null>(null);
+  // 1. Property Status Query (staleTime: 30s)
+  const {
+    data: propertiesStatus,
+    isLoading: loadingProps,
+    error: propsErrorObj,
+    refetch: fetchPropertiesStatus,
+  } = useOwnerPropertiesStatus();
+  const propsError = propsErrorObj
+    ? (propsErrorObj as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل حالة العقارات من الخادم.'
+        : 'Could not load properties status from the server.')
+    : null;
 
-  // 1b. Real Properties List State
-  const [myPropertiesList, setMyPropertiesList] = useState<any[]>([]);
-  const [loadingMyProps, setLoadingMyProps] = useState(true);
+  // 1b. Real Properties List Query (staleTime: 5m, Semi-static)
+  const {
+    data: rawMyProperties,
+    isLoading: loadingMyProps,
+  } = useOwnerMyProperties();
+  const myPropertiesList = Array.isArray(rawMyProperties) ? rawMyProperties : [];
 
-  // 2. Booking Status State
-  const [bookingsStatus, setBookingsStatus] = useState<any>(null);
-  const [loadingBookings, setLoadingBookings] = useState(true);
-  const [bookingsError, setBookingsError] = useState<string | null>(null);
+  // 2. Booking Status Query (staleTime: 30s)
+  const {
+    data: bookingsStatus,
+    isLoading: loadingBookings,
+    error: bookingsErrorObj,
+    refetch: fetchBookingsStatus,
+  } = useOwnerBookingsStatus();
+  const bookingsError = bookingsErrorObj
+    ? (bookingsErrorObj as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل حالة الحجوزات من الخادم.'
+        : 'Could not load bookings status from the server.')
+    : null;
 
-  // 3. Revenue State
-  const [revenueData, setRevenueData] = useState<any>(null);
-  const [loadingRevenue, setLoadingRevenue] = useState(true);
-  const [revenueError, setRevenueError] = useState<string | null>(null);
+  // 3. Revenue Query (staleTime: 30s)
+  const {
+    data: revenueData,
+    isLoading: loadingRevenue,
+    error: revenueErrorObj,
+    refetch: fetchRevenue,
+  } = useOwnerRevenue();
+  const revenueError = revenueErrorObj
+    ? (revenueErrorObj as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل بيانات الإيرادات من الخادم.'
+        : 'Could not load revenue data from the server.')
+    : null;
 
-  // 4. Calendar State
-  const [calendarData, setCalendarData] = useState<any>(null);
-  const [loadingCalendar, setLoadingCalendar] = useState(true);
-  const [calendarError, setCalendarError] = useState<string | null>(null);
-
-  // Fetch Section A: Properties Status & List
-  const fetchPropertiesStatus = useCallback(async () => {
-    setLoadingProps(true);
-    setLoadingMyProps(true);
-    setPropsError(null);
-    try {
-      const [statusData, propsData] = await Promise.allSettled([
-        OwnerService.getPropertiesStatus(),
-        OwnerService.getMyProperties(),
-      ]);
-
-      if (statusData.status === 'fulfilled') {
-        setPropertiesStatus(statusData.value);
-      }
-      if (propsData.status === 'fulfilled') {
-        setMyPropertiesList(Array.isArray(propsData.value) ? propsData.value : []);
-      }
-    } catch (err: any) {
-      console.error('[OwnerOverview] Properties status fetch failed:', err);
-      setPropsError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل حالة العقارات من الخادم.'
-            : 'Could not load properties status from the server.')
-      );
-    } finally {
-      setLoadingProps(false);
-      setLoadingMyProps(false);
-    }
-  }, [locale]);
-
-  // Fetch Section B: Bookings Status
-  const fetchBookingsStatus = useCallback(async () => {
-    setLoadingBookings(true);
-    setBookingsError(null);
-    try {
-      const data = await OwnerService.getBookingsStatus();
-      setBookingsStatus(data);
-    } catch (err: any) {
-      console.error('[OwnerOverview] Bookings status fetch failed:', err);
-      setBookingsError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل حالة الحجوزات من الخادم.'
-            : 'Could not load bookings status from the server.')
-      );
-    } finally {
-      setLoadingBookings(false);
-    }
-  }, [locale]);
-
-  // Fetch Section C: Revenue
-  const fetchRevenue = useCallback(async () => {
-    setLoadingRevenue(true);
-    setRevenueError(null);
-    try {
-      const data = await OwnerService.getRevenue();
-      setRevenueData(data);
-    } catch (err: any) {
-      console.error('[OwnerOverview] Revenue fetch failed:', err);
-      setRevenueError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل بيانات الإيرادات من الخادم.'
-            : 'Could not load revenue data from the server.')
-      );
-    } finally {
-      setLoadingRevenue(false);
-    }
-  }, [locale]);
-
-  // Fetch Section D: Calendar Summary
-  const fetchCalendar = useCallback(async () => {
-    setLoadingCalendar(true);
-    setCalendarError(null);
-    try {
-      const data = await OwnerService.getCalendarSummary();
-      setCalendarData(data);
-    } catch (err: any) {
-      console.error('[OwnerOverview] Calendar summary fetch failed:', err);
-      setCalendarError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل ملخص التقويم من الخادم.'
-            : 'Could not load calendar summary from the server.')
-      );
-    } finally {
-      setLoadingCalendar(false);
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    fetchPropertiesStatus();
-    fetchBookingsStatus();
-    fetchRevenue();
-    fetchCalendar();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // 4. Calendar Query (staleTime: 30s)
+  const {
+    data: calendarData,
+    isLoading: loadingCalendar,
+    error: calendarErrorObj,
+    refetch: fetchCalendar,
+  } = useOwnerCalendar();
+  const calendarError = calendarErrorObj
+    ? (calendarErrorObj as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل ملخص التقويم من الخادم.'
+        : 'Could not load calendar summary from the server.')
+    : null;
 
   // Helper to safely parse status counts
   function extractStatusEntries(raw: any): Array<{ status: string; count: number }> {

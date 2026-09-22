@@ -5,17 +5,30 @@ import type {
   OwnerPropertyItem,
   OwnerPropertyBookingItem,
 } from '../../services/ownerService';
+import { useOwnerBookingsStatus, useOwnerMyProperties } from '../../hooks/useDashboardQueries';
+import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function OwnerBookingsPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
 
-  // Booking status breakdown
-  const [, setBookingStatusData] = useState<any>(null);
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  // Booking status breakdown (Cached: 30s)
+  const {
+    data: bookingStatusData,
+    isLoading: loadingStatus,
+    error: statusErrorObj,
+    refetch: fetchStatus,
+  } = useOwnerBookingsStatus();
+  const statusError = statusErrorObj
+    ? (statusErrorObj as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل إحصائيات الحجوزات من الخادم.'
+        : 'Could not load bookings status from the server.')
+    : null;
 
-  // Properties to select from
-  const [properties, setProperties] = useState<OwnerPropertyItem[]>([]);
+  // Properties to select from (Cached: 5m, Semi-static)
+  const { data: rawProperties } = useOwnerMyProperties();
+  const properties: OwnerPropertyItem[] = Array.isArray(rawProperties) ? rawProperties : [];
   const [selectedPropId, setSelectedPropId] = useState<string>('ALL');
 
   // Active status filter tab
@@ -36,28 +49,19 @@ export default function OwnerBookingsPage() {
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [modalNote, setModalNote] = useState<string>('');
 
-  const fetchStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    setStatusError(null);
-    try {
-      const data = await OwnerService.getBookingsStatus();
-      setBookingStatusData(data);
-    } catch (err: any) {
-      console.error('[OwnerBookingsPage] Bookings status fetch failed:', err);
-      setStatusError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل إحصائيات الحجوزات من الخادم.'
-            : 'Could not load bookings status from the server.')
-      );
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, [locale]);
-
   const loadBookingsForProperty = useCallback(
     async (propId: string, currentProps: OwnerPropertyItem[]) => {
-      setLoadingBookings(true);
+      const cacheKey =
+        propId === 'ALL' || !propId
+          ? ['owner', 'all-properties-bookings']
+          : ['owner', 'properties', propId, 'bookings'];
+
+      const cached = queryClient.getQueryData<any[]>(cacheKey);
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setPropertyBookings(cached);
+      } else {
+        setLoadingBookings(true);
+      }
       setBookingsError(null);
       try {
         if (propId === 'ALL' || !propId) {
@@ -65,31 +69,44 @@ export default function OwnerBookingsPage() {
             setPropertyBookings([]);
             return;
           }
-          // Fetch bookings for all owner properties in parallel
-          const settled = await Promise.allSettled(
-            currentProps.map(async (p) => {
-              const res = await OwnerService.getPropertyBookings(p.id);
-              return res.map((b: any) => ({
-                ...b,
-                property: b.property || p,
-              }));
-            })
-          );
-          const aggregated: any[] = [];
-          for (const item of settled) {
-            if (item.status === 'fulfilled' && Array.isArray(item.value)) {
-              aggregated.push(...item.value);
-            }
-          }
-          // Sort newest bookings first
-          aggregated.sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
-          setPropertyBookings(aggregated);
+          const aggregated = await queryClient.fetchQuery({
+            queryKey: ['owner', 'all-properties-bookings'],
+            queryFn: async () => {
+              const settled = await Promise.allSettled(
+                currentProps.map(async (p) => {
+                  const res = await queryClient.fetchQuery({
+                    queryKey: ['owner', 'properties', p.id, 'bookings'],
+                    queryFn: () => OwnerService.getPropertyBookings(p.id),
+                    staleTime: STALE_TIMES.LISTS,
+                  });
+                  return (Array.isArray(res) ? res : []).map((b: any) => ({
+                    ...b,
+                    property: b.property || p,
+                  }));
+                })
+              );
+              const items: any[] = [];
+              for (const item of settled) {
+                if (item.status === 'fulfilled' && Array.isArray(item.value)) {
+                  items.push(...item.value);
+                }
+              }
+              items.sort(
+                (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+              );
+              return items;
+            },
+            staleTime: STALE_TIMES.LISTS,
+          });
+          setPropertyBookings(Array.isArray(aggregated) ? aggregated : []);
         } else {
-          const data = await OwnerService.getPropertyBookings(propId);
+          const data = await queryClient.fetchQuery({
+            queryKey: ['owner', 'properties', propId, 'bookings'],
+            queryFn: () => OwnerService.getPropertyBookings(propId),
+            staleTime: STALE_TIMES.LISTS,
+          });
           const curProp = currentProps.find((p) => p.id === propId);
-          const enriched = data.map((b: any) => ({
+          const enriched = (Array.isArray(data) ? data : []).map((b: any) => ({
             ...b,
             property: b.property || curProp,
           }));
@@ -111,25 +128,21 @@ export default function OwnerBookingsPage() {
         setLoadingBookings(false);
       }
     },
-    [locale]
+    [locale, queryClient]
   );
 
   const reloadAll = useCallback(async () => {
     fetchStatus();
-    try {
-      const list = await OwnerService.getMyProperties();
-      const safeList = Array.isArray(list) ? list : [];
-      setProperties(safeList);
-      await loadBookingsForProperty(selectedPropId, safeList);
-    } catch (err) {
-      console.warn('[OwnerBookingsPage] Could not load properties list:', err);
+    if (properties.length > 0) {
+      await loadBookingsForProperty(selectedPropId, properties);
     }
-  }, [fetchStatus, loadBookingsForProperty, selectedPropId]);
+  }, [fetchStatus, loadBookingsForProperty, selectedPropId, properties]);
 
   useEffect(() => {
-    reloadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (properties.length > 0) {
+      loadBookingsForProperty(selectedPropId, properties);
+    }
+  }, [loadBookingsForProperty, selectedPropId, properties]);
 
   // Update Booking Status Handler
   const handleUpdateStatus = async (bookingId: string, newStatus: string, note?: string) => {
@@ -165,8 +178,9 @@ export default function OwnerBookingsPage() {
           : `✓ Booking status updated to: ${statusLabels[newStatus] || newStatus}`
       );
 
-      // Refresh overview statistics in background
-      fetchStatus();
+      // Invalidate and refresh cache
+      queryClient.invalidateQueries({ queryKey: ['owner', 'bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['owner', 'revenue'] });
     } catch (err: any) {
       console.error('[OwnerBookingsPage] Update status failed:', err);
       setActionErrorMessage(

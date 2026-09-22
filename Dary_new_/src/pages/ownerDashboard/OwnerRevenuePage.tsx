@@ -1,36 +1,24 @@
-import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
-import { OwnerService } from '../../services/ownerService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useOwnerRevenue } from '../../hooks/useDashboardQueries';
 
 export default function OwnerRevenuePage() {
   const { locale } = useLocale();
-  const [revenueData, setRevenueData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchRevenue = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await OwnerService.getRevenue();
-      setRevenueData(data);
-    } catch (err: any) {
-      console.error('[OwnerRevenuePage] Revenue fetch failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل بيانات الإيرادات من الخادم.'
-            : 'Could not load revenue data from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
+  // Cached: 30s staleTime
+  const {
+    data: revenueData,
+    isLoading: loading,
+    error: queryError,
+    refetch: fetchRevenue,
+  } = useOwnerRevenue();
 
-  useEffect(() => {
-    fetchRevenue();
-  }, [fetchRevenue]);
+  const error = queryError
+    ? (queryError as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل بيانات الإيرادات من الخادم.'
+        : 'Could not load revenue data from the server.')
+    : null;
 
   // Defensive extraction
   const parsedTotal =

@@ -3,14 +3,23 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminReportItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useAdminReportsStatus } from '../../hooks/useDashboardQueries';
+import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function AdminReportsPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
 
   const [reports, setReports] = useState<AdminReportItem[]>([]);
-  const [reportsStatus, setReportsStatus] = useState<any>(null);
+  
+  // Cached: 5m staleTime
+  const {
+    data: reportsStatus,
+    isLoading: loadingStatus,
+    refetch: fetchStatus,
+  } = useAdminReportsStatus();
+
   const [loading, setLoading] = useState(true);
-  const [loadingStatus, setLoadingStatus] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -25,25 +34,26 @@ export default function AdminReportsPage() {
   const [isSubmittingResolve, setIsSubmittingResolve] = useState(false);
   const [updatingPriorityId, setUpdatingPriorityId] = useState<string | null>(null);
 
-  // 1. Fetch Reports Status
-  const fetchStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    try {
-      const data = await AdminService.getReportsStatus();
-      setReportsStatus(data);
-    } catch (err: any) {
-      console.error('[AdminReportsPage] GET /dashboard/reports/status failed:', err);
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, []);
-
   // 2. Fetch Reports List
   const fetchReports = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = ['admin', 'reports', { page, limit: 10 }];
+    const cached = queryClient.getQueryData<any>(cacheKey);
+    if (cached) {
+      const list = cached?.reports || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      setReports(Array.isArray(list) ? list : []);
+      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
+      const limit = cached?.limit || 10;
+      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const data = await AdminService.getReports({ page, limit: 10 });
+      const data = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => AdminService.getReports({ page, limit: 10 }),
+        staleTime: STALE_TIMES.LISTS,
+      });
       const list = data?.reports || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setReports(Array.isArray(list) ? list : []);
 
@@ -61,7 +71,7 @@ export default function AdminReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale]);
+  }, [page, locale, queryClient]);
 
   useEffect(() => {
     fetchStatus();
@@ -82,6 +92,7 @@ export default function AdminReportsPage() {
         type: 'success',
         text: locale === 'ar' ? `تم تغيير أولوية البلاغ إلى ${priority.toUpperCase()}.` : `Report priority updated to ${priority.toUpperCase()}.`,
       });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] });
       fetchReports();
     } catch (err: any) {
       console.error('[AdminReportsPage] updateReportPriority failed:', err);
@@ -108,6 +119,7 @@ export default function AdminReportsPage() {
       });
       setResolvingReport(null);
       setResolutionNotes('');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'reports'] });
       fetchReports();
       fetchStatus();
     } catch (err: any) {

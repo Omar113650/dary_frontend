@@ -4,6 +4,7 @@ import { LocaleContext } from './utils/LocaleContext';
 import { translations, getDirection } from './utils/i18n';
 import type { Locale } from './utils/i18n';
 import { AuthProvider } from './context/AuthContext';
+import { QueryClientProvider, defaultQueryClient } from './lib/queryClient';
 import TenantRoute from './components/auth/TenantRoute';
 import DashboardLayout from './components/dashboard/DashboardLayout';
 import DashboardOverviewPage from './pages/dashboard/DashboardOverviewPage';
@@ -59,8 +60,9 @@ export default function App() {
   }, [locale, direction]);
 
   return (
-    <LocaleContext.Provider value={{ locale, setLocale, t, direction }}>
-      <AuthProvider>
+    <QueryClientProvider client={defaultQueryClient}>
+      <LocaleContext.Provider value={{ locale, setLocale, t, direction }}>
+        <AuthProvider>
         <BrowserRouter>
           <Routes>
             {/* Standalone full-viewport Authentication routes */}
@@ -187,8 +189,8 @@ export default function App() {
             </Route>
           </Routes>
         </BrowserRouter>
-      </AuthProvider>
-    </LocaleContext.Provider>
+        </AuthProvider>
+      </LocaleContext.Provider>
+    </QueryClientProvider>
   );
 }
-

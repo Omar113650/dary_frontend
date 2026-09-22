@@ -1,36 +1,25 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
-import { OwnerService } from '../../services/ownerService';
+import { useOwnerCalendar } from '../../hooks/useDashboardQueries';
 
 export default function OwnerCalendarPage() {
   const { locale } = useLocale();
-  const [calendarData, setCalendarData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [daysFilter, setDaysFilter] = useState<number>(30);
 
-  const fetchCalendar = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await OwnerService.getCalendarSummary({ days: daysFilter });
-      setCalendarData(data);
-    } catch (err: any) {
-      console.error('[OwnerCalendarPage] Calendar summary fetch failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل ملخص التقويم من الخادم.'
-            : 'Could not load calendar summary from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale, daysFilter]);
+  // Cached: 30s staleTime per daysFilter
+  const {
+    data: calendarData,
+    isLoading: loading,
+    error: queryError,
+    refetch: fetchCalendar,
+  } = useOwnerCalendar(daysFilter);
 
-  useEffect(() => {
-    fetchCalendar();
-  }, [fetchCalendar]);
+  const error = queryError
+    ? (queryError as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل ملخص التقويم من الخادم.'
+        : 'Could not load calendar summary from the server.')
+    : null;
 
   const activeBookings = calendarData?.activeBookings ?? 0;
   const upcomingBookings = calendarData?.upcomingBookings ?? 0;

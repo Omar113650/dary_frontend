@@ -1,40 +1,29 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
-import { OwnerService } from '../../services/ownerService';
 import type { OwnerPropertyItem } from '../../services/ownerService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
-  const [properties, setProperties] = useState<OwnerPropertyItem[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const fetchProperties = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Confirmed endpoint: GET /properties/my
-      const data = await OwnerService.getMyProperties();
-      setProperties(data);
-    } catch (err: any) {
-      console.error('[OwnerPropertiesPage] GET /properties/my failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل عقاراتك من الخادم.'
-            : 'Could not load your properties from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
+  // Semi-static cache: 5 minutes staleTime
+  const {
+    data: rawProperties,
+    isLoading: loading,
+    error: queryError,
+    refetch: fetchProperties,
+  } = useOwnerMyProperties();
 
-  useEffect(() => {
-    fetchProperties();
-  }, [fetchProperties]);
+  const properties: OwnerPropertyItem[] = Array.isArray(rawProperties) ? rawProperties : [];
+  const error = queryError
+    ? (queryError as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل عقاراتك من الخادم.'
+        : 'Could not load your properties from the server.')
+    : null;
 
   const [searchQuery, setSearchQuery] = useState('');
 

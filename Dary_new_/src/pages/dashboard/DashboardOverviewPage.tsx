@@ -1,9 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useLocation, useOutletContext } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
-import { TenantService } from '../../services/tenantService';
-import { propertyService } from '../../services/propertyService';
 import type { Property } from '../../types/property';
 import type {
   RentalBooking,
@@ -11,6 +9,12 @@ import type {
   SavedSearchItem,
 } from '../../services/tenantService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import {
+  useTenantRentals,
+  useTenantFavorites,
+  useTenantSavedSearches,
+  useFeaturedProperties,
+} from '../../hooks/useDashboardQueries';
 
 export default function DashboardOverviewPage() {
   const { user } = useAuth();
@@ -19,72 +23,43 @@ export default function DashboardOverviewPage() {
   const basePath = location.pathname.startsWith('/dashboard-preview') ? '/dashboard-preview' : '/dashboard';
   const outletCtx = useOutletContext<{ unreadCount?: number }>() || {};
 
-  const [loadingRentals, setLoadingRentals] = useState(true);
-  const [rentals, setRentals] = useState<RentalBooking[]>([]);
-  const [rentalsError, setRentalsError] = useState<string | null>(null);
+  // 1. Rentals (30s)
+  const {
+    data: rawRentals,
+    isLoading: loadingRentals,
+    error: rentalsErr,
+    refetch: fetchRentals,
+  } = useTenantRentals();
+  const rentals: RentalBooking[] = Array.isArray(rawRentals) ? rawRentals : [];
+  const rentalsError = rentalsErr ? (rentalsErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل بيانات الإيجارات من الخادم.' : 'Could not load rentals from the server.') : null;
 
-  const [favorites, setFavorites] = useState<FavoriteItem[]>([]);
-  const [savedSearches, setSavedSearches] = useState<SavedSearchItem[]>([]);
+  // 2. Favorites (5m)
+  const { data: rawFavorites } = useTenantFavorites();
+  const favorites: FavoriteItem[] = Array.isArray(rawFavorites) ? rawFavorites : [];
+
+  // 3. Saved Searches (5m)
+  const { data: rawSavedSearches } = useTenantSavedSearches();
+  const savedSearches: SavedSearchItem[] = Array.isArray(rawSavedSearches) ? rawSavedSearches : [];
+
+  // 4. Featured Properties (5m)
+  const {
+    data: rawFeatured,
+    isLoading: loadingProperties,
+  } = useFeaturedProperties(6);
+  const featuredProperties: Property[] = Array.isArray(rawFeatured) ? rawFeatured : [];
+
   const [unreadNotifications, setUnreadNotifications] = useState<number>(outletCtx.unreadCount ?? 0);
-
-  const [featuredProperties, setFeaturedProperties] = useState<Property[]>([]);
-  const [loadingProperties, setLoadingProperties] = useState<boolean>(true);
 
   const firstName =
     user?.name?.split(' ')[0] ||
     user?.email?.split('@')[0] ||
     (locale === 'ar' ? 'طالبنا العزيز' : 'Student');
 
-  // Load Rentals strictly using GET /dashboard/rentals
-  const fetchRentals = useCallback(async () => {
-    setLoadingRentals(true);
-    setRentalsError(null);
-    try {
-      const data = await TenantService.getRentals();
-      setRentals(data);
-    } catch (err: any) {
-      console.error('[DashboardOverview] GET /dashboard/rentals failed:', err);
-      setRentalsError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل بيانات الإيجارات من الخادم.'
-            : 'Could not load rentals from the server.')
-      );
-    } finally {
-      setLoadingRentals(false);
-    }
-  }, [locale]);
-
-  // Load other metrics & featured properties
-  const fetchOtherData = useCallback(async () => {
-    TenantService.getFavorites()
-      .then(setFavorites)
-      .catch((err) => console.warn('[Overview] Favorites load error:', err));
-
-    TenantService.getSavedSearches()
-      .then(setSavedSearches)
-      .catch((err) => console.warn('[Overview] Saved searches error:', err));
-
-    setLoadingProperties(true);
-    propertyService
-      .getProperties({ limit: 6 })
-      .then((props) => {
-        setFeaturedProperties(props);
-      })
-      .catch((err) => console.warn('[Overview] Properties load error:', err))
-      .finally(() => setLoadingProperties(false));
-  }, []);
-
   useEffect(() => {
     if (outletCtx.unreadCount !== undefined) {
       setUnreadNotifications(outletCtx.unreadCount);
     }
   }, [outletCtx.unreadCount]);
-
-  useEffect(() => {
-    fetchRentals();
-    fetchOtherData();
-  }, [fetchRentals, fetchOtherData]);
 
   function getStatusBadge(status: string) {
     const s = (status || '').toUpperCase();

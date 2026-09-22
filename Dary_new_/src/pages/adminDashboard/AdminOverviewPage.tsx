@@ -1,10 +1,17 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
-import { AdminService } from '../../services/adminService';
 import type { AdminStatusCount, AdminReportItem } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import {
+  useAdminUsersStatus,
+  useAdminPropertiesStatus,
+  useAdminBookingsStatus,
+  useAdminRevenue,
+  useAdminReportsStatus,
+  useAdminAnalytics,
+  useAdminRecentReports,
+} from '../../hooks/useDashboardQueries';
 
 export default function AdminOverviewPage() {
   const { user } = useAuth();
@@ -17,158 +24,63 @@ export default function AdminOverviewPage() {
     user?.email?.split('@')[0] ||
     (locale === 'ar' ? 'المدير' : 'Admin');
 
-  // Status & Metric States
-  const [usersStatus, setUsersStatus] = useState<any>(null);
-  const [loadingUsers, setLoadingUsers] = useState(true);
-  const [usersError, setUsersError] = useState<string | null>(null);
+  // Status & Metric Queries (Cached: 30s)
+  const {
+    data: usersStatus,
+    isLoading: loadingUsers,
+    error: usersErr,
+    refetch: fetchUsersStatus,
+  } = useAdminUsersStatus();
+  const usersError = usersErr ? (usersErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات المستخدمين.' : 'Could not load users status.') : null;
 
-  const [propertiesStatus, setPropertiesStatus] = useState<any>(null);
-  const [loadingProps, setLoadingProps] = useState(true);
-  const [propsError, setPropsError] = useState<string | null>(null);
+  const {
+    data: propertiesStatus,
+    isLoading: loadingProps,
+    error: propsErr,
+    refetch: fetchPropsStatus,
+  } = useAdminPropertiesStatus();
+  const propsError = propsErr ? (propsErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات العقارات.' : 'Could not load properties status.') : null;
 
-  const [bookingsStatus, setBookingsStatus] = useState<any>(null);
-  const [loadingBookings, setLoadingBookings] = useState(true);
-  const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const {
+    data: bookingsStatus,
+    isLoading: loadingBookings,
+    error: bookingsErr,
+    refetch: fetchBookingsStatus,
+  } = useAdminBookingsStatus();
+  const bookingsError = bookingsErr ? (bookingsErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات الحجوزات.' : 'Could not load bookings status.') : null;
 
-  const [revenueData, setRevenueData] = useState<any>(null);
-  const [loadingRevenue, setLoadingRevenue] = useState(true);
-  const [revenueError, setRevenueError] = useState<string | null>(null);
+  const {
+    data: revenueData,
+    isLoading: loadingRevenue,
+    error: revenueErr,
+    refetch: fetchRevenue,
+  } = useAdminRevenue();
+  const revenueError = revenueErr ? (revenueErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات الإيرادات.' : 'Could not load revenue data.') : null;
 
-  const [reportsStatus, setReportsStatus] = useState<any>(null);
-  const [loadingReportsStatus, setLoadingReportsStatus] = useState(true);
-  const [reportsStatusError, setReportsStatusError] = useState<string | null>(null);
+  const {
+    data: reportsStatus,
+    isLoading: loadingReportsStatus,
+    error: reportsStatusErr,
+    refetch: fetchReportsStatus,
+  } = useAdminReportsStatus();
+  const reportsStatusError = reportsStatusErr ? (reportsStatusErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات البلاغات.' : 'Could not load reports status.') : null;
 
-  const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(true);
-  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const {
+    data: analyticsData,
+    isLoading: loadingAnalytics,
+    error: analyticsErr,
+    refetch: fetchAnalytics,
+  } = useAdminAnalytics('7d');
+  const analyticsError = analyticsErr ? (analyticsErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل تحليلات المنصة.' : 'Could not load platform analytics.') : null;
 
-  const [recentReports, setRecentReports] = useState<AdminReportItem[]>([]);
-  const [loadingReports, setLoadingReports] = useState(true);
-  const [reportsError, setReportsError] = useState<string | null>(null);
-
-  // 1. Fetch Users Status
-  const fetchUsersStatus = useCallback(async () => {
-    setLoadingUsers(true);
-    setUsersError(null);
-    try {
-      const data = await AdminService.getUsersStatus();
-      setUsersStatus(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/users/status error:', err);
-      setUsersError(err?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات المستخدمين.' : 'Could not load users status.'));
-    } finally {
-      setLoadingUsers(false);
-    }
-  }, [locale]);
-
-  // 2. Fetch Properties Status
-  const fetchPropsStatus = useCallback(async () => {
-    setLoadingProps(true);
-    setPropsError(null);
-    try {
-      const data = await AdminService.getPropertiesStatus();
-      setPropertiesStatus(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/properties/status error:', err);
-      setPropsError(err?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات العقارات.' : 'Could not load properties status.'));
-    } finally {
-      setLoadingProps(false);
-    }
-  }, [locale]);
-
-  // 3. Fetch Bookings Status
-  const fetchBookingsStatus = useCallback(async () => {
-    setLoadingBookings(true);
-    setBookingsError(null);
-    try {
-      const data = await AdminService.getBookingsStatus();
-      setBookingsStatus(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/bookings/status error:', err);
-      setBookingsError(err?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات الحجوزات.' : 'Could not load bookings status.'));
-    } finally {
-      setLoadingBookings(false);
-    }
-  }, [locale]);
-
-  // 4. Fetch Revenue
-  const fetchRevenue = useCallback(async () => {
-    setLoadingRevenue(true);
-    setRevenueError(null);
-    try {
-      const data = await AdminService.getBookingsRevenue();
-      setRevenueData(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/bookings/revenue error:', err);
-      setRevenueError(err?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات الإيرادات.' : 'Could not load revenue data.'));
-    } finally {
-      setLoadingRevenue(false);
-    }
-  }, [locale]);
-
-  // 5. Fetch Reports Status
-  const fetchReportsStatus = useCallback(async () => {
-    setLoadingReportsStatus(true);
-    setReportsStatusError(null);
-    try {
-      const data = await AdminService.getReportsStatus();
-      setReportsStatus(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/reports/status error:', err);
-      setReportsStatusError(err?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات البلاغات.' : 'Could not load reports status.'));
-    } finally {
-      setLoadingReportsStatus(false);
-    }
-  }, [locale]);
-
-  // 6. Fetch 7d Analytics
-  const fetchAnalytics = useCallback(async () => {
-    setLoadingAnalytics(true);
-    setAnalyticsError(null);
-    try {
-      const data = await AdminService.getAnalytics('7d');
-      setAnalyticsData(data);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/analytics?range=7d error:', err);
-      setAnalyticsError(err?.message || (locale === 'ar' ? 'تعذر تحميل تحليلات المنصة.' : 'Could not load platform analytics.'));
-    } finally {
-      setLoadingAnalytics(false);
-    }
-  }, [locale]);
-
-  // 7. Fetch Recent Reports
-  const fetchRecentReports = useCallback(async () => {
-    setLoadingReports(true);
-    setReportsError(null);
-    try {
-      const data = await AdminService.getReports({ limit: 5 });
-      const list = data?.reports || data?.items || data?.data || (Array.isArray(data) ? data : []);
-      setRecentReports(Array.isArray(list) ? list : []);
-    } catch (err: any) {
-      console.error('[AdminOverview] GET /dashboard/reports error:', err);
-      setReportsError(err?.message || (locale === 'ar' ? 'تعذر تحميل قائمة البلاغات الحديثة.' : 'Could not load recent reports.'));
-    } finally {
-      setLoadingReports(false);
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    fetchUsersStatus();
-    fetchPropsStatus();
-    fetchBookingsStatus();
-    fetchRevenue();
-    fetchReportsStatus();
-    fetchAnalytics();
-    fetchRecentReports();
-  }, [
-    fetchUsersStatus,
-    fetchPropsStatus,
-    fetchBookingsStatus,
-    fetchRevenue,
-    fetchReportsStatus,
-    fetchAnalytics,
-    fetchRecentReports,
-  ]);
+  const {
+    data: rawReports,
+    isLoading: loadingReports,
+    error: reportsErr,
+    refetch: fetchRecentReports,
+  } = useAdminRecentReports(5);
+  const recentReports: AdminReportItem[] = Array.isArray(rawReports) ? rawReports : [];
+  const reportsError = reportsErr ? (reportsErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل قائمة البلاغات الحديثة.' : 'Could not load recent reports.') : null;
 
   // Safe Parsers
   const normalizeStatusList = (raw: any): AdminStatusCount[] => {

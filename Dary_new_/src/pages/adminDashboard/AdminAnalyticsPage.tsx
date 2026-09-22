@@ -1,50 +1,35 @@
-import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
-import { AdminService } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useAdminAnalytics, useAdminRevenue } from '../../hooks/useDashboardQueries';
 
 export default function AdminAnalyticsPage() {
   const { locale } = useLocale();
 
-  const [analytics, setAnalytics] = useState<any>(null);
-  const [revenue, setRevenue] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Cached (30s)
+  const {
+    data: analytics,
+    isLoading: loadingAnalytics,
+    error: analyticsErr,
+    refetch: fetchAnalytics,
+  } = useAdminAnalytics('7d');
 
-  const fetchAnalyticsData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [analyticsRes, revRes] = await Promise.allSettled([
-        AdminService.getAnalytics('7d'),
-        AdminService.getBookingsRevenue(),
-      ]);
+  const {
+    data: revenue,
+    isLoading: loadingRevenue,
+    refetch: fetchRevenue,
+  } = useAdminRevenue();
 
-      if (analyticsRes.status === 'fulfilled') {
-        setAnalytics(analyticsRes.value);
-      } else {
-        throw analyticsRes.reason;
-      }
+  const loading = loadingAnalytics || loadingRevenue;
+  const error = analyticsErr
+    ? (analyticsErr as any)?.message ||
+      (locale === 'ar'
+        ? 'تعذر تحميل تحليلات المنصة من الخادم.'
+        : 'Could not load platform analytics from the server.')
+    : null;
 
-      if (revRes.status === 'fulfilled') {
-        setRevenue(revRes.value);
-      }
-    } catch (err: any) {
-      console.error('[AdminAnalyticsPage] GET /dashboard/analytics?range=7d failed:', err);
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل تحليلات المنصة من الخادم.'
-            : 'Could not load platform analytics from the server.')
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [locale]);
-
-  useEffect(() => {
-    fetchAnalyticsData();
-  }, [fetchAnalyticsData]);
+  const fetchAnalyticsData = async () => {
+    await Promise.allSettled([fetchAnalytics(), fetchRevenue()]);
+  };
 
   const parseMetricNumber = (val: any, fallback = 0): number => {
     if (typeof val === 'number' && !Number.isNaN(val)) return val;

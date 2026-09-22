@@ -4,14 +4,23 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminPropertyItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
+import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function AdminPropertiesPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
 
   const [properties, setProperties] = useState<AdminPropertyItem[]>([]);
-  const [propertiesStatus, setPropertiesStatus] = useState<any>(null);
+  
+  // Cached: 5m staleTime
+  const {
+    data: propertiesStatus,
+    isLoading: loadingStatus,
+    refetch: fetchStatus,
+  } = useAdminPropertiesStatus();
+  
   const [loading, setLoading] = useState(true);
-  const [loadingStatus, setLoadingStatus] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filters
@@ -33,25 +42,26 @@ export default function AdminPropertiesPage() {
     }
   }, [actionMessage]);
 
-  // 1. Fetch Property Status Metrics
-  const fetchStatus = useCallback(async () => {
-    setLoadingStatus(true);
-    try {
-      const data = await AdminService.getPropertiesStatus();
-      setPropertiesStatus(data);
-    } catch (err: any) {
-      console.error('[AdminPropertiesPage] GET /dashboard/properties/status failed:', err);
-    } finally {
-      setLoadingStatus(false);
-    }
-  }, []);
-
   // 2. Fetch Properties List
   const fetchProperties = useCallback(async () => {
-    setLoading(true);
+    const cacheKey = ['admin', 'properties', { page, limit: 10 }];
+    const cached = queryClient.getQueryData<any>(cacheKey);
+    if (cached) {
+      const list = cached?.properties || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      setProperties(Array.isArray(list) ? list : []);
+      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
+      const limit = cached?.limit || 10;
+      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
-      const data = await AdminService.getProperties({ page, limit: 10 });
+      const data = await queryClient.fetchQuery({
+        queryKey: cacheKey,
+        queryFn: () => AdminService.getProperties({ page, limit: 10 }),
+        staleTime: STALE_TIMES.LISTS,
+      });
       const list = data?.properties || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setProperties(Array.isArray(list) ? list : []);
 
@@ -69,7 +79,7 @@ export default function AdminPropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale]);
+  }, [page, locale, queryClient]);
 
   // Handle Approve
   const handleApprove = async (id: string) => {
@@ -81,6 +91,8 @@ export default function AdminPropertiesPage() {
         type: 'success',
         text: locale === 'ar' ? 'تم اعتماد العقار بنجاح وتفعيله على المنصة.' : 'Property approved and activated successfully.',
       });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchProperties(), fetchStatus()]);
     } catch (err: any) {
       setActionMessage({
@@ -111,6 +123,8 @@ export default function AdminPropertiesPage() {
       });
       setRejectModalId(null);
       setRejectionReason('');
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchProperties(), fetchStatus()]);
     } catch (err: any) {
       setActionMessage({
@@ -134,6 +148,8 @@ export default function AdminPropertiesPage() {
         text: locale === 'ar' ? 'تم تعليق العقار بنجاح.' : 'Property suspended successfully.',
       });
       setSuspendModalId(null);
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchProperties(), fetchStatus()]);
     } catch (err: any) {
       setActionMessage({

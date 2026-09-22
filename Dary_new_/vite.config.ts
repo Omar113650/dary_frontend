@@ -7,7 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/v1': {
-        target: 'https://dary-gold.vercel.app/',
+        target: 'http://localhost:8003/api/v1',
         changeOrigin: true,
       },
     },
