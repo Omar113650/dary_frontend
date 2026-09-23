@@ -29,7 +29,6 @@ export default function AdminOverviewPage() {
     data: usersStatus,
     isLoading: loadingUsers,
     error: usersErr,
-    refetch: fetchUsersStatus,
   } = useAdminUsersStatus();
   const usersError = usersErr ? (usersErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات المستخدمين.' : 'Could not load users status.') : null;
 
@@ -53,7 +52,6 @@ export default function AdminOverviewPage() {
     data: revenueData,
     isLoading: loadingRevenue,
     error: revenueErr,
-    refetch: fetchRevenue,
   } = useAdminRevenue();
   const revenueError = revenueErr ? (revenueErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات الإيرادات.' : 'Could not load revenue data.') : null;
 
@@ -61,7 +59,6 @@ export default function AdminOverviewPage() {
     data: reportsStatus,
     isLoading: loadingReportsStatus,
     error: reportsStatusErr,
-    refetch: fetchReportsStatus,
   } = useAdminReportsStatus();
   const reportsStatusError = reportsStatusErr ? (reportsStatusErr as any)?.message || (locale === 'ar' ? 'تعذر تحميل إحصائيات البلاغات.' : 'Could not load reports status.') : null;
 

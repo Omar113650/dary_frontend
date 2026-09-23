@@ -29,7 +29,6 @@ export default function OwnerOverviewPage() {
     data: propertiesStatus,
     isLoading: loadingProps,
     error: propsErrorObj,
-    refetch: fetchPropertiesStatus,
   } = useOwnerPropertiesStatus();
   const propsError = propsErrorObj
     ? (propsErrorObj as any)?.message ||
@@ -50,7 +49,6 @@ export default function OwnerOverviewPage() {
     data: bookingsStatus,
     isLoading: loadingBookings,
     error: bookingsErrorObj,
-    refetch: fetchBookingsStatus,
   } = useOwnerBookingsStatus();
   const bookingsError = bookingsErrorObj
     ? (bookingsErrorObj as any)?.message ||
@@ -64,7 +62,6 @@ export default function OwnerOverviewPage() {
     data: revenueData,
     isLoading: loadingRevenue,
     error: revenueErrorObj,
-    refetch: fetchRevenue,
   } = useOwnerRevenue();
   const revenueError = revenueErrorObj
     ? (revenueErrorObj as any)?.message ||

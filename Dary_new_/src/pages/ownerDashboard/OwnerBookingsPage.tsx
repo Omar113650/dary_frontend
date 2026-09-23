@@ -14,7 +14,6 @@ export default function OwnerBookingsPage() {
 
   // Booking status breakdown (Cached: 30s)
   const {
-    data: bookingStatusData,
     isLoading: loadingStatus,
     error: statusErrorObj,
     refetch: fetchStatus,
