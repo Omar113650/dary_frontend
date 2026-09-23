@@ -67,7 +67,7 @@ export interface QueryState<TData = any, TError = any> {
   errorUpdatedAt: number;
 }
 
-export interface QueryOptions<TData = any, TError = any> {
+export interface QueryOptions<TData = any, _TError = any> {
   queryKey: any[];
   queryFn: (context?: { queryKey: any[]; signal?: AbortSignal }) => Promise<TData>;
   staleTime?: number;
