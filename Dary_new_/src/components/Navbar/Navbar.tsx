@@ -7,7 +7,7 @@ import './Navbar.css';
 
 export default function Navbar() {
   const { t, locale, setLocale } = useLocale();
-  const { isAuthenticated, isOwner, isAdmin } = useAuth();
+  const { isAuthenticated, isOwner, isAdmin, logout } = useAuth();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -228,20 +228,55 @@ export default function Navbar() {
           {/* Desktop Authentication Actions */}
           <div className="navbar-auth-desktop">
             {isAuthenticated ? (
-              <Link
-                ref={btnRef as React.RefObject<HTMLAnchorElement>}
-                to={dashboardPath}
-                className="navbar-auth-register"
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
-              >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7" rx="1" />
-                  <rect x="14" y="3" width="7" height="7" rx="1" />
-                  <rect x="14" y="14" width="7" height="7" rx="1" />
-                  <rect x="3" y="14" width="7" height="7" rx="1" />
-                </svg>
-                <span>{t.nav_dashboard}</span>
-              </Link>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Link
+                  ref={btnRef as React.RefObject<HTMLAnchorElement>}
+                  to={dashboardPath}
+                  className="navbar-auth-register"
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                  </svg>
+                  <span>{t.nav_dashboard}</span>
+                </Link>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await logout();
+                    window.location.href = '/';
+                  }}
+                  title={locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: '#F1F5F9',
+                    border: '1px solid #E2E8F0',
+                    color: '#DC2626',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#FEE2E2';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#F1F5F9';
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                </button>
+              </div>
             ) : (
               <>
                 <Link
@@ -309,13 +344,45 @@ export default function Navbar() {
           {/* Mobile Authentication Actions */}
           <div className="navbar-mobile-auth">
             {isAuthenticated ? (
-              <Link
-                to={dashboardPath}
-                className="navbar-mobile-auth-register"
-                onClick={() => setMobileOpen(false)}
-              >
-                {t.nav_dashboard}
-              </Link>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', width: '100%' }}>
+                <Link
+                  to={dashboardPath}
+                  className="navbar-mobile-auth-register"
+                  onClick={() => setMobileOpen(false)}
+                >
+                  {t.nav_dashboard}
+                </Link>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setMobileOpen(false);
+                    await logout();
+                    window.location.href = '/';
+                  }}
+                  style={{
+                    width: '100%',
+                    padding: '0.75rem',
+                    borderRadius: '12px',
+                    backgroundColor: '#FEE2E2',
+                    color: '#DC2626',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                  <span>{locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}</span>
+                </button>
+              </div>
             ) : (
               <>
                 <Link

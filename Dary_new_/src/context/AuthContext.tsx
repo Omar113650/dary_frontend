@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { AuthService } from '../services/authService';
+import { ApiClient } from '../services/apiClient';
 import type { User, LoginCredentials } from '../services/authService';
 
 export interface AuthContextType {
@@ -121,13 +122,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRole(null);
         saveUserLocally(null);
       }
-    } catch {
-      // If request failed and there is no stored token, clear session
-      const token = typeof window !== 'undefined' ? localStorage.getItem('dary_access_token') : null;
-      if (!token) {
+    } catch (err: any) {
+      // If server returned 401 or 403, or invalid session, clear local storage immediately
+      if (err?.status === 401 || err?.status === 403) {
         setUser(null);
         setRole(null);
         saveUserLocally(null);
+        ApiClient.clearTokens();
+      } else {
+        const token = typeof window !== 'undefined' ? localStorage.getItem('dary_access_token') : null;
+        if (!token) {
+          setUser(null);
+          setRole(null);
+          saveUserLocally(null);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -141,6 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setRole(null);
       saveUserLocally(null);
+      ApiClient.clearTokens();
     };
 
     window.addEventListener('auth:expired', handleExpired);
