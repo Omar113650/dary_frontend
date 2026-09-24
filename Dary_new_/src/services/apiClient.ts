@@ -1,10 +1,11 @@
 export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8003/api/v1';
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api/v1';
 
 export interface RequestOptions extends RequestInit {
   data?: any;
   params?: Record<string, any> | URLSearchParams;
   _retry?: boolean;
+  timeout?: number;
 }
 
 export class ApiError extends Error {
@@ -27,6 +28,7 @@ export class ApiClient {
   private static refreshToken: string | null =
     typeof window !== 'undefined' ? localStorage.getItem('dary_refresh_token') : null;
   private static refreshPromise: Promise<boolean> | null = null;
+  private static inFlightGetRequests = new Map<string, Promise<any>>();
 
   /**
    * Save tokens both in-memory and in localStorage for persistence.
@@ -140,10 +142,17 @@ export class ApiClient {
       headers.set('Authorization', `Bearer ${currentToken}`);
     }
 
+    const timeoutMs = options.timeout ?? 12000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
+
     const config: RequestInit = {
       ...customOptions,
       credentials: 'include',
       headers,
+      signal: customOptions.signal || controller.signal,
     };
 
     if (data !== undefined) {
@@ -172,54 +181,89 @@ export class ApiClient {
       }
     }
 
-    try {
-      const response = await fetch(url, config);
-      const json = await response.json().catch(() => null);
+    const isGet = (!customOptions.method || customOptions.method.toUpperCase() === 'GET') && data === undefined;
+    const requestKey = isGet ? url : null;
 
-      if (!response.ok) {
-        const message =
-          json?.message ||
-          json?.error?.message ||
-          response.statusText ||
-          'Request failed';
-        const code = json?.code || json?.error?.code || 'HTTP_ERROR';
+    if (requestKey && this.inFlightGetRequests.has(requestKey)) {
+      return this.inFlightGetRequests.get(requestKey) as Promise<T>;
+    }
 
-        // Protected endpoint check - don't refresh on auth-specific routes
-        const isAuthEndpoint =
-          endpoint.includes('/auth/login') ||
-          endpoint.includes('/auth/register') ||
-          endpoint.includes('/auth/refresh-token') ||
-          endpoint.includes('/auth/verify-otp') ||
-          endpoint.includes('/auth/forget-password') ||
-          endpoint.includes('/auth/reset-password');
+    const executeRequest = async (): Promise<T> => {
+      try {
+        const response = await fetch(url, config);
+        const json = await response.json().catch(() => null);
 
-        if (response.status === 401 && !isAuthEndpoint && !_retry) {
-          const refreshed = await this.refreshAuth();
-          if (refreshed) {
-            // Re-try the exact original request once with new token
-            return this.request<T>(endpoint, { ...options, _retry: true });
-          } else {
-            // Refresh failed permanently (token revoked / expired)
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('auth:expired'));
+        if (!response.ok) {
+          let message =
+            json?.message ||
+            json?.error?.message ||
+            response.statusText ||
+            'Request failed';
+          
+          if (json?.errors && Array.isArray(json.errors) && json.errors.length > 0) {
+            const details = json.errors.map((e: any) => e.message || `${e.path || e.field}: ${e.message}`).join(', ');
+            message = `${message}: ${details}`;
+          } else if (json?.details) {
+            message = `${message}: ${typeof json.details === 'string' ? json.details : JSON.stringify(json.details)}`;
+          }
+
+          const code = json?.code || json?.error?.code || 'HTTP_ERROR';
+
+          // Protected endpoint check - don't refresh on auth-specific routes
+          const isAuthEndpoint =
+            endpoint.includes('/auth/login') ||
+            endpoint.includes('/auth/register') ||
+            endpoint.includes('/auth/refresh-token') ||
+            endpoint.includes('/auth/verify-otp') ||
+            endpoint.includes('/auth/forget-password') ||
+            endpoint.includes('/auth/reset-password');
+
+          if (response.status === 401 && !isAuthEndpoint && !_retry) {
+            const refreshed = await this.refreshAuth();
+            if (refreshed) {
+              // Re-try the exact original request once with new token
+              return this.request<T>(endpoint, { ...options, _retry: true });
+            } else {
+              // Refresh failed permanently (token revoked / expired)
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('auth:expired'));
+              }
             }
           }
+
+          throw new ApiError(message, code, response.status, json);
         }
 
-        throw new ApiError(message, code, response.status, json);
+        return json as T;
+      } catch (error: any) {
+        if (error instanceof ApiError) {
+          throw error;
+        }
+        if (error?.name === 'AbortError') {
+          throw new ApiError(
+            'انتهت مهلة انتظار الخادم. يرجى المحاولة مرة أخرى.',
+            'TIMEOUT_ERROR',
+            408
+          );
+        }
+        throw new ApiError(
+          error?.message || 'Network error occurred. Please check your connection.',
+          'NETWORK_ERROR',
+          0
+        );
+      } finally {
+        if (requestKey) {
+          this.inFlightGetRequests.delete(requestKey);
+        }
+        clearTimeout(timeoutId);
       }
+    };
 
-      return json as T;
-    } catch (error: any) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError(
-        error?.message || 'Network error occurred. Please check your connection.',
-        'NETWORK_ERROR',
-        0
-      );
+    const fetchPromise = executeRequest();
+    if (requestKey) {
+      this.inFlightGetRequests.set(requestKey, fetchPromise);
     }
+    return fetchPromise;
   }
 
   static get<T>(endpoint: string, options?: RequestOptions): Promise<T> {

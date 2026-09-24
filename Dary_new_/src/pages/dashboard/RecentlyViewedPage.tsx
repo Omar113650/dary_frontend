@@ -262,6 +262,7 @@ export default function RecentlyViewedPage() {
                       {propId && (
                         <Link
                           to={`/properties/${propId}`}
+                          state={{ property: p }}
                           style={{
                             padding: '0.45rem 0.9rem',
                             borderRadius: '8px',

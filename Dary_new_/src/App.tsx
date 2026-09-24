@@ -36,6 +36,7 @@ import AdminReportsPage from './pages/adminDashboard/AdminReportsPage';
 import AdminSupportTicketsPage from './pages/adminDashboard/AdminSupportTicketsPage';
 import AdminAnalyticsPage from './pages/adminDashboard/AdminAnalyticsPage';
 import AdminCalendarPage from './pages/adminDashboard/AdminCalendarPage';
+import AdminReviewsPage from './pages/adminDashboard/AdminReviewsPage';
 import AdminProfilePage from './pages/adminDashboard/AdminProfilePage';
 import DevAdminDashboardPreview from './components/adminDashboard/DevAdminDashboardPreview';
 import Layout from './components/Layout/Layout';
@@ -157,6 +158,7 @@ export default function App() {
               <Route path="reports" element={<AdminReportsPage />} />
               <Route path="tickets" element={<AdminSupportTicketsPage />} />
               <Route path="support" element={<AdminSupportTicketsPage />} />
+              <Route path="reviews" element={<AdminReviewsPage />} />
               <Route path="analytics" element={<AdminAnalyticsPage />} />
               <Route path="calendar" element={<AdminCalendarPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
@@ -173,6 +175,7 @@ export default function App() {
                 <Route path="reports" element={<AdminReportsPage />} />
                 <Route path="tickets" element={<AdminSupportTicketsPage />} />
                 <Route path="support" element={<AdminSupportTicketsPage />} />
+                <Route path="reviews" element={<AdminReviewsPage />} />
                 <Route path="analytics" element={<AdminAnalyticsPage />} />
                 <Route path="calendar" element={<AdminCalendarPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />

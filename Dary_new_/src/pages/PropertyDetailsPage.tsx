@@ -1,21 +1,38 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
-import { propertyService } from '../services/propertyService';
+import { propertyService, getCachedProperty } from '../services/propertyService';
 import { TenantService } from '../services/tenantService';
 import { ReportService } from '../services/reportService';
+import { ReviewService } from '../services/reviewService';
+import type { ReviewItem } from '../services/reviewService';
 import { useAuth } from '../context/AuthContext';
 import type { Property } from '../types/property';
+
+const recordedRecentlyViewedIds = new Set<string>();
 
 export default function PropertyDetailsPage() {
   const { id } = useParams<{ id: string }>();
   const { locale } = useLocale();
   const { isAuthenticated, user, isOwner, isAdmin } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [property, setProperty] = useState<Property | null>(null);
-  const [loading, setLoading] = useState(true);
+  // Instant hydration from navigation state or session cache
+  const passedProperty = (location.state as any)?.property as Property | undefined;
+  const initialProperty =
+    passedProperty && passedProperty.id === id
+      ? passedProperty
+      : id
+      ? getCachedProperty(id)
+      : null;
+
+  const [property, setProperty] = useState<Property | null>(initialProperty);
+  const [loading, setLoading] = useState<boolean>(!initialProperty);
   const [error, setError] = useState<string | null>(null);
+
+  const propertyRef = useRef<Property | null>(property);
+  propertyRef.current = property;
 
   const isThisOwnerProperty = Boolean(
     user?.id && property && (user.id === property.ownerId || user.id === property.owner?.id)
@@ -102,10 +119,23 @@ export default function PropertyDetailsPage() {
     }
   }
 
-  // Auto-select first room when property loads
+  // Check if all rooms in this property are full
+  const isFullyBooked = useMemo(() => {
+    if (!property) return false;
+    if (Array.isArray(property.rooms_) && property.rooms_.length > 0) {
+      return property.rooms_.every(
+        (r: any) => Number(r.availableBeds) <= 0 || r.status === 'FULL'
+      );
+    }
+    return false;
+  }, [property]);
+
+  // Auto-select first available room when property loads
   useEffect(() => {
     if (property && Array.isArray(property.rooms_) && property.rooms_.length > 0) {
-      const availableRoom = property.rooms_.find((r: any) => r.availableBeds > 0) || property.rooms_[0];
+      const availableRoom = property.rooms_.find(
+        (r: any) => Number(r.availableBeds) > 0 && r.status !== 'FULL'
+      ) || property.rooms_[0];
       if (availableRoom?.id) {
         setSelectedRoomId(availableRoom.id);
       }
@@ -118,19 +148,72 @@ export default function PropertyDetailsPage() {
       navigate('/login');
       return;
     }
+    if (isFullyBooked) {
+      return;
+    }
     setBookingError(null);
     setBookingSuccess(false);
     setBookingModalOpen(true);
   }
+
+  // Reviews & Ratings state
+  const [reviews, setReviews] = useState<ReviewItem[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsMeta, setReviewsMeta] = useState<{ total: number; avgPropertyRating: number; avgOwnerRating: number } | null>(null);
+
+  const fetchReviews = useCallback(async (propId: string) => {
+    setReviewsLoading(true);
+    try {
+      const res = await ReviewService.getPropertyReviews(propId);
+      const items: ReviewItem[] = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
+      setReviews(items);
+
+      const total = res?.meta?.total ?? items.length;
+      let avgProp = res?.aggregates?._avg?.propertyRating;
+      let avgOwn = res?.aggregates?._avg?.ownerRating;
+
+      if (avgProp === undefined && items.length > 0) {
+        avgProp = items.reduce((acc: number, r: ReviewItem) => acc + (r.propertyRating || 0), 0) / items.length;
+      }
+      if (avgOwn === undefined && items.length > 0) {
+        avgOwn = items.reduce((acc: number, r: ReviewItem) => acc + (r.ownerRating || 0), 0) / items.length;
+      }
+
+      setReviewsMeta({
+        total,
+        avgPropertyRating: avgProp ? Number(Number(avgProp).toFixed(1)) : 0,
+        avgOwnerRating: avgOwn ? Number(Number(avgOwn).toFixed(1)) : 0,
+      });
+    } catch (e) {
+      console.error('Failed to load reviews:', e);
+    } finally {
+      setReviewsLoading(false);
+    }
+  }, []);
 
   // Submit booking request
   async function handleBookingSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!id) return;
 
+    if (isFullyBooked) {
+      setBookingError(locale === 'ar' ? 'نعتذر، هذا السكن ممتلئ بالكامل ولا يمكن استقبال طلبات حجز جديدة.' : 'Sorry, this property is fully booked.');
+      return;
+    }
+
     const roomId = selectedRoomId || (property?.rooms_ && property.rooms_[0]?.id);
     if (!roomId) {
       setBookingError(locale === 'ar' ? 'يرجى اختيار الغرفة المراد حجزها' : 'Please select a room to book');
+      return;
+    }
+
+    const targetRoom = property?.rooms_?.find((r: any) => r.id === roomId);
+    if (targetRoom && (Number(targetRoom.availableBeds) <= 0 || targetRoom.status === 'FULL')) {
+      setBookingError(locale === 'ar' ? 'هذه الغرفة ممتلئة بالكامل ولا تتوفر بها أسرّة شاغرة حالياً.' : 'This room is fully booked and has no beds available.');
+      return;
+    }
+    if (targetRoom && Number(bedsRequested) > Number(targetRoom.availableBeds || 1)) {
+      setBookingError(locale === 'ar' ? `عدد الأسرة المطلوبة يتجاوز المتاح (${targetRoom.availableBeds} أسرّة)` : `Requested beds exceed available (${targetRoom.availableBeds} beds)`);
       return;
     }
 
@@ -152,6 +235,11 @@ export default function PropertyDetailsPage() {
       const waUrl = res?.data?.whatsappLink || res?.whatsappLink;
       if (waUrl) {
         setBookingWhatsappUrl(waUrl);
+        try {
+          window.open(waUrl, '_blank', 'noopener,noreferrer');
+        } catch (e) {
+          console.error('Failed to auto-open WhatsApp link:', e);
+        }
       }
       setBookingSuccess(true);
     } catch (err: any) {
@@ -168,30 +256,44 @@ export default function PropertyDetailsPage() {
 
   // ── Load property from real API ───────────────────────────────────────────
   const fetchProperty = useCallback(async () => {
-    if (!id) return;
-    setLoading(true);
+    if (!id) {
+      setLoading(false);
+      setError(locale === 'ar' ? 'معرف العقار غير صالح.' : 'Invalid property ID.');
+      return;
+    }
+    // Only block screen if we don't already have property data displayed
+    if (!propertyRef.current) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const data = await propertyService.getPropertyById(id);
       if (!data) {
-        setError(locale === 'ar' ? 'لم يتم العثور على هذا العقار.' : 'Property not found.');
+        if (!propertyRef.current) {
+          setError(locale === 'ar' ? 'لم يتم العثور على هذا العقار.' : 'Property not found.');
+        }
       } else {
         setProperty(data);
-        if (isAuthenticated) {
+        if (isAuthenticated && id && !recordedRecentlyViewedIds.has(id)) {
+          recordedRecentlyViewedIds.add(id);
           TenantService.recordRecentlyViewed(id).catch(() => {});
         }
       }
+      // Also load property reviews
+      fetchReviews(id);
     } catch (err: any) {
-      setError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر تحميل بيانات العقار. يرجى المحاولة مرة أخرى.'
-            : 'Could not load property details. Please try again.')
-      );
+      if (!propertyRef.current) {
+        setError(
+          err?.message ||
+            (locale === 'ar'
+              ? 'تعذر تحميل بيانات العقار. يرجى المحاولة مرة أخرى.'
+              : 'Could not load property details. Please try again.')
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, [id, locale, isAuthenticated]);
+  }, [id, locale, isAuthenticated, fetchReviews]);
 
   useEffect(() => {
     fetchProperty();
@@ -233,24 +335,202 @@ export default function PropertyDetailsPage() {
     }
   }
 
-  // ── Loading skeleton ──────────────────────────────────────────────────────
-  if (loading) {
+  // ── Collect and deduplicate all property images (Memoized & Safe) ─────────
+  const allImages: Array<{ url: string; category?: string }> = useMemo(() => {
+    if (!property) return [];
+    const list: Array<{ url: string; category?: string }> = [];
+    const seen = new Set<string>();
+
+    const add = (item: any, defaultCat = 'general') => {
+      if (!item) return;
+      const url = typeof item === 'string' ? item : item?.url;
+      if (!url || typeof url !== 'string' || url.startsWith('file://') || seen.has(url)) return;
+      seen.add(url);
+      list.push({
+        url,
+        category: (typeof item === 'object' && item?.category) || defaultCat,
+      });
+    };
+
+    if (property.image) add(property.image, 'main');
+    if (Array.isArray(property.images)) {
+      property.images.forEach((img: any) => add(img));
+    }
+    if (Array.isArray(property.photos)) {
+      property.photos.forEach((img: any) => add(img));
+    }
+    if (Array.isArray(property.imageUrls)) {
+      property.imageUrls.forEach((img: any) => add(img));
+    }
+    if (Array.isArray(property.kitchenPhotos)) {
+      property.kitchenPhotos.forEach((img: any) => add(img, 'kitchen'));
+    }
+    if (Array.isArray(property.bathroomPhotos)) {
+      property.bathroomPhotos.forEach((img: any) => add(img, 'bathroom'));
+    }
+    if (Array.isArray(property.livingRoomPhotos)) {
+      property.livingRoomPhotos.forEach((img: any) => add(img, 'livingRoom'));
+    }
+    if (Array.isArray(property.roomPhotos)) {
+      property.roomPhotos.forEach((img: any) => add(img, 'room'));
+    }
+    if (Array.isArray(property.rooms_)) {
+      property.rooms_.forEach((r: any) => {
+        if (r?.photoUrl) add(r.photoUrl, 'room');
+      });
+    }
+    if (list.length === 0 && property.image) {
+      list.push({ url: property.image, category: 'main' });
+    }
+    return list;
+  }, [property]);
+
+  const currentImage = allImages[activeImageIndex] || allImages[0] || {
+    url: property?.image || 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&q=80&w=900&h=506&fit=crop',
+    category: 'main',
+  };
+
+  const handlePrevImage = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allImages.length <= 1) return;
+    setActiveImageIndex((prev) => (prev === 0 ? allImages.length - 1 : prev - 1));
+  }, [allImages.length]);
+
+  const handleNextImage = useCallback((e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (allImages.length <= 1) return;
+    setActiveImageIndex((prev) => (prev === allImages.length - 1 ? 0 : prev + 1));
+  }, [allImages.length]);
+
+  // Keyboard navigation for Gallery & Lightbox (HOOK PLACED UNCONDITIONALLY)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === 'Escape' && isLightboxOpen) {
+        setIsLightboxOpen(false);
+      }
+      if (e.key === 'ArrowRight') {
+        locale === 'ar' ? handlePrevImage() : handleNextImage();
+      }
+      if (e.key === 'ArrowLeft') {
+        locale === 'ar' ? handleNextImage() : handlePrevImage();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLightboxOpen, handlePrevImage, handleNextImage, locale]);
+
+  // Auto-scroll thumbnails when active image changes (HOOK PLACED UNCONDITIONALLY)
+  useEffect(() => {
+    if (thumbnailsRef.current) {
+      const activeBtn = thumbnailsRef.current.children[activeImageIndex] as HTMLElement;
+      if (activeBtn) {
+        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      }
+    }
+  }, [activeImageIndex]);
+
+  // Slow loading watchdog timer (HOOK PLACED UNCONDITIONALLY)
+  const [isSlowLoading, setIsSlowLoading] = useState(false);
+  useEffect(() => {
+    if (!loading || property) {
+      setIsSlowLoading(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setIsSlowLoading(true);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [loading, property]);
+
+  // Touch Swipe handlers for mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartX - touchEndX;
+    if (Math.abs(diff) > 40) {
+      if (diff > 0) {
+        locale === 'ar' ? handlePrevImage() : handleNextImage();
+      } else {
+        locale === 'ar' ? handleNextImage() : handlePrevImage();
+      }
+    }
+    setTouchStartX(null);
+  };
+
+  // ── Loading skeleton (Only shown if NO property is available in memory/cache) ──
+  if (loading && !property) {
     return (
-      <main className="page" style={{ paddingTop: '7rem' }}>
+      <main className="page" style={{ paddingTop: '7rem', minHeight: '80vh' }}>
         <div className="container" style={{ maxWidth: '860px' }}>
           <div style={{ height: '380px', borderRadius: '20px', background: '#F1F5F9', marginBottom: '2rem', animation: 'shimmer 1.4s infinite' }} />
           <div style={{ height: '28px', width: '60%', borderRadius: '8px', background: '#F1F5F9', marginBottom: '1rem', animation: 'shimmer 1.4s infinite' }} />
           <div style={{ height: '18px', width: '40%', borderRadius: '8px', background: '#F1F5F9', marginBottom: '0.5rem', animation: 'shimmer 1.4s infinite' }} />
-          <div style={{ height: '18px', width: '30%', borderRadius: '8px', background: '#F1F5F9', animation: 'shimmer 1.4s infinite' }} />
+          <div style={{ height: '18px', width: '30%', borderRadius: '8px', background: '#F1F5F9', marginBottom: '2rem', animation: 'shimmer 1.4s infinite' }} />
+
+          {isSlowLoading && (
+            <div
+              style={{
+                backgroundColor: '#EFF6FF',
+                border: '1px solid #BFDBFE',
+                borderRadius: '16px',
+                padding: '1.25rem',
+                textAlign: 'center',
+                animation: 'fadeIn 0.3s ease',
+              }}
+            >
+              <p style={{ margin: '0 0 0.75rem', fontWeight: 600, color: 'var(--color-navy)', fontSize: '0.95rem' }}>
+                {locale === 'ar'
+                  ? 'جاري جلب تفاصيل العقار من الخادم... يستغرق الأمر وقتاً أطول من المعتاد.'
+                  : 'Fetching property details from the server... taking longer than usual.'}
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={fetchProperty}
+                  style={{
+                    padding: '0.5rem 1.25rem',
+                    borderRadius: '999px',
+                    background: 'var(--color-blue)',
+                    color: '#fff',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    border: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {locale === 'ar' ? 'إعادة المحاولة الآن' : 'Retry Now'}
+                </button>
+                <Link
+                  to="/properties"
+                  style={{
+                    padding: '0.5rem 1.25rem',
+                    borderRadius: '999px',
+                    background: '#F1F5F9',
+                    color: 'var(--color-navy)',
+                    fontWeight: 600,
+                    fontSize: '0.85rem',
+                    textDecoration: 'none',
+                  }}
+                >
+                  {locale === 'ar' ? 'العودة للعقارات' : 'Back to Listings'}
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </main>
     );
   }
 
   // ── Error state ───────────────────────────────────────────────────────────
-  if (error || !property) {
+  if ((error || !property) && !loading) {
     return (
-      <main className="page" style={{ paddingTop: '7rem', textAlign: 'center' }}>
+      <main className="page" style={{ paddingTop: '7rem', textAlign: 'center', minHeight: '80vh' }}>
         <div className="container" style={{ maxWidth: '540px' }}>
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--color-navy)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ marginBottom: '1.25rem', opacity: 0.4 }}>
             <circle cx="12" cy="12" r="10" />
@@ -261,7 +541,7 @@ export default function PropertyDetailsPage() {
             {locale === 'ar' ? 'تعذر تحميل العقار' : 'Property Not Available'}
           </h2>
           <p style={{ color: 'var(--color-text-secondary)', marginBottom: '1.5rem', lineHeight: 1.6 }}>
-            {error || (locale === 'ar' ? 'لم يتم العثور على هذا العقار.' : 'This property could not be found.')}
+            {error || (locale === 'ar' ? 'لم يتم العثور على هذا العقار أو قد تم حذفه.' : 'This property could not be found or has been removed.')}
           </p>
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
             <button
@@ -283,132 +563,29 @@ export default function PropertyDetailsPage() {
     );
   }
 
-  const displayTitle = property.title[locale] || property.title.ar || property.title.en;
-  const displayLocation = property.location[locale] || property.location.ar || property.location.en;
-  const displayType = property.type[locale] || property.type.ar || property.type.en;
+  // Safety guard for TypeScript
+  if (!property) return null;
+
+  const displayTitle =
+    typeof property.title === 'string'
+      ? property.title
+      : property.title?.[locale] || property.title?.ar || property.title?.en || (locale === 'ar' ? 'عقار سكني' : 'Property Listing');
+
+  const displayLocation =
+    typeof property.location === 'string'
+      ? property.location
+      : property.location?.[locale] || property.location?.ar || property.location?.en || property.city || (locale === 'ar' ? 'الموقع غير محدد' : 'Unspecified Location');
+
+  const displayType =
+    typeof property.type === 'string'
+      ? property.type
+      : property.type?.[locale] || property.type?.ar || property.type?.en || (locale === 'ar' ? 'سكن طلابي' : 'Student Housing');
 
   // Find currently selected room for pricing calculation in modal
   const activeRoom = property.rooms_?.find((r: any) => r.id === selectedRoomId) || property.rooms_?.[0];
   const roomPricePerBed = activeRoom?.pricePerBed || property.price || 0;
   const calculatedMonths = Math.max(1, Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24 * 30)));
   const estimatedTotal = roomPricePerBed * bedsRequested * calculatedMonths;
-
-  // ── Collect and deduplicate all property images ─────────────────────────────
-  const allImages: Array<{ url: string; category?: string }> = (() => {
-    const list: Array<{ url: string; category?: string }> = [];
-    const seen = new Set<string>();
-
-    const add = (item: any, defaultCat = 'general') => {
-      if (!item) return;
-      const url = typeof item === 'string' ? item : item?.url;
-      if (!url || typeof url !== 'string' || url.startsWith('file://') || seen.has(url)) return;
-      seen.add(url);
-      list.push({
-        url,
-        category: (typeof item === 'object' && item?.category) || defaultCat,
-      });
-    };
-
-    // Primary image
-    if (property.image) add(property.image, 'main');
-    // Multiple images
-    if (Array.isArray(property.images)) {
-      property.images.forEach((img: any) => add(img));
-    }
-    // Photos arrays
-    if (Array.isArray(property.photos)) {
-      property.photos.forEach((img: any) => add(img));
-    }
-    if (Array.isArray(property.imageUrls)) {
-      property.imageUrls.forEach((img: any) => add(img));
-    }
-    if (Array.isArray(property.kitchenPhotos)) {
-      property.kitchenPhotos.forEach((img: any) => add(img, 'kitchen'));
-    }
-    if (Array.isArray(property.bathroomPhotos)) {
-      property.bathroomPhotos.forEach((img: any) => add(img, 'bathroom'));
-    }
-    if (Array.isArray(property.livingRoomPhotos)) {
-      property.livingRoomPhotos.forEach((img: any) => add(img, 'livingRoom'));
-    }
-    if (Array.isArray(property.roomPhotos)) {
-      property.roomPhotos.forEach((img: any) => add(img, 'room'));
-    }
-    // Room-specific photos
-    if (Array.isArray(property.rooms_)) {
-      property.rooms_.forEach((r: any) => {
-        if (r?.photoUrl) add(r.photoUrl, 'room');
-      });
-    }
-
-    if (list.length === 0 && property.image) {
-      list.push({ url: property.image, category: 'main' });
-    }
-    return list;
-  })();
-
-  const currentImage = allImages[activeImageIndex] || allImages[0] || { url: property.image, category: 'main' };
-
-  const handlePrevImage = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (allImages.length <= 1) return;
-    setActiveImageIndex((prev) => (prev === 0 ? allImages.length - 1 : prev - 1));
-  };
-
-  const handleNextImage = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    if (allImages.length <= 1) return;
-    setActiveImageIndex((prev) => (prev === allImages.length - 1 ? 0 : prev + 1));
-  };
-
-  // Keyboard navigation for Gallery & Lightbox
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return;
-      if (e.key === 'Escape' && isLightboxOpen) {
-        setIsLightboxOpen(false);
-      }
-      if (e.key === 'ArrowRight') {
-        locale === 'ar' ? handlePrevImage() : handleNextImage();
-      }
-      if (e.key === 'ArrowLeft') {
-        locale === 'ar' ? handleNextImage() : handlePrevImage();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isLightboxOpen, allImages.length, locale]);
-
-  // Auto-scroll thumbnails when active image changes
-  useEffect(() => {
-    if (thumbnailsRef.current) {
-      const activeBtn = thumbnailsRef.current.children[activeImageIndex] as HTMLElement;
-      if (activeBtn) {
-        activeBtn.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-      }
-    }
-  }, [activeImageIndex]);
-
-  // Touch Swipe handlers for mobile
-  const handleTouchStart = (e: React.TouchEvent) => {
-    setTouchStartX(e.touches[0].clientX);
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX === null) return;
-    const touchEndX = e.changedTouches[0].clientX;
-    const diff = touchStartX - touchEndX;
-    if (Math.abs(diff) > 40) {
-      if (diff > 0) {
-        // Swiped left
-        locale === 'ar' ? handlePrevImage() : handleNextImage();
-      } else {
-        // Swiped right
-        locale === 'ar' ? handleNextImage() : handlePrevImage();
-      }
-    }
-    setTouchStartX(null);
-  };
 
   const getCategoryLabel = (cat?: string) => {
     if (!cat) return null;
@@ -423,12 +600,6 @@ export default function PropertyDetailsPage() {
     const c = catMap[cat];
     return c ? (locale === 'ar' ? c.ar : c.en) : cat;
   };
-
-  // Owner details helper
-  const ownerName = property.owner?.firstName
-    ? `${property.owner.firstName} ${property.owner.lastName || ''}`.trim()
-    : property.owner?.name || (locale === 'ar' ? 'مالك موثق في داري' : 'Verified Dary Host');
-  const ownerPhone = property.owner?.whatsappPhone || property.owner?.phone;
 
   return (
     <main className="page" style={{ paddingTop: '7rem', paddingBottom: '4rem' }}>
@@ -1105,7 +1276,9 @@ export default function PropertyDetailsPage() {
                   {locale === 'ar' ? '📝 عن السكن' : '📝 About Property'}
                 </h3>
                 <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.8, fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-line' }}>
-                  {property.description}
+                  {typeof property.description === 'object' && property.description !== null
+                    ? (property.description[locale] || property.description.ar || property.description.en || JSON.stringify(property.description))
+                    : String(property.description)}
                 </p>
               </div>
             )}
@@ -1123,7 +1296,7 @@ export default function PropertyDetailsPage() {
                       room.roomType === 'DOUBLE' ? (locale === 'ar' ? 'غرفة ثنائية' : 'Double Room') :
                       room.roomType === 'TRIPLE' ? (locale === 'ar' ? 'غرفة ثلاثية' : 'Triple Room') :
                       room.roomType === 'QUAD' ? (locale === 'ar' ? 'غرفة رباعية' : 'Quad Room') : room.roomType;
-                    const isAvailable = room.availableBeds > 0;
+                    const isAvailable = Number(room.availableBeds) > 0 && room.status !== 'FULL';
 
                     return (
                       <div
@@ -1202,26 +1375,32 @@ export default function PropertyDetailsPage() {
                   {locale === 'ar' ? '✨ المرافق والخدمات المشمولة' : '✨ Amenities & Inclusions'}
                 </h3>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem' }}>
-                  {property.amenities.map((item: string, i: number) => (
-                    <span
-                      key={i}
-                      style={{
-                        padding: '0.45rem 0.95rem',
-                        borderRadius: '10px',
-                        backgroundColor: '#EFF6FF',
-                        color: 'var(--color-blue)',
-                        fontSize: '0.88rem',
-                        fontWeight: 700,
-                        border: '1px solid #DBEAFE',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <span>✓</span>
-                      <span>{item}</span>
-                    </span>
-                  ))}
+                  {property.amenities.map((item: any, i: number) => {
+                    const label =
+                      typeof item === 'object' && item !== null
+                        ? (item.name || item.title || item.label || JSON.stringify(item))
+                        : String(item);
+                    return (
+                      <span
+                        key={i}
+                        style={{
+                          padding: '0.45rem 0.95rem',
+                          borderRadius: '10px',
+                          backgroundColor: '#EFF6FF',
+                          color: 'var(--color-blue)',
+                          fontSize: '0.88rem',
+                          fontWeight: 700,
+                          border: '1px solid #DBEAFE',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>✓</span>
+                        <span>{label}</span>
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1235,97 +1414,189 @@ export default function PropertyDetailsPage() {
                 <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '14px', padding: '1.15rem' }}>
                   {Array.isArray(property.rules) ? (
                     <ul style={{ margin: 0, paddingInlineStart: '1.25rem', color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.9rem' }}>
-                      {property.rules.map((rule: string, rIdx: number) => (
-                        <li key={rIdx}>{rule}</li>
-                      ))}
+                      {property.rules.map((rule: any, rIdx: number) => {
+                        const ruleText = typeof rule === 'object' && rule !== null ? (rule.name || rule.rule || JSON.stringify(rule)) : String(rule);
+                        return <li key={rIdx}>{ruleText}</li>;
+                      })}
                     </ul>
                   ) : (
                     <p style={{ margin: 0, color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.9rem', whiteSpace: 'pre-line' }}>
-                      {property.rules}
+                      {typeof property.rules === 'object' && property.rules !== null
+                        ? (property.rules[locale] || property.rules.ar || property.rules.en || JSON.stringify(property.rules))
+                        : String(property.rules)}
                     </p>
                   )}
                 </div>
               </div>
             )}
 
-            {/* Owner / Host Information Card */}
-            <div
-              style={{
-                backgroundColor: '#FFFFFF',
-                border: '1px solid #E2E8F0',
-                borderRadius: '16px',
-                padding: '1.25rem',
-                marginBottom: '1rem',
-                boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '1rem',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div
-                  style={{
-                    width: '52px',
-                    height: '52px',
-                    borderRadius: '50%',
-                    backgroundColor: '#EFF6FF',
-                    color: 'var(--color-blue)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '1.35rem',
-                    fontWeight: 800,
-                    border: '2px solid #BFDBFE',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {property.owner?.avatar ? (
-                    <img src={property.owner.avatar} alt={ownerName} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    ownerName.charAt(0) || '👤'
-                  )}
-                </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>
-                    {locale === 'ar' ? 'المالك / المعلن المسئول' : 'Host / Owner'}
-                  </div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: 'var(--color-navy)' }}>
-                    {ownerName}
-                  </div>
-                  <div style={{ fontSize: '0.8rem', color: '#16A34A', fontWeight: 600 }}>
-                    ✓ {locale === 'ar' ? 'حساب مالك معتمد وموثق لدى منصة داري' : 'Verified Host on Dary Platform'}
-                  </div>
-                </div>
+            {/* ── Student Reviews & Ratings Section ───────────────────────────── */}
+            <div style={{ marginTop: '2.5rem', marginBottom: '2rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-navy)', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span>⭐</span>
+                  <span>{locale === 'ar' ? 'تقييمات وتجارب الطلاب' : 'Student Reviews & Ratings'}</span>
+                </h3>
+                {reviewsMeta && reviewsMeta.total > 0 && (
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-secondary)' }}>
+                    {reviewsMeta.total} {locale === 'ar' ? 'تقييم موثق' : 'verified reviews'}
+                  </span>
+                )}
               </div>
 
-              {ownerPhone && (
-                <a
-                  href={`https://wa.me/${ownerPhone.replace(/\D/g, '')}?text=${encodeURIComponent(
-                    locale === 'ar'
-                      ? `مرحبًا، أنا مهتم بحجز السكن: ${displayTitle}`
-                      : `Hello, I am interested in booking: ${displayTitle}`
-                  )}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
+              {/* Aggregates Card */}
+              {reviewsMeta && reviewsMeta.total > 0 ? (
+                <div
                   style={{
-                    display: 'inline-flex',
+                    backgroundColor: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '16px',
+                    padding: '1.25rem 1.5rem',
+                    marginBottom: '1.5rem',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '1.25rem',
                     alignItems: 'center',
-                    gap: '6px',
-                    padding: '0.65rem 1.15rem',
-                    borderRadius: '10px',
-                    backgroundColor: '#25D366',
-                    color: '#FFFFFF',
-                    fontWeight: 700,
-                    fontSize: '0.85rem',
-                    textDecoration: 'none',
-                    boxShadow: '0 3px 10px rgba(37, 211, 102, 0.25)',
                   }}
                 >
-                  <span>💬</span>
-                  <span>{locale === 'ar' ? 'تواصل عبر واتساب' : 'Chat on WhatsApp'}</span>
-                </a>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                    <div style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--color-blue)', lineHeight: 1 }}>
+                      {reviewsMeta.avgPropertyRating.toFixed(1)}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', gap: '2px', color: '#F59E0B', fontSize: '1.1rem', marginBottom: '0.2rem' }}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <span key={star}>
+                            {star <= Math.round(reviewsMeta.avgPropertyRating) ? '★' : '☆'}
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-navy)' }}>
+                        {locale === 'ar' ? 'تقييم العقار والخدمات' : 'Property & Amenities Rating'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', borderInlineStart: '1px solid #E2E8F0', paddingInlineStart: '1.25rem' }}>
+                    <div style={{ fontSize: '2.4rem', fontWeight: 900, color: '#16A34A', lineHeight: 1 }}>
+                      {reviewsMeta.avgOwnerRating.toFixed(1)}
+                    </div>
+                    <div>
+                      <div style={{ display: 'flex', gap: '2px', color: '#F59E0B', fontSize: '1.1rem', marginBottom: '0.2rem' }}>
+                        {[1, 2, 3, 4, 5].map((star) => (
+                          <span key={star}>
+                            {star <= Math.round(reviewsMeta.avgOwnerRating) ? '★' : '☆'}
+                          </span>
+                        ))}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-navy)' }}>
+                        {locale === 'ar' ? 'تقييم تعاون المالك' : 'Owner Cooperation Rating'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Reviews List */}
+              {reviewsLoading ? (
+                <div style={{ textAlign: 'center', padding: '2rem', color: '#64748B', fontSize: '0.9rem' }}>
+                  {locale === 'ar' ? 'جاري تحميل التقييمات...' : 'Loading reviews...'}
+                </div>
+              ) : reviews.length === 0 ? (
+                <div
+                  style={{
+                    backgroundColor: '#F8FAFC',
+                    border: '1px dashed #CBD5E1',
+                    borderRadius: '16px',
+                    padding: '2rem',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>💬</div>
+                  <div style={{ fontWeight: 700, color: 'var(--color-navy)', fontSize: '0.95rem', marginBottom: '0.35rem' }}>
+                    {locale === 'ar' ? 'لا توجد تقييمات منشورة لهذا السكن بعد' : 'No student reviews published yet'}
+                  </div>
+                  <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.85rem', margin: 0 }}>
+                    {locale === 'ar'
+                      ? 'يمكن للطلاب تقييم السكن والمالك بعد تأكيد وحضور الحجز.'
+                      : 'Students can rate and review this accommodation after completing their stay.'}
+                  </p>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {reviews.map((rev) => {
+                    const tenantName =
+                      rev.tenant?.firstName
+                        ? `${rev.tenant.firstName} ${rev.tenant?.lastName || ''}`.trim()
+                        : (locale === 'ar' ? 'طالب جامعي' : 'University Student');
+                    const initial = tenantName.charAt(0).toUpperCase();
+
+                    return (
+                      <div
+                        key={rev.id}
+                        style={{
+                          backgroundColor: '#FFFFFF',
+                          border: '1px solid #E2E8F0',
+                          borderRadius: '14px',
+                          padding: '1.25rem',
+                          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            {rev.tenant?.avatar ? (
+                              <img
+                                src={rev.tenant.avatar}
+                                alt={tenantName}
+                                style={{ width: '42px', height: '42px', borderRadius: '50%', objectFit: 'cover' }}
+                              />
+                            ) : (
+                              <div
+                                style={{
+                                  width: '42px',
+                                  height: '42px',
+                                  borderRadius: '50%',
+                                  backgroundColor: '#EEF2FF',
+                                  color: '#4F46E5',
+                                  fontWeight: 800,
+                                  fontSize: '1rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                {initial}
+                              </div>
+                            )}
+                            <div>
+                              <div style={{ fontWeight: 700, color: 'var(--color-navy)', fontSize: '0.92rem' }}>
+                                {tenantName}
+                              </div>
+                              <div style={{ fontSize: '0.75rem', color: '#94A3B8' }}>
+                                {rev.createdAt ? new Date(rev.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : ''}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', borderRadius: '6px', backgroundColor: '#FEF3C7', color: '#B45309', fontWeight: 700 }}>
+                              🏠 {locale === 'ar' ? 'السكن' : 'Property'}: {rev.propertyRating}/5 ★
+                            </span>
+                            <span style={{ fontSize: '0.75rem', padding: '0.25rem 0.6rem', borderRadius: '6px', backgroundColor: '#DCFCE7', color: '#15803D', fontWeight: 700 }}>
+                              👤 {locale === 'ar' ? 'المالك' : 'Owner'}: {rev.ownerRating}/5 ★
+                            </span>
+                          </div>
+                        </div>
+
+                        {rev.comment && (
+                          <p style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', lineHeight: 1.6 }}>
+                            {rev.comment}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
@@ -1336,7 +1607,7 @@ export default function PropertyDetailsPage() {
               {locale === 'ar' ? 'السعر الشهري' : 'Monthly Price'}
             </div>
             <div style={{ fontSize: '2.15rem', fontWeight: 900, color: 'var(--color-blue)', lineHeight: 1, marginBottom: '0.35rem' }}>
-              {property.price.toLocaleString()}
+              {Number(property.price || 0).toLocaleString()}
             </div>
             <div style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
               {property.currency} / {locale === 'ar' ? 'شهرياً' : 'month'}
@@ -1349,7 +1620,7 @@ export default function PropertyDetailsPage() {
                   {locale === 'ar' ? 'مبلغ التأمين المسترد:' : 'Security Deposit (Refundable):'}
                 </div>
                 <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--color-navy)' }}>
-                  🛡️ {property.deposit.toLocaleString()} {property.currency}
+                  🛡️ {Number(property.deposit || 0).toLocaleString()} {property.currency}
                 </div>
                 <div style={{ fontSize: '0.72rem', color: '#64748B', marginTop: '2px' }}>
                   {locale === 'ar' ? 'يُرد بالكامل عند انتهاء مدة الإقامة وتسليم الغرفة.' : 'Refunded upon checkout.'}
@@ -1437,30 +1708,55 @@ export default function PropertyDetailsPage() {
               )
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={handleOpenBookingModal}
-                  style={{
-                    width: '100%',
-                    padding: '0.9rem',
-                    borderRadius: '12px',
-                    background: 'var(--color-blue)',
-                    color: '#fff',
-                    fontWeight: 800,
-                    fontSize: '1rem',
-                    border: 'none',
-                    cursor: 'pointer',
-                    marginBottom: '0.75rem',
-                    boxShadow: '0 4px 14px rgba(47, 107, 255, 0.35)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <span>📅</span>
-                  <span>{locale === 'ar' ? 'طلب حجز سكن' : 'Request to Book'}</span>
-                </button>
+                {isFullyBooked ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      padding: '1rem',
+                      borderRadius: '12px',
+                      backgroundColor: '#FEE2E2',
+                      border: '1.5px solid #F87171',
+                      color: '#991B1B',
+                      marginBottom: '0.75rem',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontWeight: 800, fontSize: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '0.35rem' }}>
+                      <span>✕</span>
+                      <span>{locale === 'ar' ? 'السكن ممتلئ بالكامل' : 'Property Fully Booked'}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '0.78rem', color: '#B91C1C', lineHeight: 1.5 }}>
+                      {locale === 'ar'
+                        ? 'نعتذر، جميع الغرف والأسرة في هذا السكن محجوزة بالكامل حالياً.'
+                        : 'All rooms and beds in this property are currently occupied.'}
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleOpenBookingModal}
+                    style={{
+                      width: '100%',
+                      padding: '0.9rem',
+                      borderRadius: '12px',
+                      background: 'var(--color-blue)',
+                      color: '#fff',
+                      fontWeight: 800,
+                      fontSize: '1rem',
+                      border: 'none',
+                      cursor: 'pointer',
+                      marginBottom: '0.75rem',
+                      boxShadow: '0 4px 14px rgba(47, 107, 255, 0.35)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <span>📅</span>
+                    <span>{locale === 'ar' ? 'طلب حجز سكن' : 'Request to Book'}</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1829,12 +2125,21 @@ export default function PropertyDetailsPage() {
                       required
                       style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '0.9rem', outline: 'none', backgroundColor: '#FFFFFF' }}
                     >
-                      {property.rooms_.map((r: any, i: number) => (
-                        <option key={r.id || i} value={r.id}>
-                          {r.roomType} — {r.pricePerBed} {property.currency} / {locale === 'ar' ? 'سرير' : 'bed'} ({r.availableBeds} {locale === 'ar' ? 'أسرّة متاحة' : 'beds available'})
-                        </option>
-                      ))}
+                      {property.rooms_.map((r: any, i: number) => {
+                        const isAvail = Number(r.availableBeds) > 0 && r.status !== 'FULL';
+                        return (
+                          <option key={r.id || i} value={r.id} disabled={!isAvail}>
+                            {r.roomType} — {r.pricePerBed} {property.currency} / {locale === 'ar' ? 'سرير' : 'bed'} ({isAvail ? `${r.availableBeds} ${locale === 'ar' ? 'أسرّة متاحة' : 'beds available'}` : (locale === 'ar' ? 'ممتلئة بالكامل' : 'Fully Booked')})
+                          </option>
+                        );
+                      })}
                     </select>
+                  </div>
+                )}
+
+                {activeRoom && (Number(activeRoom.availableBeds) <= 0 || activeRoom.status === 'FULL') && (
+                  <div style={{ padding: '0.75rem 1rem', backgroundColor: '#FEF2F2', border: '1px solid #FECACA', color: '#DC2626', borderRadius: '10px', fontSize: '0.85rem', fontWeight: 700 }}>
+                    ✕ {locale === 'ar' ? 'هذه الغرفة ممتلئة بالكامل حالياً ولا تتوفر بها أسرّة شاغرة.' : 'This room is currently full and has no beds available.'}
                   </div>
                 )}
 
@@ -1846,8 +2151,9 @@ export default function PropertyDetailsPage() {
                   <input
                     type="number"
                     min="1"
-                    max={activeRoom?.availableBeds || 4}
+                    max={Math.max(1, activeRoom?.availableBeds || 1)}
                     value={bedsRequested}
+                    disabled={!activeRoom || Number(activeRoom.availableBeds) <= 0 || activeRoom.status === 'FULL'}
                     onChange={(e) => setBedsRequested(Math.max(1, Number(e.target.value)))}
                     required
                     style={{ width: '100%', padding: '0.75rem', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '0.9rem', outline: 'none' }}
@@ -1894,7 +2200,7 @@ export default function PropertyDetailsPage() {
                     </div>
                   </div>
                   <div style={{ fontSize: '1.4rem', fontWeight: 900, color: '#16A34A' }}>
-                    {estimatedTotal.toLocaleString()} {property.currency}
+                    {Number(estimatedTotal || 0).toLocaleString()} {property.currency}
                   </div>
                 </div>
 
@@ -1924,20 +2230,44 @@ export default function PropertyDetailsPage() {
 
                   <button
                     type="submit"
-                    disabled={bookingLoading}
+                    disabled={
+                      bookingLoading ||
+                      !activeRoom ||
+                      Number(activeRoom.availableBeds) <= 0 ||
+                      activeRoom.status === 'FULL' ||
+                      bedsRequested > Number(activeRoom.availableBeds || 0)
+                    }
                     style={{
                       padding: '0.7rem 1.5rem',
                       borderRadius: '10px',
-                      backgroundColor: bookingLoading ? '#94A3B8' : 'var(--color-blue)',
+                      backgroundColor:
+                        bookingLoading ||
+                        !activeRoom ||
+                        Number(activeRoom.availableBeds) <= 0 ||
+                        activeRoom.status === 'FULL' ||
+                        bedsRequested > Number(activeRoom.availableBeds || 0)
+                          ? '#94A3B8'
+                          : 'var(--color-blue)',
                       color: '#FFFFFF',
                       fontWeight: 800,
                       fontSize: '0.9rem',
-                      cursor: bookingLoading ? 'not-allowed' : 'pointer',
+                      cursor:
+                        bookingLoading ||
+                        !activeRoom ||
+                        Number(activeRoom.availableBeds) <= 0 ||
+                        activeRoom.status === 'FULL' ||
+                        bedsRequested > Number(activeRoom.availableBeds || 0)
+                          ? 'not-allowed'
+                          : 'pointer',
                       border: 'none',
                       boxShadow: '0 4px 12px rgba(47, 107, 255, 0.25)',
                     }}
                   >
-                    {bookingLoading ? (locale === 'ar' ? 'جاري الإرسال...' : 'Sending...') : (locale === 'ar' ? 'تأكيد طلب الحجز 🚀' : 'Confirm Request 🚀')}
+                    {bookingLoading
+                      ? (locale === 'ar' ? 'جاري الإرسال...' : 'Sending...')
+                      : !activeRoom || Number(activeRoom.availableBeds) <= 0 || activeRoom.status === 'FULL'
+                      ? (locale === 'ar' ? '✕ الغرفة ممتلئة بالكامل' : '✕ Fully Booked')
+                      : (locale === 'ar' ? 'تأكيد طلب الحجز 🚀' : 'Confirm Request 🚀')}
                   </button>
                 </div>
               </form>

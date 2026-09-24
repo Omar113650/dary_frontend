@@ -3,6 +3,7 @@ import { Outlet, useLocation } from 'react-router-dom';
 import DashboardSidebar from './DashboardSidebar';
 import DashboardHeader from './DashboardHeader';
 import { TenantService } from '../../services/tenantService';
+import { defaultQueryClient, STALE_TIMES } from '../../lib/queryClient';
 import './Dashboard.css';
 
 interface DashboardLayoutProps {
@@ -18,16 +19,20 @@ export default function DashboardLayout({ basePath: customBasePath }: DashboardL
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    // Poll notifications count once on mount
+    // Fetch notifications count with cached stale time
     let isMounted = true;
-    TenantService.getNotifications(1, 10)
+    defaultQueryClient
+      .fetchQuery({
+        queryKey: ['tenant', 'notifications', 1, 10],
+        queryFn: () => TenantService.getNotifications(1, 10),
+        staleTime: STALE_TIMES.LIVE,
+      })
       .then((res) => {
         if (!isMounted) return;
-        const unread = res.items.filter((n) => !n.isRead && !n.read).length;
+        const unread = res?.items ? res.items.filter((n: any) => !n.isRead && !n.read).length : 0;
         setUnreadCount(unread);
       })
       .catch((err) => {
-        // Log API error; don't break the layout
         console.warn('[DashboardLayout] Could not fetch notifications count:', err);
       });
 

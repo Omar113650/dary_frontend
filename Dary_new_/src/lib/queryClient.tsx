@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useCallback, useSyncExternalStore } from 'react';
 
 // ==========================================
 // 1. STALE TIMES & CACHE CONFIGURATION
@@ -508,6 +508,10 @@ export function useQuery<TData = any, TError = any>(
     });
   };
 
+  const stableRefetch = useCallback(async () => {
+    return refetch.current();
+  }, []);
+
   return {
     data: rawData,
     error: queryState.error,
@@ -518,7 +522,7 @@ export function useQuery<TData = any, TError = any>(
     status: queryState.status === 'idle' ? 'pending' : (queryState.status as any),
     fetchStatus: queryState.fetchStatus,
     dataUpdatedAt: queryState.dataUpdatedAt,
-    refetch: () => refetch.current(),
+    refetch: stableRefetch,
   };
 }
 

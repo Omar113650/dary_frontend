@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
+import { ContractService } from '../../services/contractService';
+import type { ContractItem } from '../../services/contractService';
 import type {
   OwnerPropertyItem,
   OwnerPropertyBookingItem,
@@ -47,6 +49,54 @@ export default function OwnerBookingsPage() {
   // Selected Booking Details Modal State
   const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
   const [modalNote, setModalNote] = useState<string>('');
+
+  // Owner Contract Modal State
+  const [contractBooking, setContractBooking] = useState<any | null>(null);
+  const [contractData, setContractData] = useState<ContractItem | null>(null);
+  const [loadingContract, setLoadingContract] = useState(false);
+  const [ownerSigningFile, setOwnerSigningFile] = useState<File | null>(null);
+  const [uploadingOwnerSign, setUploadingOwnerSign] = useState(false);
+  const [contractActionMsg, setContractActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const openOwnerContractModal = async (booking: any) => {
+    setContractBooking(booking);
+    setContractData(null);
+    setOwnerSigningFile(null);
+    setContractActionMsg(null);
+    setLoadingContract(true);
+    try {
+      const data = await ContractService.getContractByBooking(booking.id);
+      setContractData(data);
+    } catch (err: any) {
+      console.error('Failed to load contract for owner:', err);
+    } finally {
+      setLoadingContract(false);
+    }
+  };
+
+  const handleOwnerSign = async () => {
+    if (!contractData || !ownerSigningFile) return;
+    setUploadingOwnerSign(true);
+    setContractActionMsg(null);
+    try {
+      await ContractService.ownerSignContract(contractData.id, ownerSigningFile);
+      setContractActionMsg({
+        type: 'success',
+        text: locale === 'ar' ? 'تم رفع نسختك الموقعة بنجاح! بانتظار تفعيل العقد من إدارة المنصة.' : 'Owner signature uploaded successfully!',
+      });
+      if (contractBooking) {
+        const updated = await ContractService.getContractByBooking(contractBooking.id);
+        setContractData(updated);
+      }
+    } catch (err: any) {
+      setContractActionMsg({
+        type: 'error',
+        text: err?.message || (locale === 'ar' ? 'فشل رفع توقيع العقد. تأكد من رفع ملف PDF.' : 'Failed to upload contract. Please ensure you select a PDF file.'),
+      });
+    } finally {
+      setUploadingOwnerSign(false);
+    }
+  };
 
   const loadBookingsForProperty = useCallback(
     async (propId: string, currentProps: OwnerPropertyItem[]) => {
@@ -182,13 +232,35 @@ export default function OwnerBookingsPage() {
       queryClient.invalidateQueries({ queryKey: ['owner', 'revenue'] });
     } catch (err: any) {
       console.error('[OwnerBookingsPage] Update status failed:', err);
-      setActionErrorMessage(
-        err?.response?.data?.message ||
-          err?.message ||
-          (locale === 'ar'
+      const rawMessage = err?.response?.data?.message || err?.message;
+      let displayMessage = rawMessage;
+
+      const errorMapAr: Record<string, string> = {
+        'booking.invalidStatusTransition': 'لا يمكن تغيير حالة الحجز بهذا الشكل (تحقق من تسلسل الحالات المسموح به).',
+        'booking.notFound': 'طلب الحجز غير موجود أو تم حذفه.',
+        'booking.alreadyRequested': 'يوجد طلب حجز قائم بالفعل على هذه الغرفة.',
+        'booking.contractNotSigned': 'لا يمكن إغلاق الحجز قبل توقيع العقد من الطرفين.',
+        'booking.cannotCancel': 'لا يمكن إلغاء هذا الحجز في حالته الحالية.',
+      };
+
+      const errorMapEn: Record<string, string> = {
+        'booking.invalidStatusTransition': 'This booking status transition is not allowed.',
+        'booking.notFound': 'Booking request not found.',
+        'booking.alreadyRequested': 'A booking already exists for this room.',
+        'booking.contractNotSigned': 'Booking cannot be closed before contract is signed.',
+        'booking.cannotCancel': 'This booking cannot be cancelled in its current state.',
+      };
+
+      if (rawMessage && (locale === 'ar' ? errorMapAr[rawMessage] : errorMapEn[rawMessage])) {
+        displayMessage = locale === 'ar' ? errorMapAr[rawMessage] : errorMapEn[rawMessage];
+      } else if (!displayMessage) {
+        displayMessage =
+          locale === 'ar'
             ? 'تعذر تحديث حالة الحجز. يرجى المحاولة مرة أخرى.'
-            : 'Failed to update booking status. Please try again.')
-      );
+            : 'Failed to update booking status. Please try again.';
+      }
+
+      setActionErrorMessage(displayMessage);
     } finally {
       setUpdatingBookingId(null);
       setTimeout(() => {
@@ -929,6 +1001,28 @@ export default function OwnerBookingsPage() {
 
                     {/* Communication & Modal Details Buttons */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      {/* Contract button */}
+                      <button
+                        type="button"
+                        onClick={() => openOwnerContractModal(b)}
+                        style={{
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#EFF6FF',
+                          color: '#2F6BFF',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          border: '1px solid #BFDBFE',
+                        }}
+                      >
+                        <span>📝</span>
+                        <span>{locale === 'ar' ? 'العقد والتوقيع' : 'Contract & Sign'}</span>
+                      </button>
+
                       {tenantPhone && (
                         <a
                           href={`https://wa.me/${tenantPhone.replace(/[^0-9]/g, '')}`}
@@ -1316,6 +1410,252 @@ export default function OwnerBookingsPage() {
                 {locale === 'ar' ? 'إغلاق' : 'Close'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Owner Digital Contract Modal */}
+      {contractBooking && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(11, 42, 74, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.5rem',
+            zIndex: 60,
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '20px',
+              padding: '2rem',
+              maxWidth: '560px',
+              width: '100%',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, color: 'var(--dary-navy)', fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span>📝</span>
+                <span>{locale === 'ar' ? 'عقد الإيجار الإلكتروني للمالك' : 'Owner Digital Contract'}</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setContractBooking(null)}
+                style={{ fontSize: '1.2rem', color: '#94A3B8', cursor: 'pointer', border: 'none', background: 'none' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingContract ? (
+              <div style={{ padding: '2.5rem 0', textAlign: 'center', color: 'var(--dary-muted)' }}>
+                <div style={{ width: '32px', height: '32px', border: '3px solid #E2E8F0', borderTopColor: '#2F6BFF', borderRadius: '50%', margin: '0 auto 1rem', animation: 'spin 0.8s linear infinite' }} />
+                <p style={{ margin: 0, fontSize: '0.9rem' }}>{locale === 'ar' ? 'جاري جلب بيانات العقد...' : 'Loading contract...'}</p>
+              </div>
+            ) : !contractData ? (
+              <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
+                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📄</div>
+                <h4 style={{ margin: '0 0 0.5rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
+                  {locale === 'ar' ? 'لم يتم إنشاء مسودة العقد بعد' : 'No Contract Draft Created Yet'}
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--dary-muted)', lineHeight: 1.6 }}>
+                  {locale === 'ar'
+                    ? 'سيقوم المشرف العام للمنصة بإنشاء العقد ورفع المسودة، وستظهر هنا فور جاهزيتها لتتمكن من مراجعتها وتوقيعها.'
+                    : 'The administration will create the contract draft after agreement.'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setContractBooking(null)}
+                  style={{
+                    marginTop: '1.5rem',
+                    padding: '0.6rem 1.5rem',
+                    borderRadius: '10px',
+                    backgroundColor: '#F1F5F9',
+                    border: 'none',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {locale === 'ar' ? 'إغلاق' : 'Close'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                {contractActionMsg && (
+                  <div
+                    style={{
+                      padding: '0.75rem 1rem',
+                      borderRadius: '10px',
+                      backgroundColor: contractActionMsg.type === 'success' ? '#F0FDF4' : '#FEF2F2',
+                      border: `1px solid ${contractActionMsg.type === 'success' ? '#BBF7D0' : '#FECACA'}`,
+                      color: contractActionMsg.type === 'success' ? '#166534' : '#991B1B',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    {contractActionMsg.text}
+                  </div>
+                )}
+
+                {/* Contract Status Overview */}
+                <div style={{ padding: '1rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--dary-muted)', display: 'block' }}>
+                      {locale === 'ar' ? 'رقم العقد:' : 'Contract Number:'}
+                    </span>
+                    <strong style={{ color: 'var(--dary-navy)', fontFamily: 'monospace' }}>
+                      {contractData.contractNumber || contractData.id.slice(0, 8)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span
+                      style={{
+                        padding: '0.35rem 0.75rem',
+                        borderRadius: '6px',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        backgroundColor:
+                          contractData.status === 'ACTIVE'
+                            ? '#DCFCE7'
+                            : contractData.status === 'SIGNED'
+                            ? '#EFF6FF'
+                            : contractData.status === 'SENT'
+                            ? '#FEF9C3'
+                            : '#F1F5F9',
+                        color:
+                          contractData.status === 'ACTIVE'
+                            ? '#15803D'
+                            : contractData.status === 'SIGNED'
+                            ? '#1D4ED8'
+                            : contractData.status === 'SENT'
+                            ? '#A16207'
+                            : '#475569',
+                      }}
+                    >
+                      {contractData.status}
+                    </span>
+                  </div>
+                </div>
+
+                {/* PDF Downloads */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {contractData.draftPdfUrl && (
+                    <div style={{ padding: '0.85rem 1rem', border: '1px dashed #CBD5E1', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)' }}>
+                        {locale === 'ar' ? 'مسودة العقد الأساسية' : 'Official Draft'}
+                      </span>
+                      <a
+                        href={contractData.draftPdfUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ padding: '0.4rem 0.85rem', backgroundColor: '#0B2A4A', color: '#FFFFFF', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
+                      >
+                        📥 {locale === 'ar' ? 'تحميل المسودة' : 'Download Draft'}
+                      </a>
+                    </div>
+                  )}
+
+                  {contractData.tenantSignedPdfUrl && (
+                    <div style={{ padding: '0.85rem 1rem', border: '1px dashed #BBF7D0', backgroundColor: '#F0FDF4', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#166534' }}>
+                        {locale === 'ar' ? '✓ نسخة توقيع الطالب المستأجر' : '✓ Tenant Signed Copy'}
+                      </span>
+                      <a
+                        href={contractData.tenantSignedPdfUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ padding: '0.4rem 0.85rem', backgroundColor: '#16A34A', color: '#FFFFFF', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
+                      >
+                        📄 {locale === 'ar' ? 'معاينة توقيع الطالب' : 'View Tenant Signature'}
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                {/* Signatures status */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.825rem' }}>
+                  <div style={{ padding: '0.75rem', backgroundColor: contractData.tenantSignedAt ? '#F0FDF4' : '#FFFBEB', borderRadius: '8px', border: `1px solid ${contractData.tenantSignedAt ? '#BBF7D0' : '#FDE68A'}` }}>
+                    <div style={{ fontWeight: 700, color: contractData.tenantSignedAt ? '#15803D' : '#B45309' }}>
+                      {contractData.tenantSignedAt ? '✓ تم توقيع المستأجر' : '⏳ بانتظار توقيع المستأجر'}
+                    </div>
+                    {contractData.tenantSignedAt && (
+                      <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: '0.25rem' }}>
+                        {new Date(contractData.tenantSignedAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ padding: '0.75rem', backgroundColor: contractData.ownerSignedAt ? '#F0FDF4' : '#FFFBEB', borderRadius: '8px', border: `1px solid ${contractData.ownerSignedAt ? '#BBF7D0' : '#FDE68A'}` }}>
+                    <div style={{ fontWeight: 700, color: contractData.ownerSignedAt ? '#15803D' : '#B45309' }}>
+                      {contractData.ownerSignedAt ? '✓ تم توقيعك كمالك' : '⏳ بانتظار توقيعك'}
+                    </div>
+                    {contractData.ownerSignedAt && (
+                      <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: '0.25rem' }}>
+                        {new Date(contractData.ownerSignedAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upload Owner Signed PDF */}
+                {!contractData.ownerSignedAt && contractData.status !== 'CANCELLED' && (
+                  <div style={{ padding: '1rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
+                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                      {locale === 'ar' ? 'رفع نسختك الموقعة كمالك (ملف PDF)' : 'Upload Owner Signed PDF'}
+                    </label>
+                    <input
+                      type="file"
+                      accept="application/pdf"
+                      onChange={(e) => setOwnerSigningFile(e.target.files?.[0] || null)}
+                      style={{ fontSize: '0.85rem', marginBottom: '0.75rem', width: '100%' }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!ownerSigningFile || uploadingOwnerSign}
+                      onClick={handleOwnerSign}
+                      style={{
+                        padding: '0.6rem 1.25rem',
+                        backgroundColor: ownerSigningFile && !uploadingOwnerSign ? '#16A34A' : '#94A3B8',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        cursor: ownerSigningFile && !uploadingOwnerSign ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      {uploadingOwnerSign
+                        ? (locale === 'ar' ? 'جاري الرفع...' : 'Uploading...')
+                        : (locale === 'ar' ? 'تأكيد توقيع المالك ✍️' : 'Confirm Owner Signature ✍️')}
+                    </button>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setContractBooking(null)}
+                    style={{
+                      padding: '0.55rem 1.25rem',
+                      borderRadius: '8px',
+                      backgroundColor: '#F1F5F9',
+                      border: 'none',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {locale === 'ar' ? 'إغلاق' : 'Close'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

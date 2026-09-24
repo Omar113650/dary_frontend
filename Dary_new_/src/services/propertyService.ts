@@ -16,6 +16,37 @@ export interface PropertyFilterParams {
   limit?: number;
 }
 
+// In-memory cache + sessionStorage backup for instant property retrieval
+const propertyMemoryCache = new Map<string, Property>();
+
+export function cacheProperty(prop: Property): void {
+  if (!prop?.id) return;
+  propertyMemoryCache.set(prop.id, prop);
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.setItem(`dary_prop_${prop.id}`, JSON.stringify(prop));
+    } catch {}
+  }
+}
+
+export function getCachedProperty(id: string): Property | null {
+  if (!id) return null;
+  if (propertyMemoryCache.has(id)) {
+    return propertyMemoryCache.get(id)!;
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem(`dary_prop_${id}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        propertyMemoryCache.set(id, parsed);
+        return parsed;
+      }
+    } catch {}
+  }
+  return null;
+}
+
 export function normalizeProperty(raw: any): Property {
   const id = String(raw.id || raw._id || raw.propertyId || '');
 
@@ -63,11 +94,16 @@ export function normalizeProperty(raw: any): Property {
       ? { ar: raw.type.ar || '', en: raw.type.en || '' }
       : typeMap[typeKey] || { ar: String(rawType || 'سكن طلابي'), en: String(rawType || 'Student Housing') };
 
-  const price = Number(raw.price || raw.startingPrice || 0);
+  const price = Number(raw.price || raw.startingPrice || raw.starting_price || 0);
   const currency = String(raw.currency || 'EGP');
 
-  // Rooms parsing
-  let rooms_: any[] = raw.rooms_ || raw.rooms || raw.roomsConfig || [];
+  // Rooms parsing (handle integer room count vs relation array)
+  let rooms_: any[] =
+    raw.rooms_ ||
+    raw.propertyRooms ||
+    (Array.isArray(raw.rooms) ? raw.rooms : []) ||
+    raw.roomsConfig ||
+    [];
   if (typeof rooms_ === 'string') {
     try {
       rooms_ = JSON.parse(rooms_);
@@ -77,18 +113,29 @@ export function normalizeProperty(raw: any): Property {
   }
   if (!Array.isArray(rooms_)) rooms_ = [];
 
-  const bedrooms = Number(raw.bedrooms || (rooms_.length > 0 ? rooms_.length : 1));
+  const bedrooms = Number(
+    raw.bedrooms ||
+    (typeof raw.rooms === 'number' ? raw.rooms : 0) ||
+    (rooms_.length > 0 ? rooms_.length : 1)
+  );
   const bathrooms = Number(raw.bathrooms || 1);
 
-  // Amenities parsing
+  // Amenities parsing (safely convert objects to strings if needed)
   let amenities: string[] = [];
   if (Array.isArray(raw.amenities)) {
-    amenities = raw.amenities;
+    amenities = raw.amenities.map((a: any) =>
+      typeof a === 'object' && a !== null ? (a.name || a.title || a.label || JSON.stringify(a)) : String(a)
+    );
   } else if (typeof raw.amenities === 'string') {
     try {
       const parsed = JSON.parse(raw.amenities);
-      if (Array.isArray(parsed)) amenities = parsed;
-      else amenities = raw.amenities.split(',').map((s: string) => s.trim()).filter(Boolean);
+      if (Array.isArray(parsed)) {
+        amenities = parsed.map((a: any) =>
+          typeof a === 'object' && a !== null ? (a.name || a.title || a.label || JSON.stringify(a)) : String(a)
+        );
+      } else {
+        amenities = raw.amenities.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
     } catch {
       amenities = raw.amenities.split(',').map((s: string) => s.trim()).filter(Boolean);
     }
@@ -100,7 +147,7 @@ export function normalizeProperty(raw: any): Property {
 
   const addImageUrl = (urlOrObj: any, defaultCategory = 'general') => {
     if (!urlOrObj) return;
-    const url = typeof urlOrObj === 'string' ? urlOrObj : urlOrObj?.url;
+    const url = typeof urlOrObj === 'string' ? urlOrObj : (urlOrObj?.url || urlOrObj?.imageUrl || urlOrObj?.photoUrl || urlOrObj?.path);
     if (!url || typeof url !== 'string' || url.startsWith('file://')) return;
     if (seenUrls.has(url)) return;
     seenUrls.add(url);
@@ -116,6 +163,9 @@ export function normalizeProperty(raw: any): Property {
   }
   if (Array.isArray(raw.images)) {
     raw.images.forEach((img: any) => addImageUrl(img, 'general'));
+  }
+  if (Array.isArray(raw.propertyImages)) {
+    raw.propertyImages.forEach((img: any) => addImageUrl(img, 'general'));
   }
   if (Array.isArray(raw.photos)) {
     raw.photos.forEach((img: any) => addImageUrl(img, 'general'));
@@ -155,15 +205,28 @@ export function normalizeProperty(raw: any): Property {
   }
 
   // Normalize rooms items
-  const normalizedRooms = rooms_.map((r: any, idx: number) => ({
-    id: String(r.id || r._id || `room-${idx + 1}`),
-    roomType: r.roomType || 'SINGLE',
-    pricePerBed: Number(r.pricePerBed || raw.price || 0),
-    totalBeds: Number(r.totalBeds || 1),
-    availableBeds: Number(r.availableBeds !== undefined ? r.availableBeds : r.totalBeds || 1),
-    photoUrl: r.photoUrl || (Array.isArray(raw.roomPhotos) ? raw.roomPhotos[idx] : undefined),
-    status: r.status || 'AVAILABLE',
-  }));
+  const normalizedRooms = rooms_.map((r: any, idx: number) => {
+    const totalBeds = Number(r.totalBeds || r.total_beds || 1);
+    const rawAvail =
+      r.availableBeds !== undefined && r.availableBeds !== null
+        ? r.availableBeds
+        : r.available_beds !== undefined && r.available_beds !== null
+        ? r.available_beds
+        : r.remainingBeds !== undefined && r.remainingBeds !== null
+        ? r.remainingBeds
+        : undefined;
+    const availableBeds = rawAvail !== undefined ? Number(rawAvail) : totalBeds;
+    const status = availableBeds <= 0 ? 'FULL' : (r.status || 'AVAILABLE');
+    return {
+      id: String(r.id || r._id || `room-${idx + 1}`),
+      roomType: r.roomType || r.room_type || 'SINGLE',
+      pricePerBed: Number(r.pricePerBed || r.price_per_bed || raw.price || 0),
+      totalBeds,
+      availableBeds: Math.max(0, availableBeds),
+      photoUrl: r.photoUrl || r.photo_url || (Array.isArray(raw.roomPhotos) ? raw.roomPhotos[idx] : undefined),
+      status,
+    };
+  });
 
   const isFurnished = raw.isFurnished !== undefined ? Boolean(raw.isFurnished) : true;
   const electricityIncluded = Boolean(raw.electricityIncluded);
@@ -177,7 +240,7 @@ export function normalizeProperty(raw: any): Property {
   const area = raw.area !== undefined ? Number(raw.area) : (raw.squareMeters !== undefined ? Number(raw.squareMeters) : undefined);
   const rules = raw.rules || raw.houseRules || undefined;
 
-  return {
+  const normalized: Property = {
     ...raw,
     id,
     title,
@@ -217,6 +280,9 @@ export function normalizeProperty(raw: any): Property {
     verified: Boolean(raw.isVerified || raw.verified),
     createdAt: raw.createdAt || new Date().toISOString(),
   };
+
+  cacheProperty(normalized);
+  return normalized;
 }
 
 export const propertyService = {
@@ -316,16 +382,26 @@ export const propertyService = {
       const response = await ApiClient.get<any>(`/properties/${id}`);
       const raw =
         response?.data?.property ||
+        response?.data?.data ||
         response?.data?.item ||
         response?.data ||
         response?.property ||
         response;
       if (!raw || (!raw.id && !raw._id && !raw.propertyId)) {
+        console.warn('[getPropertyById] Received raw payload without ID:', raw);
+        const cached = getCachedProperty(id);
+        if (cached) return cached;
         return null;
       }
       return normalizeProperty(raw);
-    } catch {
-      return null;
+    } catch (err: any) {
+      console.error(`[getPropertyById] Failed to fetch property id=${id}:`, err);
+      const cached = getCachedProperty(id);
+      if (cached) {
+        console.log(`[getPropertyById] Returning cached property for id=${id}`);
+        return cached;
+      }
+      throw err;
     }
   },
 
@@ -376,8 +452,8 @@ export const propertyService = {
    * 8. POST /properties/:propertyId/rooms
    * Add Room (multipart/form-data)
    */
-  async addRoom(propertyId: string, formData: FormData): Promise<any> {
-    const res = await ApiClient.post<any>(`/properties/${propertyId}/rooms`, formData);
+  async addRoom(propertyId: string, payload: FormData | Record<string, any>): Promise<any> {
+    const res = await ApiClient.post<any>(`/properties/${propertyId}/rooms`, payload);
     return res?.data || res;
   },
 

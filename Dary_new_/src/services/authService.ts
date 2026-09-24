@@ -110,22 +110,25 @@ export class AuthService {
 
   /**
    * 3. POST /auth/verify-otp
-   * Body: { email, otp }
+   * Body: { email, otp, type: "EMAIL_VERIFICATION" }
    */
-  static async verifyOtp(data: VerifyOtpData): Promise<any> {
+  static async verifyOtp(data: VerifyOtpData & { type?: string; code?: string }): Promise<any> {
+    const otpValue = (data.otp || data.code || '').trim();
     return ApiClient.post<any>('/auth/verify-otp', {
       email: data.email.trim().toLowerCase(),
-      otp: data.otp.trim(),
+      otp: otpValue,
+      type: data.type || 'EMAIL_VERIFICATION',
     });
   }
 
   /**
    * 4. POST /auth/resend-otp
-   * Body: { email }
+   * Body: { email, type: "EMAIL_VERIFICATION" }
    */
-  static async resendOtp(email: string): Promise<any> {
+  static async resendOtp(email: string, type = 'EMAIL_VERIFICATION'): Promise<any> {
     return ApiClient.post<any>('/auth/resend-otp', {
       email: email.trim().toLowerCase(),
+      type,
     });
   }
 

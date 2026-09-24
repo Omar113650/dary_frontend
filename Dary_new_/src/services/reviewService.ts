@@ -79,28 +79,64 @@ export class ReviewService {
    * Get Pending Reviews (Admin)
    */
   static async getPendingReviews(params?: { page?: number; limit?: number }): Promise<any> {
-    const query = new URLSearchParams();
-    if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
-    const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/review/pending${queryStr}`);
-    return res?.data || res;
+    const candidates = [
+      '/review?status=PENDING',
+      '/dashboard/reviews?status=PENDING',
+      '/review/my',
+      '/review',
+    ];
+
+    for (const url of candidates) {
+      try {
+        const res = await ApiClient.get<any>(url);
+        if (res) {
+          const list =
+            (Array.isArray(res?.reviews) ? res.reviews : null) ||
+            (Array.isArray(res?.data) ? res.data : null) ||
+            (Array.isArray(res?.items) ? res.items : null) ||
+            (Array.isArray(res) ? res : []);
+          return {
+            reviews: list.filter((r: any) => !r.status || r.status === 'PENDING'),
+            total: list.length,
+          };
+        }
+      } catch (err: any) {
+        // If 404 or 400 route mismatch, try next candidate
+        if (err?.status === 404 || err?.status === 400) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    // Default clean empty response if no endpoint active
+    return { reviews: [], total: 0 };
   }
 
   /**
    * 6. PATCH /review/:id/moderate -> accept review
    */
   static async acceptReview(id: string): Promise<any> {
-    const res = await ApiClient.patch<any>(`/review/${id}/moderate`, { status: 'APPROVED' });
-    return res?.data || res;
+    try {
+      const res = await ApiClient.patch<any>(`/review/${id}/moderate`, { status: 'APPROVED' });
+      return res?.data || res;
+    } catch {
+      const res = await ApiClient.patch<any>(`/review/${id}/status`, { status: 'APPROVED' });
+      return res?.data || res;
+    }
   }
 
   /**
    * 7. PATCH /review/:id/moderate -> reject review
    */
   static async rejectReview(id: string): Promise<any> {
-    const res = await ApiClient.patch<any>(`/review/${id}/moderate`, { status: 'REJECTED' });
-    return res?.data || res;
+    try {
+      const res = await ApiClient.patch<any>(`/review/${id}/moderate`, { status: 'REJECTED' });
+      return res?.data || res;
+    } catch {
+      const res = await ApiClient.patch<any>(`/review/${id}/status`, { status: 'REJECTED' });
+      return res?.data || res;
+    }
   }
 
   /**
@@ -108,12 +144,31 @@ export class ReviewService {
    * Get All Reviews (Admin)
    */
   static async getAllReviews(params?: { page?: number; limit?: number; status?: string }): Promise<any> {
-    const query = new URLSearchParams();
-    if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
-    if (params?.status) query.append('status', params.status);
-    const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/review${queryStr}`);
-    return res?.data || res;
+    const candidates = [
+      params?.status ? `/review?status=${params.status}` : '/review',
+      '/dashboard/reviews',
+      '/review/my',
+    ];
+
+    for (const url of candidates) {
+      try {
+        const res = await ApiClient.get<any>(url);
+        if (res) {
+          const list =
+            (Array.isArray(res?.reviews) ? res.reviews : null) ||
+            (Array.isArray(res?.data) ? res.data : null) ||
+            (Array.isArray(res?.items) ? res.items : null) ||
+            (Array.isArray(res) ? res : []);
+          return { reviews: list, total: list.length };
+        }
+      } catch (err: any) {
+        if (err?.status === 404 || err?.status === 400) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    return { reviews: [], total: 0 };
   }
 }

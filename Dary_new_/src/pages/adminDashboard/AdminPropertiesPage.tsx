@@ -11,7 +11,10 @@ export default function AdminPropertiesPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
-  const [properties, setProperties] = useState<AdminPropertyItem[]>([]);
+  const initialCache = queryClient.getQueryData<any>(['admin', 'properties', { page: 1, limit: 10 }]);
+  const initialList = initialCache?.properties || initialCache?.items || initialCache?.data || (Array.isArray(initialCache) ? initialCache : []);
+
+  const [properties, setProperties] = useState<AdminPropertyItem[]>(() => (Array.isArray(initialList) ? initialList : []));
   
   // Cached: 5m staleTime
   const {
@@ -20,7 +23,7 @@ export default function AdminPropertiesPage() {
     refetch: fetchStatus,
   } = useAdminPropertiesStatus();
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [error, setError] = useState<string | null>(null);
 
   // Filters
@@ -44,7 +47,10 @@ export default function AdminPropertiesPage() {
 
   // 2. Fetch Properties List
   const fetchProperties = useCallback(async () => {
-    const cacheKey = ['admin', 'properties', { page, limit: 10 }];
+    const isPending = statusFilter === 'PENDING';
+    const cacheKey = isPending
+      ? ['admin', 'properties', 'pending', { page, limit: 10 }]
+      : ['admin', 'properties', { page, limit: 10 }];
     const cached = queryClient.getQueryData<any>(cacheKey);
     if (cached) {
       const list = cached?.properties || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
@@ -59,7 +65,10 @@ export default function AdminPropertiesPage() {
     try {
       const data = await queryClient.fetchQuery({
         queryKey: cacheKey,
-        queryFn: () => AdminService.getProperties({ page, limit: 10 }),
+        queryFn: () =>
+          isPending
+            ? AdminService.getPendingProperties({ page, limit: 10 })
+            : AdminService.getProperties({ page, limit: 10 }),
         staleTime: STALE_TIMES.LISTS,
       });
       const list = data?.properties || data?.items || data?.data || (Array.isArray(data) ? data : []);
@@ -69,7 +78,7 @@ export default function AdminPropertiesPage() {
       const limit = data?.limit || 10;
       setTotalPages(Math.max(1, Math.ceil(total / limit)));
     } catch (err: any) {
-      console.error('[AdminPropertiesPage] GET /dashboard/properties failed:', err);
+      console.error('[AdminPropertiesPage] Fetch properties failed:', err);
       setError(
         err?.message ||
           (locale === 'ar'
@@ -79,7 +88,7 @@ export default function AdminPropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale, queryClient]);
+  }, [page, statusFilter, locale, queryClient]);
 
   // Handle Approve
   const handleApprove = async (id: string) => {
@@ -160,10 +169,6 @@ export default function AdminPropertiesPage() {
       setActionLoadingId(null);
     }
   };
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
 
   useEffect(() => {
     fetchProperties();
@@ -286,7 +291,10 @@ export default function AdminPropertiesPage() {
             <button
               key={st}
               type="button"
-              onClick={() => setStatusFilter(st)}
+              onClick={() => {
+                setStatusFilter(st);
+                setPage(1);
+              }}
               style={{
                 padding: '0.4rem 0.85rem',
                 borderRadius: '6px',

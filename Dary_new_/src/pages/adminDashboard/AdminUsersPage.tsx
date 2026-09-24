@@ -10,7 +10,11 @@ export default function AdminUsersPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
-  const [users, setUsers] = useState<AdminUserItem[]>([]);
+  const initialParams = { page: 1, limit: 10 };
+  const initialCache = queryClient.getQueryData<any>(['admin', 'users', initialParams]);
+  const initialList = initialCache?.users || initialCache?.items || initialCache?.data || (Array.isArray(initialCache) ? initialCache : []);
+
+  const [users, setUsers] = useState<AdminUserItem[]>(() => (Array.isArray(initialList) ? initialList : []));
   
   // Cached: 30s staleTime
   const {
@@ -19,7 +23,7 @@ export default function AdminUsersPage() {
     refetch: fetchUsersStatus,
   } = useAdminUsersStatus();
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -83,10 +87,6 @@ export default function AdminUsersPage() {
       setLoading(false);
     }
   }, [page, search, roleFilter, statusFilter, locale, queryClient]);
-
-  useEffect(() => {
-    fetchUsersStatus();
-  }, [fetchUsersStatus]);
 
   useEffect(() => {
     fetchUsers();

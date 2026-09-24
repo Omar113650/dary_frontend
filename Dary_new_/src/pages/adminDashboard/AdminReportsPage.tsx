@@ -10,7 +10,10 @@ export default function AdminReportsPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
-  const [reports, setReports] = useState<AdminReportItem[]>([]);
+  const initialCache = queryClient.getQueryData<any>(['admin', 'reports', { page: 1, limit: 10 }]);
+  const initialList = initialCache?.reports || initialCache?.items || initialCache?.data || (Array.isArray(initialCache) ? initialCache : []);
+
+  const [reports, setReports] = useState<AdminReportItem[]>(() => (Array.isArray(initialList) ? initialList : []));
   
   // Cached: 5m staleTime
   const {
@@ -19,7 +22,7 @@ export default function AdminReportsPage() {
     refetch: fetchStatus,
   } = useAdminReportsStatus();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState<boolean>(() => !initialCache);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -72,10 +75,6 @@ export default function AdminReportsPage() {
       setLoading(false);
     }
   }, [page, locale, queryClient]);
-
-  useEffect(() => {
-    fetchStatus();
-  }, [fetchStatus]);
 
   useEffect(() => {
     fetchReports();

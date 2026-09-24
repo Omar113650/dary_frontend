@@ -395,6 +395,7 @@ export default function DashboardOverviewPage() {
 
                     <Link
                       to={`/properties/${prop.id}`}
+                      state={{ property: prop }}
                       style={{
                         padding: '0.45rem 0.9rem',
                         backgroundColor: '#0B2A4A',

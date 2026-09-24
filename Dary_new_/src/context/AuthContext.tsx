@@ -111,6 +111,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshUser = useCallback(async () => {
+    const token = ApiClient.getAccessToken();
+    if (!token) {
+      setUser(null);
+      setRole(null);
+      saveUserLocally(null);
+      setIsLoading(false);
+      return;
+    }
+
     try {
       const userData = await AuthService.getMe();
       if (userData && userData.id) {
@@ -130,8 +139,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         saveUserLocally(null);
         ApiClient.clearTokens();
       } else {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('dary_access_token') : null;
-        if (!token) {
+        const currentToken = ApiClient.getAccessToken();
+        if (!currentToken) {
           setUser(null);
           setRole(null);
           saveUserLocally(null);

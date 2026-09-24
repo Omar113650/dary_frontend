@@ -12,7 +12,11 @@ export default function PropertyCard({ property }: PropertyCardProps) {
 
   return (
     <article className="property-card">
-      <Link to={`/properties/${property.id}`} className="property-card-link-wrapper">
+      <Link
+        to={`/properties/${property.id}`}
+        state={{ property }}
+        className="property-card-link-wrapper"
+      >
         {/* Media */}
         <div className="property-card-media">
           <img
