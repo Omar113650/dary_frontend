@@ -8,7 +8,7 @@ import type {
   OwnerPropertyBookingItem,
 } from '../../services/ownerService';
 import { useOwnerBookingsStatus, useOwnerMyProperties } from '../../hooks/useDashboardQueries';
-import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function OwnerBookingsPage() {
   const { locale } = useLocale();

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
-import { useAuth, extractUserRole, isUserAdmin } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import { AuthService } from '../services/authService';
 import { API_BASE_URL } from '../services/apiClient';
 import logo from '../assets/branding/FINAL-LOGO1.png';

@@ -7,11 +7,9 @@ import { ContractService } from '../../services/contractService';
 import type { ContractItem } from '../../services/contractService';
 import { ReviewService } from '../../services/reviewService';
 import { useTenantRentals } from '../../hooks/useDashboardQueries';
-import { useQueryClient } from '../../lib/queryClient';
 
 export default function RentalsPage() {
   const { locale } = useLocale();
-  const queryClient = useQueryClient();
 
   // Cached: 30s staleTime
   const {

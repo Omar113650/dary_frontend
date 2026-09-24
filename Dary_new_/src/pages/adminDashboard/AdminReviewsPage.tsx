@@ -2,11 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { ReviewService } from '../../services/reviewService';
 import type { ReviewItem } from '../../services/reviewService';
-import { useQueryClient } from '../../lib/queryClient';
-
 export default function AdminReviewsPage() {
   const { locale } = useLocale();
-  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<'PENDING' | 'ALL'>('PENDING');
   const [reviews, setReviews] = useState<ReviewItem[]>([]);

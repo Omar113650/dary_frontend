@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
-import type { AdminBookingItem, AdminStatusCount } from '../../services/adminService';
+import type { AdminBookingItem } from '../../services/adminService';
 import { ContractService } from '../../services/contractService';
 import type { ContractItem } from '../../services/contractService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useAdminBookingsStatus, useAdminRevenue } from '../../hooks/useDashboardQueries';
-import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function AdminBookingsPage() {
   const { locale } = useLocale();

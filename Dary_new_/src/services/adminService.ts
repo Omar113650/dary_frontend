@@ -278,19 +278,6 @@ export class AdminService {
   }
 
   /**
-   * GET /properties/pending
-   * Returns pending properties awaiting admin approval
-   */
-  static async getPendingProperties(params?: { page?: number; limit?: number }): Promise<any> {
-    const query = new URLSearchParams();
-    if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
-    const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/properties/pending${queryStr}`);
-    return res?.data?.data ?? res?.data?.properties ?? res?.data ?? res;
-  }
-
-  /**
    * PATCH /auth/users/:id/status
    */
   static async updateUserStatus(id: string, status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'): Promise<any> {

@@ -1276,8 +1276,8 @@ export default function PropertyDetailsPage() {
                   {locale === 'ar' ? '📝 عن السكن' : '📝 About Property'}
                 </h3>
                 <p style={{ color: 'var(--color-text-secondary)', lineHeight: 1.8, fontSize: '0.95rem', margin: 0, whiteSpace: 'pre-line' }}>
-                  {typeof property.description === 'object' && property.description !== null
-                    ? (property.description[locale] || property.description.ar || property.description.en || JSON.stringify(property.description))
+                  {typeof (property.description as any) === 'object' && property.description !== null
+                    ? ((property.description as any)[locale] || (property.description as any).ar || (property.description as any).en || JSON.stringify(property.description))
                     : String(property.description)}
                 </p>
               </div>
@@ -1421,8 +1421,8 @@ export default function PropertyDetailsPage() {
                     </ul>
                   ) : (
                     <p style={{ margin: 0, color: 'var(--color-text-secondary)', lineHeight: 1.7, fontSize: '0.9rem', whiteSpace: 'pre-line' }}>
-                      {typeof property.rules === 'object' && property.rules !== null
-                        ? (property.rules[locale] || property.rules.ar || property.rules.en || JSON.stringify(property.rules))
+                      {typeof (property.rules as any) === 'object' && property.rules !== null
+                        ? ((property.rules as any)[locale] || (property.rules as any).ar || (property.rules as any).en || JSON.stringify(property.rules))
                         : String(property.rules)}
                     </p>
                   )}

@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
-import { AdminService } from '../../services/adminService';
-import type { AdminPropertyItem, AdminStatusCount } from '../../services/adminService';
+import type { AdminPropertyItem } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
-import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function AdminPropertiesPage() {
   const { locale } = useLocale();

@@ -78,7 +78,7 @@ export class ReviewService {
    * 5. GET /review/pending
    * Get Pending Reviews (Admin)
    */
-  static async getPendingReviews(params?: { page?: number; limit?: number }): Promise<any> {
+  static async getPendingReviews(_params?: { page?: number; limit?: number }): Promise<any> {
     const candidates = [
       '/review?status=PENDING',
       '/dashboard/reviews?status=PENDING',

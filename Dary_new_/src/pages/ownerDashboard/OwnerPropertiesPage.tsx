@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useQueryClient } from '../../lib/queryClient';
 import { useLocale } from '../../utils/LocaleContext';
 import type { OwnerPropertyItem } from '../../services/ownerService';
 import { propertyService } from '../../services/propertyService';
@@ -9,7 +8,6 @@ import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
-  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   // Action states
