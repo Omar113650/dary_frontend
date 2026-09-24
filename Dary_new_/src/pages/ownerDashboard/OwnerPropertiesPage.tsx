@@ -5,9 +5,11 @@ import type { OwnerPropertyItem } from '../../services/ownerService';
 import { propertyService } from '../../services/propertyService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
+import { useQueryClient } from '../../lib/queryClient';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
   // Action states
