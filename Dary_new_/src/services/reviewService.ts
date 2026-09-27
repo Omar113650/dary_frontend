@@ -56,6 +56,13 @@ export interface ReviewResponseMeta {
 export interface PropertyReviewsResult {
   data: ReviewItem[];
   meta: ReviewResponseMeta;
+  aggregates?: {
+    _avg?: {
+      propertyRating?: number;
+      ownerRating?: number;
+    };
+    [key: string]: any;
+  };
 }
 
 export class ReviewService {
@@ -149,6 +156,7 @@ export class ReviewService {
     return {
       data: list,
       meta,
+      aggregates: dataObj?.aggregates || res?.aggregates,
     };
   }
 

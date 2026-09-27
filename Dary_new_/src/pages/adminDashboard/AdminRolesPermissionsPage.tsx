@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
-import { useAuth } from '../../context/AuthContext';
 import { RbacService, type RoleItem, type Permission } from '../../services/rbacService';
 import './AdminRolesPermissions.css';
 
@@ -16,7 +15,6 @@ interface PermissionCategoryGroup {
 
 export default function AdminRolesPermissionsPage() {
   const { locale } = useLocale();
-  const { isSuperAdmin } = useAuth();
 
   // Core Data States
   const [roles, setRoles] = useState<RoleItem[]>([]);
