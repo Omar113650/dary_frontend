@@ -3,6 +3,7 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminBookingItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import Pagination from '../../components/common/Pagination';
 import { useAdminBookingsStatus, useAdminRevenue } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
@@ -10,10 +11,7 @@ export default function AdminBookingsPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
-  const initialCache = queryClient.getQueryData<any>(['admin', 'bookings', { page: 1, limit: 10 }]);
-  const initialList = initialCache?.bookings || initialCache?.items || initialCache?.data || (Array.isArray(initialCache) ? initialCache : []);
-
-  const [bookings, setBookings] = useState<AdminBookingItem[]>(() => (Array.isArray(initialList) ? initialList : []));
+  const [bookings, setBookings] = useState<AdminBookingItem[]>([]);
   
   // Cached metrics (5m)
   const {
@@ -33,25 +31,63 @@ export default function AdminBookingsPage() {
     await Promise.allSettled([fetchBookingsStatus(), fetchRevenue()]);
   }, [fetchBookingsStatus, fetchRevenue]);
 
-  const [loading, setLoading] = useState<boolean>(() => !initialCache);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
+  // Filters & Pagination
   const [statusFilter, setStatusFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [hasPrevPage, setHasPrevPage] = useState(false);
 
-  // 2. Fetch Bookings List
+  // Debounce search term
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchTerm.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchTerm]);
+
+  // 2. Fetch Bookings List with server-side pagination, status, and search
   const fetchBookings = useCallback(async () => {
-    const cacheKey = ['admin', 'bookings', { page, limit: 10 }];
+    const params: any = { page, limit };
+    if (statusFilter) params.status = statusFilter;
+    if (debouncedSearch) params.search = debouncedSearch;
+
+    const cacheKey = ['admin', 'bookings', params];
     const cached = queryClient.getQueryData<any>(cacheKey);
     if (cached) {
-      const list = cached?.bookings || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      const list =
+        cached?.bookings ||
+        cached?.data?.bookings ||
+        cached?.items ||
+        cached?.data ||
+        (Array.isArray(cached) ? cached : []);
       setBookings(Array.isArray(list) ? list : []);
-      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = cached?.limit || 10;
-      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+
+      const total =
+        cached?.meta?.total ??
+        cached?.totalCount ??
+        cached?.total ??
+        cached?.data?.totalCount ??
+        (Array.isArray(list) ? list.length : 0);
+      setTotalCount(total);
+
+      const pages =
+        cached?.meta?.totalPages ??
+        cached?.totalPages ??
+        cached?.data?.totalPages ??
+        Math.max(1, Math.ceil(total / limit));
+      setTotalPages(pages);
+
+      setHasNextPage(Boolean(cached?.meta?.hasNextPage ?? cached?.hasNextPage ?? page < pages));
+      setHasPrevPage(Boolean(cached?.meta?.hasPrevPage ?? cached?.hasPrevPage ?? page > 1));
     } else {
       setLoading(true);
     }
@@ -59,15 +95,35 @@ export default function AdminBookingsPage() {
     try {
       const data = await queryClient.fetchQuery({
         queryKey: cacheKey,
-        queryFn: () => AdminService.getBookings({ page, limit: 10 }),
+        queryFn: () => AdminService.getBookings(params),
         staleTime: STALE_TIMES.LISTS,
       });
-      const list = data?.bookings || data?.items || data?.data || (Array.isArray(data) ? data : []);
+
+      const list =
+        data?.bookings ||
+        data?.data?.bookings ||
+        data?.items ||
+        data?.data ||
+        (Array.isArray(data) ? data : []);
       setBookings(Array.isArray(list) ? list : []);
 
-      const total = data?.total || data?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = data?.limit || 10;
-      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+      const total =
+        data?.meta?.total ??
+        data?.totalCount ??
+        data?.total ??
+        data?.data?.totalCount ??
+        (Array.isArray(list) ? list.length : 0);
+      setTotalCount(total);
+
+      const pages =
+        data?.meta?.totalPages ??
+        data?.totalPages ??
+        data?.data?.totalPages ??
+        Math.max(1, Math.ceil(total / limit));
+      setTotalPages(pages);
+
+      setHasNextPage(Boolean(data?.meta?.hasNextPage ?? data?.hasNextPage ?? page < pages));
+      setHasPrevPage(Boolean(data?.meta?.hasPrevPage ?? data?.hasPrevPage ?? page > 1));
     } catch (err: any) {
       console.error('[AdminBookingsPage] GET /dashboard/bookings failed:', err);
       setError(
@@ -79,7 +135,7 @@ export default function AdminBookingsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale, queryClient]);
+  }, [page, limit, statusFilter, debouncedSearch, locale, queryClient]);
 
   useEffect(() => {
     fetchBookings();
@@ -359,7 +415,10 @@ export default function AdminBookingsPage() {
               <button
                 key={st}
                 type="button"
-                onClick={() => setStatusFilter(st)}
+                onClick={() => {
+                  setStatusFilter(st);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.35rem 0.75rem',
                   borderRadius: '6px',
@@ -698,53 +757,22 @@ export default function AdminBookingsPage() {
               </table>
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '1.25rem',
-                  borderTop: '1px solid #E2E8F0',
-                }}
-              >
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page <= 1 ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'السابق' : 'Previous'}
-                </button>
-                <span style={{ fontSize: '0.85rem', color: '#64748B' }}>
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page >= totalPages ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page >= totalPages ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'التالي' : 'Next'}
-                </button>
-              </div>
-            )}
+            {/* Reusable Modern Pagination */}
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              limit={limit}
+              onPageChange={(newPage) => setPage(newPage)}
+              onLimitChange={(newLimit) => {
+                setLimit(newLimit);
+                setPage(1);
+              }}
+              limitOptions={[10, 20, 50]}
+              hasNextPage={hasNextPage}
+              hasPrevPage={hasPrevPage}
+              loading={loading}
+            />
           </>
         )}
       </div>

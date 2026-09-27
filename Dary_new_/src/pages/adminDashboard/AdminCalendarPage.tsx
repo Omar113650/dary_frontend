@@ -4,6 +4,7 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminCalendarBookingEvent } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import Pagination from '../../components/common/Pagination';
 
 export default function AdminCalendarPage() {
   const { locale } = useLocale();
@@ -13,9 +14,22 @@ export default function AdminCalendarPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination state (Offset & Cursor compatible)
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [hasPrevPage, setHasPrevPage] = useState(false);
+
   // Search & Filter state
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Sorting state
+  const [sortBy, setSortBy] = useState<string>('startDate');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Date filters
   const today = new Date().toISOString().split('T')[0];
@@ -23,31 +37,79 @@ export default function AdminCalendarPage() {
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(nextMonthDate);
 
+  // Debounce search input to avoid overwhelming the server
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(searchQuery.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
+
+  // Fetch Calendar Data with full pagination, filtering, and sorting
   const fetchCalendarData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const [calRes, sumRes] = await Promise.allSettled([
-        AdminService.getBookingCalendar(startDate, endDate),
+        AdminService.getBookingCalendar({
+          page,
+          limit,
+          startDate: startDate || undefined,
+          endDate: endDate || undefined,
+          status: statusFilter || undefined,
+          search: debouncedSearch || undefined,
+          sort: sortBy,
+          order: sortOrder,
+        }),
         AdminService.getCalendarSummary(),
       ]);
 
       if (calRes.status === 'fulfilled') {
         const raw = calRes.value;
-        const list = Array.isArray(raw)
-          ? raw
-          : Array.isArray(raw?.bookings?.bookings)
-          ? raw.bookings.bookings
+        const list = Array.isArray(raw?.data?.bookings)
+          ? raw.data.bookings
           : Array.isArray(raw?.bookings)
           ? raw.bookings
-          : Array.isArray(raw?.data?.bookings)
-          ? raw.data.bookings
           : Array.isArray(raw?.data)
           ? raw.data
           : Array.isArray(raw?.events)
           ? raw.events
+          : Array.isArray(raw)
+          ? raw
           : [];
         setEvents(list);
+
+        const total =
+          raw?.meta?.total ??
+          raw?.totalCount ??
+          raw?.data?.totalCount ??
+          raw?.data?.meta?.total ??
+          raw?.total ??
+          list.length;
+        setTotalCount(typeof total === 'number' ? total : list.length);
+
+        const pages =
+          raw?.meta?.totalPages ??
+          raw?.totalPages ??
+          raw?.data?.totalPages ??
+          raw?.data?.meta?.totalPages ??
+          Math.max(1, Math.ceil((total || list.length) / limit));
+        setTotalPages(Math.max(1, pages));
+
+        const next =
+          raw?.meta?.hasNextPage ??
+          raw?.hasNextPage ??
+          raw?.data?.hasNextPage ??
+          page < pages;
+        setHasNextPage(Boolean(next));
+
+        const prev =
+          raw?.meta?.hasPrevPage ??
+          raw?.hasPrevPage ??
+          raw?.data?.hasPrevPage ??
+          page > 1;
+        setHasPrevPage(Boolean(prev));
       } else {
         throw calRes.reason;
       }
@@ -66,11 +128,38 @@ export default function AdminCalendarPage() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, endDate, locale]);
+  }, [page, limit, startDate, endDate, statusFilter, debouncedSearch, sortBy, sortOrder, locale]);
 
   useEffect(() => {
     fetchCalendarData();
   }, [fetchCalendarData]);
+
+  // Quick Date Preset Handler
+  const applyDatePreset = (preset: '30days' | 'thisMonth' | 'nextMonth' | 'quarter' | 'all') => {
+    const now = new Date();
+    setPage(1);
+
+    if (preset === '30days') {
+      setStartDate(today);
+      setEndDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+    } else if (preset === 'thisMonth') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+      setStartDate(firstDay);
+      setEndDate(lastDay);
+    } else if (preset === 'nextMonth') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString().split('T')[0];
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 2, 0).toISOString().split('T')[0];
+      setStartDate(firstDay);
+      setEndDate(lastDay);
+    } else if (preset === 'quarter') {
+      setStartDate(today);
+      setEndDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
+    } else if (preset === 'all') {
+      setStartDate('');
+      setEndDate('');
+    }
+  };
 
   // Helper for duration calculation
   const calculateDuration = (startStr?: string, endStr?: string) => {
@@ -85,32 +174,6 @@ export default function AdminCalendarPage() {
     return locale === 'ar' ? `${diffMonths} شهور` : `${diffMonths} months`;
   };
 
-  // Filtered Events List
-  const filteredEvents = events.filter((evt: any) => {
-    const propTitle = evt.propertyTitle || evt.property?.title || '';
-    const tenantName =
-      evt.tenantName ||
-      (evt.tenant?.firstName ? `${evt.tenant.firstName} ${evt.tenant.lastName || ''}` : evt.tenant?.email || '');
-    const st = evt.status || 'PENDING';
-
-    const matchesSearch =
-      !searchQuery.trim() ||
-      propTitle.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-      tenantName.toLowerCase().includes(searchQuery.toLowerCase().trim());
-
-    const matchesStatus =
-      !statusFilter ||
-      (statusFilter === 'ACTIVE'
-        ? st === 'CONFIRMED' || st === 'CLOSED'
-        : statusFilter === 'CONTACTED'
-        ? st === 'CONTACTED'
-        : statusFilter === 'PENDING'
-        ? st === 'PENDING'
-        : st === statusFilter);
-
-    return matchesSearch && matchesStatus;
-  });
-
   return (
     <div className="dary-page-container">
       {/* 1. Header Banner */}
@@ -122,8 +185,8 @@ export default function AdminCalendarPage() {
           </h1>
           <p className="dary-page-subtitle">
             {locale === 'ar'
-              ? 'متابعة مواعيد وصول الطلاب ومغادرتهم، نسب الإشغال، وحالة تسكين الغرف والأسرة على كافة عقارات المنصة.'
-              : 'Track student check-ins, check-outs, occupancy timelines, and bed reservations.'}
+              ? 'متابعة مواعيد وصول الطلاب ومغادرتهم، نسب الإشغال، وحالة تسكين الغرف والأسرة على كافة عقارات المنصة مع الترقيم والبحث الفوري.'
+              : 'Track student check-ins, check-outs, occupancy timelines, and bed reservations with server-side pagination and filters.'}
           </p>
         </div>
       </div>
@@ -137,7 +200,7 @@ export default function AdminCalendarPage() {
           </div>
           <div>
             <h3 className="dary-metric-number">
-              <AnimatedCounter value={summary?.totalBookings ?? events.length} loading={loading} />
+              <AnimatedCounter value={summary?.totalBookings ?? totalCount} loading={loading && !totalCount} />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي الحجوزات بالتقويم' : 'Calendar Bookings'}</p>
           </div>
@@ -151,11 +214,11 @@ export default function AdminCalendarPage() {
           <div>
             <h3 className="dary-metric-number" style={{ color: '#15803D' }}>
               <AnimatedCounter
-                value={summary?.activeBookings ?? events.filter((e: any) => e.status === 'CONTACTED' || e.status === 'CLOSED').length}
-                loading={loading}
+                value={summary?.activeBookings ?? events.filter((e: any) => e.status === 'CONTACTED' || e.status === 'CLOSED' || e.status === 'CONFIRMED').length}
+                loading={loading && !summary}
               />
             </h3>
-            <p className="dary-metric-label">{locale === 'ar' ? 'حجوزات سارية / متواصل معها' : 'Active Occupancies'}</p>
+            <p className="dary-metric-label">{locale === 'ar' ? 'حجوزات سارية / مؤكدة' : 'Active Occupancies'}</p>
           </div>
         </div>
 
@@ -168,7 +231,7 @@ export default function AdminCalendarPage() {
             <h3 className="dary-metric-number" style={{ color: '#B45309' }}>
               <AnimatedCounter
                 value={summary?.upcomingBookings ?? events.filter((e: any) => e.status === 'PENDING').length}
-                loading={loading}
+                loading={loading && !summary}
               />
             </h3>
             <p className="dary-metric-label">{locale === 'ar' ? 'طلبات قيد المراجعة' : 'Pending Requests'}</p>
@@ -184,7 +247,7 @@ export default function AdminCalendarPage() {
             <h3 className="dary-metric-number">
               <AnimatedCounter
                 value={summary?.occupancyRate !== undefined ? summary.occupancyRate : 66}
-                loading={loading}
+                loading={loading && !summary}
                 suffix="%"
               />
             </h3>
@@ -193,32 +256,57 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      {/* 3. Filter and Search Toolbar */}
+      {/* 3. Filter, Search and Sorting Toolbar */}
       <div className="dary-card" style={{ marginBottom: '1.5rem', padding: '1.25rem' }}>
+        {/* Row 1: Search Box + Date Pickers */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-          {/* Search Box */}
-          <div style={{ flex: '1 1 260px' }}>
+          {/* Smart Search Box */}
+          <div style={{ flex: '1 1 280px' }}>
             <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#0B2A4A', marginBottom: '0.35rem' }}>
-              {locale === 'ar' ? '🔍 بحث باسم العقار أو الطالب:' : '🔍 Search Property or Tenant:'}
+              {locale === 'ar' ? '🔍 بحث ذكي (العقار، العميل، الهاتف، العنوان):' : '🔍 Smart Search (Property, Tenant, Phone, City):'}
             </label>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={locale === 'ar' ? 'اكتب اسم العقار أو اسم المستأجر...' : 'Search property or tenant name...'}
-              style={{
-                width: '100%',
-                padding: '0.6rem 0.9rem',
-                borderRadius: '8px',
-                border: '1px solid #CBD5E1',
-                fontSize: '0.88rem',
-                outline: 'none',
-              }}
-            />
+            <div style={{ position: 'relative' }}>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={locale === 'ar' ? 'ابحث باسم المستأجر، رقم الهاتف، أو اسم العقار...' : 'Search tenant, phone, property...'}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '0.88rem',
+                  outline: 'none',
+                  backgroundColor: '#FFFFFF',
+                }}
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    left: locale === 'ar' ? '0.75rem' : 'auto',
+                    right: locale === 'ar' ? 'auto' : '0.75rem',
+                    color: '#94A3B8',
+                    cursor: 'pointer',
+                    fontSize: '0.9rem',
+                    border: 'none',
+                    background: 'none',
+                  }}
+                  title={locale === 'ar' ? 'مسح البحث' : 'Clear search'}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Date Pickers */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 700, color: '#0B2A4A', marginBottom: '0.35rem' }}>
                 {locale === 'ar' ? 'من تاريخ:' : 'From:'}
@@ -226,7 +314,10 @@ export default function AdminCalendarPage() {
               <input
                 type="date"
                 value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
+                onChange={(e) => {
+                  setStartDate(e.target.value);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.55rem 0.75rem',
                   borderRadius: '8px',
@@ -244,7 +335,10 @@ export default function AdminCalendarPage() {
               <input
                 type="date"
                 value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
+                onChange={(e) => {
+                  setEndDate(e.target.value);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.55rem 0.75rem',
                   borderRadius: '8px',
@@ -257,33 +351,141 @@ export default function AdminCalendarPage() {
 
             <button
               type="button"
-              onClick={fetchCalendarData}
+              onClick={() => {
+                setPage(1);
+                fetchCalendarData();
+              }}
               className="dary-primary-btn"
               style={{
                 padding: '0.6rem 1.25rem',
                 fontSize: '0.85rem',
                 fontWeight: 700,
-                alignSelf: 'flex-end',
                 height: '38px',
               }}
             >
-              {locale === 'ar' ? 'تحديث النطاق' : 'Apply'}
+              {locale === 'ar' ? 'تحديث' : 'Refresh'}
             </button>
           </div>
         </div>
 
-        {/* Status Filter Tabs */}
+        {/* Row 2: Date Presets & Sorting Options */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.75rem',
+            marginTop: '1rem',
+            paddingTop: '0.85rem',
+            borderTop: '1px dashed #E2E8F0',
+          }}
+        >
+          {/* Quick Date Range Presets */}
+          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 700 }}>
+              {locale === 'ar' ? 'نطاقات سريعة:' : 'Quick Presets:'}
+            </span>
+            {[
+              { id: '30days', labelAr: '30 يوم القادمة', labelEn: 'Next 30 Days' },
+              { id: 'thisMonth', labelAr: 'الشهر الحالي', labelEn: 'This Month' },
+              { id: 'nextMonth', labelAr: 'الشهر القادم', labelEn: 'Next Month' },
+              { id: 'quarter', labelAr: '3 أشهر', labelEn: 'Quarter' },
+              { id: 'all', labelAr: 'كافة التواريخ', labelEn: 'All Time' },
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => applyDatePreset(p.id as any)}
+                style={{
+                  padding: '0.25rem 0.65rem',
+                  borderRadius: '6px',
+                  border: '1px solid #E2E8F0',
+                  backgroundColor: '#F8FAFC',
+                  color: '#475569',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {locale === 'ar' ? p.labelAr : p.labelEn}
+              </button>
+            ))}
+          </div>
+
+          {/* Sorting Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 700 }}>
+              {locale === 'ar' ? 'الترتيب حسب:' : 'Sort by:'}
+            </span>
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value);
+                setPage(1);
+              }}
+              style={{
+                padding: '0.35rem 0.75rem',
+                borderRadius: '8px',
+                border: '1px solid #CBD5E1',
+                backgroundColor: '#FFFFFF',
+                color: '#0B2A4A',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                outline: 'none',
+              }}
+            >
+              <option value="startDate">{locale === 'ar' ? 'تاريخ الوصول (البداية)' : 'Start Date'}</option>
+              <option value="endDate">{locale === 'ar' ? 'تاريخ المغادرة (النهاية)' : 'End Date'}</option>
+              <option value="createdAt">{locale === 'ar' ? 'تاريخ تقديم الحجز' : 'Date Created'}</option>
+              <option value="totalPrice">{locale === 'ar' ? 'السعر الإجمالي' : 'Total Price'}</option>
+              <option value="status">{locale === 'ar' ? 'حالة الحجز' : 'Status'}</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSortOrder((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                setPage(1);
+              }}
+              title={locale === 'ar' ? `الترتيب: ${sortOrder === 'asc' ? 'تصاعدي' : 'تنازلي'}` : `Order: ${sortOrder.toUpperCase()}`}
+              style={{
+                padding: '0.35rem 0.65rem',
+                borderRadius: '8px',
+                border: '1px solid #CBD5E1',
+                backgroundColor: '#F8FAFC',
+                color: '#0B2A4A',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem',
+              }}
+            >
+              <span>{sortOrder === 'asc' ? '↑' : '↓'}</span>
+              <span>{sortOrder === 'asc' ? (locale === 'ar' ? 'تصاعدي' : 'ASC') : (locale === 'ar' ? 'تنازلي' : 'DESC')}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Row 3: Status Filter Tabs */}
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #F1F5F9' }}>
           {[
             { id: '', labelAr: 'الكل', labelEn: 'All' },
             { id: 'CONTACTED', labelAr: '📞 تم التواصل (CONTACTED)', labelEn: 'Contacted' },
             { id: 'PENDING', labelAr: '⏳ قيد المراجعة (PENDING)', labelEn: 'Pending' },
-            { id: 'ACTIVE', labelAr: '✓ مؤكد ومكتمل (CONFIRMED)', labelEn: 'Confirmed' },
+            { id: 'CLOSED,CONFIRMED', labelAr: '✓ مؤكد ومكتمل (CONFIRMED)', labelEn: 'Confirmed' },
+            { id: 'CANCELLED', labelAr: '✕ ملغي (CANCELLED)', labelEn: 'Cancelled' },
           ].map((tab) => (
             <button
               key={tab.id}
               type="button"
-              onClick={() => setStatusFilter(tab.id)}
+              onClick={() => {
+                setStatusFilter(tab.id);
+                setPage(1);
+              }}
               style={{
                 padding: '0.35rem 0.85rem',
                 borderRadius: '20px',
@@ -303,18 +505,43 @@ export default function AdminCalendarPage() {
         </div>
       </div>
 
-      {/* 4. Beautiful Bookings List / Cards */}
-      <div className="dary-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '0.75rem', borderBottom: '1px solid #E2E8F0' }}>
-          <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0B2A4A', margin: 0 }}>
-            {locale === 'ar' ? 'سجل مواعيد وتسكين الطلاب' : 'Occupancy Schedule'}
-          </h2>
+      {/* 4. Bookings List / Cards */}
+      <div className="dary-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '1.25rem 1.5rem',
+            borderBottom: '1px solid #E2E8F0',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0B2A4A', margin: 0 }}>
+              {locale === 'ar' ? 'سجل مواعيد وتسكين الطلاب' : 'Occupancy Schedule'}
+            </h2>
+            {loading && (
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: '14px',
+                  height: '14px',
+                  border: '2px solid #CBD5E1',
+                  borderTopColor: '#2F6BFF',
+                  borderRadius: '50%',
+                  animation: 'spin 0.8s linear infinite',
+                }}
+              />
+            )}
+          </div>
           <span style={{ fontSize: '0.82rem', color: '#64748B', fontWeight: 600 }}>
-            {locale === 'ar' ? `عرض ${filteredEvents.length} حجز` : `Showing ${filteredEvents.length} bookings`}
+            {locale === 'ar'
+              ? `إجمالي السجلات: ${totalCount} حجز`
+              : `Total records: ${totalCount} bookings`}
           </span>
         </div>
 
-        {loading ? (
+        {loading && events.length === 0 ? (
           <div style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#64748B' }}>
             <div
               style={{
@@ -330,13 +557,13 @@ export default function AdminCalendarPage() {
             <p style={{ fontWeight: 600 }}>{locale === 'ar' ? 'جاري تحميل مواعيد التقويم...' : 'Loading calendar...'}</p>
           </div>
         ) : error ? (
-          <div className="dary-error-alert" style={{ margin: '1rem' }}>
+          <div className="dary-error-alert" style={{ margin: '1.5rem' }}>
             <span>{error}</span>
             <button type="button" onClick={fetchCalendarData} className="dary-retry-btn">
               {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </button>
           </div>
-        ) : filteredEvents.length === 0 ? (
+        ) : events.length === 0 ? (
           <div style={{ padding: '3.5rem 1rem', textAlign: 'center', color: '#64748B' }}>
             <span style={{ fontSize: '2.8rem', display: 'block', marginBottom: '0.75rem' }}>🗓️</span>
             <h3 style={{ color: '#0B2A4A', fontWeight: 700, marginBottom: '0.25rem' }}>
@@ -347,8 +574,8 @@ export default function AdminCalendarPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
-            {filteredEvents.map((evt: any, idx) => {
+          <div style={{ padding: '1.25rem', display: 'grid', gridTemplateColumns: '1fr', gap: '1rem' }}>
+            {events.map((evt: any, idx) => {
               const propId = evt.propertyId || evt.property?.id;
               const propTitle = evt.propertyTitle || evt.property?.title || (locale === 'ar' ? 'سكن طلابي' : 'Student Housing');
               const city = evt.property?.city || evt.city || '';
@@ -358,12 +585,13 @@ export default function AdminCalendarPage() {
                   ? `${evt.tenant.firstName} ${evt.tenant.lastName || ''}`.trim()
                   : evt.tenant?.email || '—');
               const tenantPhone = evt.tenant?.whatsappPhone || evt.tenant?.phone;
-              const roomType = evt.room?.roomType || evt.roomType || 'غرفة مجهزة';
+              const roomType = evt.room?.roomType || evt.roomType || (locale === 'ar' ? 'غرفة مجهزة' : 'Equipped Room');
               const beds = evt.bedsRequested || 1;
               const duration = calculateDuration(evt.startDate, evt.endDate);
 
               const isContacted = evt.status === 'CONTACTED';
               const isClosed = evt.status === 'CLOSED' || evt.status === 'CONFIRMED';
+              const isCancelled = evt.status === 'CANCELLED';
 
               return (
                 <div
@@ -485,15 +713,17 @@ export default function AdminCalendarPage() {
                           borderRadius: '20px',
                           fontSize: '0.78rem',
                           fontWeight: 800,
-                          backgroundColor: isClosed ? '#DCFCE7' : isContacted ? '#E0F2FE' : '#FEF9C3',
-                          color: isClosed ? '#15803D' : isContacted ? '#0369A1' : '#B45309',
-                          border: `1px solid ${isClosed ? '#86EFAC' : isContacted ? '#BAE6FD' : '#FDE68A'}`,
+                          backgroundColor: isClosed ? '#DCFCE7' : isContacted ? '#E0F2FE' : isCancelled ? '#FEE2E2' : '#FEF9C3',
+                          color: isClosed ? '#15803D' : isContacted ? '#0369A1' : isCancelled ? '#DC2626' : '#B45309',
+                          border: `1px solid ${isClosed ? '#86EFAC' : isContacted ? '#BAE6FD' : isCancelled ? '#FECACA' : '#FDE68A'}`,
                         }}
                       >
                         {isClosed
                           ? locale === 'ar' ? '✓ ساري / مؤكد' : 'Confirmed'
                           : isContacted
                           ? locale === 'ar' ? '📞 تم التواصل' : 'Contacted'
+                          : isCancelled
+                          ? locale === 'ar' ? '✕ ملغي' : 'Cancelled'
                           : locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending'}
                       </span>
                     </div>
@@ -522,6 +752,23 @@ export default function AdminCalendarPage() {
             })}
           </div>
         )}
+
+        {/* 5. Pagination Controls */}
+        <Pagination
+          currentPage={page}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          limit={limit}
+          onPageChange={(newPage) => setPage(newPage)}
+          onLimitChange={(newLimit) => {
+            setLimit(newLimit);
+            setPage(1);
+          }}
+          limitOptions={[10, 20, 50]}
+          hasNextPage={hasNextPage}
+          hasPrevPage={hasPrevPage}
+          loading={loading}
+        />
       </div>
     </div>
   );

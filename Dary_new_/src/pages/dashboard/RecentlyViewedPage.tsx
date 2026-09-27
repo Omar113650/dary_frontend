@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
 import type { RecentlyViewedItem } from '../../services/tenantService';
+import Pagination from '../../components/common/Pagination';
 
 export default function RecentlyViewedPage() {
   const { locale } = useLocale();
@@ -12,6 +13,16 @@ export default function RecentlyViewedPage() {
   const [isClearing, setIsClearing] = useState(false);
   const [confirmClearModal, setConfirmClearModal] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(9);
+  const totalCount = items.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const paginatedItems = useMemo(() => {
+    const start = (page - 1) * limit;
+    return items.slice(start, start + limit);
+  }, [items, page, limit]);
 
   useEffect(() => {
     if (actionMessage) {
@@ -182,14 +193,15 @@ export default function RecentlyViewedPage() {
             </Link>
           </div>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: '1.5rem',
-            }}
-          >
-            {items.map((item) => {
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: '1.5rem',
+              }}
+            >
+              {paginatedItems.map((item) => {
               const p = item.property || item;
               const propId = item.propertyId || p.id;
               const title = p.title || (locale === 'ar' ? 'سكن طلابي' : 'Student Housing');
@@ -282,6 +294,26 @@ export default function RecentlyViewedPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalCount > 0 && (
+            <div style={{ marginTop: '1.5rem' }}>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={limit}
+                onPageChange={(p) => setPage(p)}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemNameAr="عقار تمت مشاهدته"
+                itemNameEn="viewed properties"
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
 

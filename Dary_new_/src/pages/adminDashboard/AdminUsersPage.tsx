@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthService } from '../../services/authService';
@@ -6,6 +6,7 @@ import { AdminService } from '../../services/adminService';
 import { ApiClient } from '../../services/apiClient';
 import type { AdminUserItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import Pagination from '../../components/common/Pagination';
 import { useAdminUsersStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 import type { AdminModule } from '../../utils/adminPermissions';
@@ -123,10 +124,21 @@ export default function AdminUsersPage() {
     const cacheKey = ['admin', 'users', params];
     const cached = queryClient.getQueryData<any>(cacheKey);
     if (cached) {
-      const list = cached?.users || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
+      const list =
+        cached?.users ||
+        cached?.items ||
+        cached?.data?.users ||
+        cached?.data?.items ||
+        (Array.isArray(cached?.data) ? cached.data : null) ||
+        (Array.isArray(cached) ? cached : []);
       setUsers(Array.isArray(list) ? list : []);
-      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = cached?.limit || 10;
+      const total =
+        cached?.total ??
+        cached?.meta?.total ??
+        cached?.data?.total ??
+        cached?.data?.meta?.total ??
+        (Array.isArray(list) ? list.length : 0);
+      const limit = cached?.limit || cached?.meta?.limit || 10;
       setTotalPages(Math.max(1, Math.ceil(total / limit)));
     } else {
       setLoading(true);
@@ -138,11 +150,22 @@ export default function AdminUsersPage() {
         queryFn: () => AdminService.getUsers(params),
         staleTime: STALE_TIMES.LISTS,
       });
-      const list = data?.users || data?.items || data?.data || (Array.isArray(data) ? data : []);
+      const list =
+        data?.users ||
+        data?.items ||
+        data?.data?.users ||
+        data?.data?.items ||
+        (Array.isArray(data?.data) ? data.data : null) ||
+        (Array.isArray(data) ? data : []);
       setUsers(Array.isArray(list) ? list : []);
 
-      const total = data?.total || data?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = data?.limit || 10;
+      const total =
+        data?.total ??
+        data?.meta?.total ??
+        data?.data?.total ??
+        data?.data?.meta?.total ??
+        (Array.isArray(list) ? list.length : 0);
+      const limit = data?.limit || data?.meta?.limit || 10;
       setTotalPages(Math.max(1, Math.ceil(total / limit)));
     } catch (err: any) {
       console.error('[AdminUsersPage] GET /dashboard/users failed:', err);
@@ -156,6 +179,64 @@ export default function AdminUsersPage() {
       setLoading(false);
     }
   }, [page, search, roleFilter, statusFilter, locale, queryClient]);
+
+  // Client-side filtering fallback if backend returns full unpaginated/unfiltered list
+  const filteredUsers = useMemo(() => {
+    // If backend already filtered on server side and returned a page-slice (e.g. <= 10 items when total > 10), keep as-is:
+    if (users.length <= 10 && (search.trim() || roleFilter || statusFilter)) {
+      return users;
+    }
+
+    let result = users;
+
+    if (search.trim()) {
+      const s = search.trim().toLowerCase();
+      result = result.filter(
+        (u) =>
+          u.email?.toLowerCase().includes(s) ||
+          u.name?.toLowerCase().includes(s) ||
+          `${u.firstName || ''} ${u.lastName || ''}`.toLowerCase().includes(s) ||
+          u.phone?.includes(s)
+      );
+    }
+
+    if (roleFilter) {
+      result = result.filter((u) => {
+        const directRole: string =
+          u.role ||
+          (Array.isArray(u.roles) && (
+            u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'super_admin') ? 'super_admin' :
+            u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'admin') ? 'admin' :
+            u.roles.some((r: any) => (typeof r === 'string' ? r : r?.name || r?.role?.name) === 'owner') ? 'owner' :
+            (typeof u.roles[0] === 'string' ? u.roles[0] : (u.roles[0]?.name || u.roles[0]?.role?.name))
+          )) ||
+          'tenant';
+        return directRole.toLowerCase() === roleFilter.toLowerCase();
+      });
+    }
+
+    if (statusFilter) {
+      result = result.filter((u) => (u.status || '').toUpperCase() === statusFilter.toUpperCase());
+    }
+
+    return result;
+  }, [users, search, roleFilter, statusFilter]);
+
+  // If the returned list has more items than the page limit (10),
+  // it means the server sent the full dataset without slicing.
+  // In that case, we slice by the current page on the client side:
+  const isClientSidePaginated = filteredUsers.length > 10;
+  const effectiveTotalPages = isClientSidePaginated
+    ? Math.max(1, Math.ceil(filteredUsers.length / 10))
+    : Math.max(1, totalPages);
+
+  const displayedUsers = useMemo(() => {
+    if (isClientSidePaginated) {
+      const startIndex = (page - 1) * 10;
+      return filteredUsers.slice(startIndex, startIndex + 10);
+    }
+    return filteredUsers;
+  }, [filteredUsers, isClientSidePaginated, page]);
 
   useEffect(() => {
     fetchUsers();
@@ -787,7 +868,7 @@ export default function AdminUsersPage() {
               {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </button>
           </div>
-        ) : users.length === 0 ? (
+        ) : displayedUsers.length === 0 ? (
           <div style={{ padding: '3rem 1rem', textAlign: 'center', color: '#64748B' }}>
             <span style={{ fontSize: '2.5rem', display: 'block', marginBottom: '0.5rem' }}>👥</span>
             <p style={{ fontWeight: 600, color: '#0B2A4A' }}>
@@ -809,7 +890,7 @@ export default function AdminUsersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {users.map((u) => {
+                  {displayedUsers.map((u) => {
                     const fullName = u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email;
                     const directRole: string =
                       u.role ||
@@ -1058,53 +1139,15 @@ export default function AdminUsersPage() {
               </table>
             </div>
 
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '1.25rem',
-                  borderTop: '1px solid #E2E8F0',
-                }}
-              >
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page <= 1 ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'السابق' : 'Previous'}
-                </button>
-                <span style={{ fontSize: '0.85rem', color: '#64748B' }}>
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page >= totalPages ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page >= totalPages ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'التالي' : 'Next'}
-                </button>
-              </div>
-            )}
+            {/* Modern Reusable Pagination */}
+            <Pagination
+              currentPage={page}
+              totalPages={effectiveTotalPages}
+              totalCount={filteredUsers.length > 10 ? filteredUsers.length : undefined}
+              limit={10}
+              onPageChange={(newPage) => setPage(newPage)}
+              loading={loading}
+            />
           </>
         )}
       </div>

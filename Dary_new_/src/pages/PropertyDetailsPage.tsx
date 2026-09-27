@@ -162,15 +162,17 @@ export default function PropertyDetailsPage() {
   const [reviewsMeta, setReviewsMeta] = useState<{ total: number; avgPropertyRating: number; avgOwnerRating: number } | null>(null);
 
   const fetchReviews = useCallback(async (propId: string) => {
+    const cleanId = String(propId || '').trim();
+    if (!cleanId || cleanId === 'undefined' || cleanId === 'null') return;
     setReviewsLoading(true);
     try {
-      const res = await ReviewService.getPropertyReviews(propId);
+      const res = await ReviewService.getPropertyReviews(cleanId);
       const items: ReviewItem[] = Array.isArray(res?.data) ? res.data : Array.isArray(res) ? res : [];
       setReviews(items);
 
       const total = res?.meta?.total ?? items.length;
-      let avgProp = res?.aggregates?._avg?.propertyRating;
-      let avgOwn = res?.aggregates?._avg?.ownerRating;
+      let avgProp = res?.meta?.averagePropertyRating ?? res?.aggregates?._avg?.propertyRating;
+      let avgOwn = res?.meta?.averageOwnerRating ?? res?.aggregates?._avg?.ownerRating;
 
       if (avgProp === undefined && items.length > 0) {
         avgProp = items.reduce((acc: number, r: ReviewItem) => acc + (r.propertyRating || 0), 0) / items.length;

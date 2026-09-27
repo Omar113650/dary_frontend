@@ -3,6 +3,7 @@ import { useLocale } from '../../utils/LocaleContext';
 import { ReviewService } from '../../services/reviewService';
 import type { ReviewItem } from '../../services/reviewService';
 import { useQueryClient } from '../../lib/queryClient';
+import Pagination from '../../components/common/Pagination';
 
 export default function AdminReviewsPage() {
   const { locale } = useLocale();
@@ -15,7 +16,11 @@ export default function AdminReviewsPage() {
 
   // Pagination
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [hasPrevPage, setHasPrevPage] = useState(false);
 
   // Action state
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -34,9 +39,9 @@ export default function AdminReviewsPage() {
     try {
       let data: any;
       if (activeTab === 'PENDING') {
-        data = await ReviewService.getPendingReviews({ page, limit: 10 });
+        data = await ReviewService.getPendingReviews({ page, limit });
       } else {
-        data = await ReviewService.getAllReviews({ page, limit: 10 });
+        data = await ReviewService.getAllReviews({ page, limit });
       }
 
       const list =
@@ -46,9 +51,12 @@ export default function AdminReviewsPage() {
         (Array.isArray(data) ? data : []);
 
       setReviews(list);
-      const total = data?.total || data?.meta?.total || list.length;
-      const limit = data?.limit || 10;
-      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+      const total = data?.total ?? data?.meta?.total ?? data?.totalCount ?? list.length;
+      setTotalCount(total);
+      const pages = data?.totalPages ?? data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / limit));
+      setTotalPages(pages);
+      setHasNextPage(Boolean(data?.hasNextPage ?? data?.meta?.hasNextPage ?? page < pages));
+      setHasPrevPage(Boolean(data?.hasPrevPage ?? data?.meta?.hasPrevPage ?? page > 1));
     } catch (err: any) {
       console.error('[AdminReviewsPage] Fetch error:', err);
       setError(
@@ -60,7 +68,7 @@ export default function AdminReviewsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, locale]);
+  }, [activeTab, page, limit, locale]);
 
   useEffect(() => {
     fetchReviews();
@@ -442,42 +450,23 @@ export default function AdminReviewsPage() {
               );
             })}
 
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', marginTop: '1.5rem' }}>
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--dary-border)',
-                    backgroundColor: '#FFFFFF',
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {locale === 'ar' ? 'السابق' : 'Prev'}
-                </button>
-                <span style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem', fontWeight: 600 }}>
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--dary-border)',
-                    backgroundColor: '#FFFFFF',
-                    cursor: page >= totalPages ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {locale === 'ar' ? 'التالي' : 'Next'}
-                </button>
-              </div>
-            )}
+            {/* Reusable Modern Pagination */}
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              limit={limit}
+              onPageChange={(newPage) => setPage(newPage)}
+              onLimitChange={(newLimit) => {
+                setLimit(newLimit);
+                setPage(1);
+              }}
+              limitOptions={[10, 20, 50]}
+              hasNextPage={hasNextPage}
+              hasPrevPage={hasPrevPage}
+              loading={loading}
+              style={{ marginTop: '1.5rem', borderRadius: '12px', border: '1px solid #E2E8F0' }}
+            />
           </div>
         )}
       </div>

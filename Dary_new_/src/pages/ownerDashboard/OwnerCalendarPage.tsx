@@ -1,10 +1,13 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { useOwnerCalendar } from '../../hooks/useDashboardQueries';
+import Pagination from '../../components/common/Pagination';
 
 export default function OwnerCalendarPage() {
   const { locale } = useLocale();
   const [daysFilter, setDaysFilter] = useState<number>(30);
+  const [page, setPage] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(10);
 
   // Cached: 30s staleTime per daysFilter
   const {
@@ -35,6 +38,12 @@ export default function OwnerCalendarPage() {
     : Array.isArray(calendarData)
     ? calendarData
     : [];
+
+  const totalPages = Math.max(1, Math.ceil(rawBookings.length / limit));
+  const paginatedBookings = useMemo(() => {
+    const startIndex = (page - 1) * limit;
+    return rawBookings.slice(startIndex, startIndex + limit);
+  }, [rawBookings, page, limit]);
 
   return (
     <div>
@@ -115,7 +124,10 @@ export default function OwnerCalendarPage() {
               <button
                 key={days}
                 type="button"
-                onClick={() => setDaysFilter(days)}
+                onClick={() => {
+                  setDaysFilter(days);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.35rem 0.75rem',
                   borderRadius: '6px',
@@ -163,8 +175,9 @@ export default function OwnerCalendarPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            {rawBookings.map((b: any, idx: number) => {
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+            {paginatedBookings.map((b: any, idx: number) => {
               const start = b.startDate || b.moveInDate;
               const end = b.endDate || b.moveOutDate;
               const tenantName = b.tenant?.firstName
@@ -250,7 +263,23 @@ export default function OwnerCalendarPage() {
               );
             })}
           </div>
-        )}
+
+          {/* Reusable Modern Pagination */}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalCount={rawBookings.length}
+            limit={limit}
+            onPageChange={(newPage) => setPage(newPage)}
+            onLimitChange={(newLimit) => {
+              setLimit(newLimit);
+              setPage(1);
+            }}
+            limitOptions={[10, 20, 50]}
+            style={{ marginTop: '1.25rem', border: '1px solid #E2E8F0', borderRadius: '12px' }}
+          />
+        </>
+      )}
       </div>
     </div>
   );

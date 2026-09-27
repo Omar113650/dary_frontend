@@ -3,6 +3,7 @@ import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminReportItem, AdminStatusCount } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import Pagination from '../../components/common/Pagination';
 import { useAdminReportsStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
@@ -10,10 +11,7 @@ export default function AdminReportsPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
-  const initialCache = queryClient.getQueryData<any>(['admin', 'reports', { page: 1, limit: 10 }]);
-  const initialList = initialCache?.reports || initialCache?.items || initialCache?.data || (Array.isArray(initialCache) ? initialCache : []);
-
-  const [reports, setReports] = useState<AdminReportItem[]>(() => (Array.isArray(initialList) ? initialList : []));
+  const [reports, setReports] = useState<AdminReportItem[]>([]);
   
   // Cached: 5m staleTime
   const {
@@ -22,13 +20,17 @@ export default function AdminReportsPage() {
     refetch: fetchStatus,
   } = useAdminReportsStatus();
 
-  const [loading, setLoading] = useState<boolean>(() => !initialCache);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Pagination & Filters
   const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNextPage, setHasNextPage] = useState(false);
+  const [hasPrevPage, setHasPrevPage] = useState(false);
   const [priorityFilter, setPriorityFilter] = useState('');
 
   // Active Resolving Modal
@@ -39,14 +41,17 @@ export default function AdminReportsPage() {
 
   // 2. Fetch Reports List
   const fetchReports = useCallback(async () => {
-    const cacheKey = ['admin', 'reports', { page, limit: 10 }];
+    const cacheKey = ['admin', 'reports', { page, limit }];
     const cached = queryClient.getQueryData<any>(cacheKey);
     if (cached) {
       const list = cached?.reports || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
       setReports(Array.isArray(list) ? list : []);
-      const total = cached?.total || cached?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = cached?.limit || 10;
-      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+      const total = cached?.meta?.total ?? cached?.totalCount ?? cached?.total ?? (Array.isArray(list) ? list.length : 0);
+      setTotalCount(total);
+      const pages = cached?.meta?.totalPages ?? cached?.totalPages ?? Math.max(1, Math.ceil(total / limit));
+      setTotalPages(pages);
+      setHasNextPage(Boolean(cached?.meta?.hasNextPage ?? cached?.hasNextPage ?? page < pages));
+      setHasPrevPage(Boolean(cached?.meta?.hasPrevPage ?? cached?.hasPrevPage ?? page > 1));
     } else {
       setLoading(true);
     }
@@ -54,15 +59,18 @@ export default function AdminReportsPage() {
     try {
       const data = await queryClient.fetchQuery({
         queryKey: cacheKey,
-        queryFn: () => AdminService.getReports({ page, limit: 10 }),
+        queryFn: () => AdminService.getReports({ page, limit }),
         staleTime: STALE_TIMES.LISTS,
       });
       const list = data?.reports || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setReports(Array.isArray(list) ? list : []);
 
-      const total = data?.total || data?.meta?.total || (Array.isArray(list) ? list.length : 0);
-      const limit = data?.limit || 10;
-      setTotalPages(Math.max(1, Math.ceil(total / limit)));
+      const total = data?.meta?.total ?? data?.totalCount ?? data?.total ?? (Array.isArray(list) ? list.length : 0);
+      setTotalCount(total);
+      const pages = data?.meta?.totalPages ?? data?.totalPages ?? Math.max(1, Math.ceil(total / limit));
+      setTotalPages(pages);
+      setHasNextPage(Boolean(data?.meta?.hasNextPage ?? data?.hasNextPage ?? page < pages));
+      setHasPrevPage(Boolean(data?.meta?.hasPrevPage ?? data?.hasPrevPage ?? page > 1));
     } catch (err: any) {
       console.error('[AdminReportsPage] GET /dashboard/reports failed:', err);
       setError(
@@ -74,7 +82,7 @@ export default function AdminReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, locale, queryClient]);
+  }, [page, limit, locale, queryClient]);
 
   useEffect(() => {
     fetchReports();
@@ -443,53 +451,22 @@ export default function AdminReportsPage() {
               </table>
             </div>
 
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'center',
-                  alignItems: 'center',
-                  gap: '1rem',
-                  padding: '1.25rem',
-                  borderTop: '1px solid #E2E8F0',
-                }}
-              >
-                <button
-                  type="button"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page <= 1 ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page <= 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'السابق' : 'Previous'}
-                </button>
-                <span style={{ fontSize: '0.85rem', color: '#64748B' }}>
-                  {page} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  style={{
-                    padding: '0.4rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #CBD5E1',
-                    background: page >= totalPages ? '#F1F5F9' : '#FFFFFF',
-                    cursor: page >= totalPages ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                  }}
-                >
-                  {locale === 'ar' ? 'التالي' : 'Next'}
-                </button>
-              </div>
-            )}
+            {/* Reusable Modern Pagination */}
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalCount={totalCount}
+              limit={limit}
+              onPageChange={(newPage) => setPage(newPage)}
+              onLimitChange={(newLimit) => {
+                setLimit(newLimit);
+                setPage(1);
+              }}
+              limitOptions={[10, 20, 50]}
+              hasNextPage={hasNextPage}
+              hasPrevPage={hasPrevPage}
+              loading={loading}
+            />
           </>
         )}
       </div>

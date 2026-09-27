@@ -8,6 +8,7 @@ import type {
 } from '../../services/ownerService';
 import { useOwnerBookingsStatus, useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import Pagination from '../../components/common/Pagination';
 
 export default function OwnerBookingsPage() {
   const { locale } = useLocale();
@@ -38,6 +39,10 @@ export default function OwnerBookingsPage() {
   // Active status filter tab
   const [selectedStatusTab, setSelectedStatusTab] = useState<string>('ALL');
   const [searchTerm, setSearchTerm] = useState<string>('');
+
+  // Pagination state
+  const [page, setPage] = useState<number>(1);
+  const [limit, setLimit] = useState<number>(10);
 
   // Property bookings list
   const [propertyBookings, setPropertyBookings] = useState<OwnerPropertyBookingItem[]>([]);
@@ -177,6 +182,12 @@ export default function OwnerBookingsPage() {
       return true;
     });
   }, [propertyBookings, selectedStatusTab, searchTerm]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredBookings.length / limit));
+  const paginatedBookings = useMemo(() => {
+    const startIndex = (page - 1) * limit;
+    return filteredBookings.slice(startIndex, startIndex + limit);
+  }, [filteredBookings, page, limit]);
 
   // Status counts from current bookings
   const statusCounts = useMemo(() => {
@@ -562,6 +573,7 @@ export default function OwnerBookingsPage() {
                 onChange={(e) => {
                   const newId = e.target.value;
                   setSelectedPropId(newId);
+                  setPage(1);
                   loadBookingsForProperty(newId, properties);
                 }}
                 style={{
@@ -595,7 +607,10 @@ export default function OwnerBookingsPage() {
               <input
                 type="text"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => {
+                  setSearchTerm(e.target.value);
+                  setPage(1);
+                }}
                 placeholder={locale === 'ar' ? 'اسم الطالب، الهاتف، الغرفة...' : 'Student name, phone, room...'}
                 style={{
                   width: '100%',
@@ -625,7 +640,10 @@ export default function OwnerBookingsPage() {
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setSelectedStatusTab(tab.id)}
+                  onClick={() => {
+                    setSelectedStatusTab(tab.id);
+                    setPage(1);
+                  }}
                   style={{
                     padding: '0.45rem 0.85rem',
                     borderRadius: '8px',
@@ -711,8 +729,9 @@ export default function OwnerBookingsPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {filteredBookings.map((b: any) => {
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            {paginatedBookings.map((b: any) => {
               const tenantName = b.tenant?.firstName
                 ? `${b.tenant.firstName} ${b.tenant.lastName || ''}`.trim()
                 : b.tenant?.name || (locale === 'ar' ? 'طالب مستأجر' : 'Student Tenant');
@@ -1007,7 +1026,23 @@ export default function OwnerBookingsPage() {
               );
             })}
           </div>
-        )}
+
+          {/* Reusable Modern Pagination */}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalCount={filteredBookings.length}
+            limit={limit}
+            onPageChange={(newPage) => setPage(newPage)}
+            onLimitChange={(newLimit) => {
+              setLimit(newLimit);
+              setPage(1);
+            }}
+            limitOptions={[10, 20, 50]}
+            style={{ marginTop: '1.25rem', border: '1px solid #E2E8F0', borderRadius: '12px' }}
+          />
+        </>
+      )}
       </div>
     </div>
   );

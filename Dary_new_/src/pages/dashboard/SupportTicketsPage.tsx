@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
 import { ReportService, type ReportItem } from '../../services/reportService';
 import type { SupportTicketItem, TicketMessageItem } from '../../services/supportTicketService';
+import Pagination from '../../components/common/Pagination';
 
 export default function SupportTicketsPage() {
   const { locale } = useLocale();
@@ -13,10 +14,30 @@ export default function SupportTicketsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Pagination for tickets
+  const [ticketPage, setTicketPage] = useState(1);
+  const [ticketLimit, setTicketLimit] = useState(10);
+  const ticketTotalCount = tickets.length;
+  const ticketTotalPages = Math.max(1, Math.ceil(ticketTotalCount / ticketLimit));
+  const paginatedTickets = useMemo(() => {
+    const start = (ticketPage - 1) * ticketLimit;
+    return tickets.slice(start, start + ticketLimit);
+  }, [tickets, ticketPage, ticketLimit]);
+
   // Reports state
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [loadingReports, setLoadingReports] = useState(false);
   const [reportsError, setReportsError] = useState<string | null>(null);
+
+  // Pagination for reports
+  const [reportPage, setReportPage] = useState(1);
+  const [reportLimit, setReportLimit] = useState(10);
+  const reportTotalCount = reports.length;
+  const reportTotalPages = Math.max(1, Math.ceil(reportTotalCount / reportLimit));
+  const paginatedReports = useMemo(() => {
+    const start = (reportPage - 1) * reportLimit;
+    return reports.slice(start, start + reportLimit);
+  }, [reports, reportPage, reportLimit]);
 
   // New ticket modal
   const [isNewTicketOpen, setIsNewTicketOpen] = useState(false);
@@ -367,50 +388,70 @@ export default function SupportTicketsPage() {
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {tickets.map((ticket) => (
-                  <div
-                    key={ticket.id}
-                    onClick={() => handleOpenThread(ticket)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '1.25rem',
-                      border: '1px solid var(--dary-border)',
-                      borderRadius: '12px',
-                      backgroundColor: '#FFFFFF',
-                      cursor: 'pointer',
-                      flexWrap: 'wrap',
-                      gap: '1rem',
-                      transition: 'border-color 0.2s',
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
-                        <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
-                          {ticket.subject || (locale === 'ar' ? 'تذكرة بدون عنوان' : 'Untitled Ticket')}
-                        </h3>
-                        {getStatusBadge(ticket.status)}
-                        {ticket.category && (
-                          <span style={{ fontSize: '0.75rem', backgroundColor: '#F1F5F9', color: '#475569', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
-                            {ticket.category}
-                          </span>
-                        )}
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {paginatedTickets.map((ticket) => (
+                    <div
+                      key={ticket.id}
+                      onClick={() => handleOpenThread(ticket)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '1.25rem',
+                        border: '1px solid var(--dary-border)',
+                        borderRadius: '12px',
+                        backgroundColor: '#FFFFFF',
+                        cursor: 'pointer',
+                        flexWrap: 'wrap',
+                        gap: '1rem',
+                        transition: 'border-color 0.2s',
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.35rem' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
+                            {ticket.subject || (locale === 'ar' ? 'تذكرة بدون عنوان' : 'Untitled Ticket')}
+                          </h3>
+                          {getStatusBadge(ticket.status)}
+                          {ticket.category && (
+                            <span style={{ fontSize: '0.75rem', backgroundColor: '#F1F5F9', color: '#475569', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                              {ticket.category}
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--dary-muted)' }}>
+                          {ticket.description?.slice(0, 100) || ''}
+                          {ticket.createdAt ? ` • ${new Date(ticket.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}` : ''}
+                        </p>
                       </div>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--dary-muted)' }}>
-                        {ticket.description?.slice(0, 100) || ''}
-                        {ticket.createdAt ? ` • ${new Date(ticket.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}` : ''}
-                      </p>
-                    </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--dary-blue)', fontSize: '0.85rem', fontWeight: 600 }}>
-                      <span>{locale === 'ar' ? 'عرض المحادثة' : 'View Thread'}</span>
-                      <span>→</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--dary-blue)', fontSize: '0.85rem', fontWeight: 600 }}>
+                        <span>{locale === 'ar' ? 'عرض المحادثة' : 'View Thread'}</span>
+                        <span>→</span>
+                      </div>
                     </div>
+                  ))}
+                </div>
+
+                {ticketTotalCount > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <Pagination
+                      page={ticketPage}
+                      totalPages={ticketTotalPages}
+                      totalCount={ticketTotalCount}
+                      limit={ticketLimit}
+                      onPageChange={(p) => setTicketPage(p)}
+                      onLimitChange={(l) => {
+                        setTicketLimit(l);
+                        setTicketPage(1);
+                      }}
+                      itemNameAr="تذكرة"
+                      itemNameEn="tickets"
+                    />
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             )}
           </>
         )}
@@ -451,128 +492,148 @@ export default function SupportTicketsPage() {
                 </Link>
               </div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
-                {reports.map((report) => {
-                  const isResolved = report.status?.toUpperCase() === 'RESOLVED';
-                  const priorityKey = (report.priority || '').toLowerCase();
-                  const isHigh = priorityKey === 'high' || priorityKey === 'urgent';
-                  const isMed = priorityKey === 'medium';
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+                  {paginatedReports.map((report) => {
+                    const isResolved = report.status?.toUpperCase() === 'RESOLVED';
+                    const priorityKey = (report.priority || '').toLowerCase();
+                    const isHigh = priorityKey === 'high' || priorityKey === 'urgent';
+                    const isMed = priorityKey === 'medium';
 
-                  return (
-                    <div
-                      key={report.id}
-                      style={{
-                        padding: '1.25rem',
-                        border: isResolved ? '1px solid #BBF7D0' : '1px solid #FECACA',
-                        borderRadius: '14px',
-                        backgroundColor: '#FFFFFF',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.85rem',
-                      }}
-                    >
-                      {/* Report Card Header */}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                          <span style={{ fontSize: '0.78rem', fontFamily: 'monospace', backgroundColor: '#F1F5F9', color: '#64748B', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
-                            #{report.id?.slice(0, 8)}
-                          </span>
+                    return (
+                      <div
+                        key={report.id}
+                        style={{
+                          padding: '1.25rem',
+                          border: isResolved ? '1px solid #BBF7D0' : '1px solid #FECACA',
+                          borderRadius: '14px',
+                          backgroundColor: '#FFFFFF',
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.03)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.85rem',
+                        }}
+                      >
+                        {/* Report Card Header */}
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                            <span style={{ fontSize: '0.78rem', fontFamily: 'monospace', backgroundColor: '#F1F5F9', color: '#64748B', padding: '0.2rem 0.55rem', borderRadius: '6px' }}>
+                              #{report.id?.slice(0, 8)}
+                            </span>
 
-                          <span
-                            style={{
-                              fontSize: '0.78rem',
-                              fontWeight: 700,
-                              padding: '0.2rem 0.65rem',
-                              borderRadius: '999px',
-                              backgroundColor: isResolved ? '#DCFCE7' : '#FEF3C7',
-                              color: isResolved ? '#166534' : '#B45309',
-                            }}
-                          >
-                            {isResolved
-                              ? (locale === 'ar' ? '✓ تم حل البلاغ' : 'Resolved')
-                              : (locale === 'ar' ? '⏳ قيد المراجعة والمعالجة' : 'Pending Review')}
-                          </span>
-
-                          <span
-                            style={{
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              padding: '0.2rem 0.55rem',
-                              borderRadius: '6px',
-                              backgroundColor: isHigh ? '#FEE2E2' : isMed ? '#FEF3C7' : '#EFF6FF',
-                              color: isHigh ? '#B91C1C' : isMed ? '#D97706' : '#1D4ED8',
-                            }}
-                          >
-                            {isHigh
-                              ? (locale === 'ar' ? 'أولوية عالية / عاجل' : 'High Priority')
-                              : isMed
-                              ? (locale === 'ar' ? 'أولوية متوسطة' : 'Medium Priority')
-                              : (locale === 'ar' ? 'أولوية عادية' : 'Low Priority')}
-                          </span>
-                        </div>
-
-                        {report.createdAt && (
-                          <span style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
-                            📅 {new Date(report.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Property info */}
-                      {report.reportedProperty?.title && (
-                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--dary-navy)' }}>
-                          <span>🏠 {locale === 'ar' ? 'العقار المبلغ عنه:' : 'Reported Property:'} </span>
-                          {report.reportedPropertyId ? (
-                            <Link
-                              to={`/properties/${report.reportedPropertyId}`}
-                              style={{ color: 'var(--dary-blue)', textDecoration: 'underline' }}
+                            <span
+                              style={{
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                padding: '0.2rem 0.65rem',
+                                borderRadius: '999px',
+                                backgroundColor: isResolved ? '#DCFCE7' : '#FEF3C7',
+                                color: isResolved ? '#166534' : '#B45309',
+                              }}
                             >
-                              {report.reportedProperty.title}
-                            </Link>
-                          ) : (
-                            <span>{report.reportedProperty.title}</span>
+                              {isResolved
+                                ? (locale === 'ar' ? '✓ تم حل البلاغ' : 'Resolved')
+                                : (locale === 'ar' ? '⏳ قيد المراجعة والمعالجة' : 'Pending Review')}
+                            </span>
+
+                            <span
+                              style={{
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                padding: '0.2rem 0.55rem',
+                                borderRadius: '6px',
+                                backgroundColor: isHigh ? '#FEE2E2' : isMed ? '#FEF3C7' : '#EFF6FF',
+                                color: isHigh ? '#B91C1C' : isMed ? '#D97706' : '#1D4ED8',
+                              }}
+                            >
+                              {isHigh
+                                ? (locale === 'ar' ? 'أولوية عالية / عاجل' : 'High Priority')
+                                : isMed
+                                ? (locale === 'ar' ? 'أولوية متوسطة' : 'Medium Priority')
+                                : (locale === 'ar' ? 'أولوية عادية' : 'Low Priority')}
+                            </span>
+                          </div>
+
+                          {report.createdAt && (
+                            <span style={{ fontSize: '0.8rem', color: '#94A3B8' }}>
+                              📅 {new Date(report.createdAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
+                            </span>
                           )}
                         </div>
-                      )}
 
-                      {/* Reason and details */}
-                      <div style={{ fontSize: '0.88rem', color: '#334155', lineHeight: 1.6, backgroundColor: '#F8FAFC', padding: '0.75rem 1rem', borderRadius: '8px' }}>
-                        <span style={{ fontWeight: 700, color: '#DC2626' }}>
-                          {locale === 'ar' ? 'تفاصيل البلاغ:' : 'Report Details:'}{' '}
-                        </span>
-                        <span>{report.description || (locale === 'ar' ? 'بدون تفاصيل إضافية' : 'No description')}</span>
-                      </div>
+                        {/* Property info */}
+                        {report.reportedProperty?.title && (
+                          <div style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--dary-navy)' }}>
+                            <span>🏠 {locale === 'ar' ? 'العقار المبلغ عنه:' : 'Reported Property:'} </span>
+                            {report.reportedPropertyId ? (
+                              <Link
+                                to={`/properties/${report.reportedPropertyId}`}
+                                style={{ color: 'var(--dary-blue)', textDecoration: 'underline' }}
+                              >
+                                {report.reportedProperty.title}
+                              </Link>
+                            ) : (
+                              <span>{report.reportedProperty.title}</span>
+                            )}
+                          </div>
+                        )}
 
-                      {/* Admin Resolution Section */}
-                      {isResolved && (
-                        <div
-                          style={{
-                            padding: '0.85rem 1rem',
-                            borderRadius: '10px',
-                            backgroundColor: '#F0FDF4',
-                            border: '1px solid #BBF7D0',
-                            fontSize: '0.86rem',
-                            color: '#166534',
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          <div style={{ fontWeight: 800, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <span>🛡️</span>
-                            <span>{locale === 'ar' ? 'إجراء وقرار إدارة داري:' : 'Dary Admin Resolution:'}</span>
-                          </div>
-                          <div>
-                            {report.resolutionNotes ||
-                              (locale === 'ar'
-                                ? 'تمت مراجعة العقار واتخاذ الإجراء اللازم من قبل المشرفين.'
-                                : 'The property has been reviewed and appropriate actions were taken by administrators.')}
-                          </div>
+                        {/* Reason and details */}
+                        <div style={{ fontSize: '0.88rem', color: '#334155', lineHeight: 1.6, backgroundColor: '#F8FAFC', padding: '0.75rem 1rem', borderRadius: '8px' }}>
+                          <span style={{ fontWeight: 700, color: '#DC2626' }}>
+                            {locale === 'ar' ? 'تفاصيل البلاغ:' : 'Report Details:'}{' '}
+                          </span>
+                          <span>{report.description || (locale === 'ar' ? 'بدون تفاصيل إضافية' : 'No description')}</span>
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+
+                        {/* Admin Resolution Section */}
+                        {isResolved && (
+                          <div
+                            style={{
+                              padding: '0.85rem 1rem',
+                              borderRadius: '10px',
+                              backgroundColor: '#F0FDF4',
+                              border: '1px solid #BBF7D0',
+                              fontSize: '0.86rem',
+                              color: '#166534',
+                              lineHeight: 1.6,
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span>🛡️</span>
+                              <span>{locale === 'ar' ? 'إجراء وقرار إدارة داري:' : 'Dary Admin Resolution:'}</span>
+                            </div>
+                            <div>
+                              {report.resolutionNotes ||
+                                (locale === 'ar'
+                                  ? 'تمت مراجعة العقار واتخاذ الإجراء اللازم من قبل المشرفين.'
+                                  : 'The property has been reviewed and appropriate actions were taken by administrators.')}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {reportTotalCount > 0 && (
+                  <div style={{ marginTop: '1.25rem' }}>
+                    <Pagination
+                      page={reportPage}
+                      totalPages={reportTotalPages}
+                      totalCount={reportTotalCount}
+                      limit={reportLimit}
+                      onPageChange={(p) => setReportPage(p)}
+                      onLimitChange={(l) => {
+                        setReportLimit(l);
+                        setReportPage(1);
+                      }}
+                      itemNameAr="بلاغ"
+                      itemNameEn="reports"
+                    />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}

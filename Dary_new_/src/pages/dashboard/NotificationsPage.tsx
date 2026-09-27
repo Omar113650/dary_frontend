@@ -4,6 +4,7 @@ import { NotificationService } from '../../services/notificationService';
 import type { NotificationItem } from '../../services/notificationService';
 import { useNotifications } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
+import Pagination from '../../components/common/Pagination';
 
 export default function NotificationsPage() {
   const { locale } = useLocale();
@@ -35,6 +36,8 @@ export default function NotificationsPage() {
   const [isMarkingAll, setIsMarkingAll] = useState(false);
   const [isDeletingRead, setIsDeletingRead] = useState(false);
   const [filterTab, setFilterTab] = useState<'ALL' | 'UNREAD' | 'READ'>('ALL');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -131,6 +134,13 @@ export default function NotificationsPage() {
     }
     return notifications;
   }, [notifications, filterTab]);
+
+  const totalCount = filteredNotifications.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const paginatedNotifications = useMemo(() => {
+    const start = (page - 1) * limit;
+    return filteredNotifications.slice(start, start + limit);
+  }, [filteredNotifications, page, limit]);
 
   function translateNotification(
     rawTitle?: string,
@@ -350,7 +360,10 @@ export default function NotificationsPage() {
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setFilterTab(tab.id)}
+                onClick={() => {
+                  setFilterTab(tab.id);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.4rem 0.85rem',
                   borderRadius: '8px',
@@ -421,8 +434,9 @@ export default function NotificationsPage() {
             </p>
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            {filteredNotifications.map((item) => {
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {paginatedNotifications.map((item) => {
               const isUnread = !item.isRead && !item.read;
               const { title, message } = translateNotification(
                 item.title,
@@ -548,6 +562,26 @@ export default function NotificationsPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalCount > 0 && (
+            <div style={{ marginTop: '1.25rem' }}>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={limit}
+                onPageChange={(p) => setPage(p)}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemNameAr="إشعار"
+                itemNameEn="notifications"
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

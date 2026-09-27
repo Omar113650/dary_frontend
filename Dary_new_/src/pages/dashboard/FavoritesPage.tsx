@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
 import type { FavoriteItem } from '../../services/tenantService';
+import Pagination from '../../components/common/Pagination';
 
 export default function FavoritesPage() {
   const { locale } = useLocale();
@@ -11,6 +12,16 @@ export default function FavoritesPage() {
   const [error, setError] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(9);
+  const totalCount = favorites.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const paginatedFavorites = useMemo(() => {
+    const start = (page - 1) * limit;
+    return favorites.slice(start, start + limit);
+  }, [favorites, page, limit]);
 
   useEffect(() => {
     if (actionMessage) {
@@ -145,14 +156,15 @@ export default function FavoritesPage() {
             </Link>
           </div>
         ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: '1.5rem',
-            }}
-          >
-            {favorites.map((fav) => {
+          <>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: '1.5rem',
+              }}
+            >
+              {paginatedFavorites.map((fav) => {
               const p = fav.property || fav;
               const propId = fav.propertyId || p.id;
               const title = p.title || (locale === 'ar' ? 'سكن طلابي' : 'Student Housing');
@@ -246,6 +258,26 @@ export default function FavoritesPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalCount > 0 && (
+            <div style={{ marginTop: '1.5rem' }}>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={limit}
+                onPageChange={(p) => setPage(p)}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemNameAr="عقار مفضل"
+                itemNameEn="favorites"
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
     </div>

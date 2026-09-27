@@ -6,11 +6,16 @@ import { propertyService } from '../../services/propertyService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
+import Pagination from '../../components/common/Pagination';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(9);
 
   // Action states
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
@@ -77,6 +82,13 @@ export default function OwnerPropertiesPage() {
 
     return result;
   }, [properties, statusFilter, searchQuery]);
+
+  const totalCount = filteredProperties.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const paginatedProperties = useMemo(() => {
+    const start = (page - 1) * limit;
+    return filteredProperties.slice(start, start + limit);
+  }, [filteredProperties, page, limit]);
 
   const stats = useMemo(() => {
     const total = properties.length;
@@ -390,7 +402,10 @@ export default function OwnerPropertiesPage() {
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setStatusFilter(tab.key)}
+                onClick={() => {
+                  setStatusFilter(tab.key);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.45rem 0.9rem',
                   borderRadius: '8px',
@@ -413,7 +428,10 @@ export default function OwnerPropertiesPage() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setPage(1);
+              }}
               placeholder={locale === 'ar' ? '🔍 ابحث بالعنوان أو المدينة أو الحي...' : '🔍 Search by title, city, district...'}
               className="dary-input"
               style={{ padding: '0.45rem 0.85rem', fontSize: '0.85rem', margin: 0 }}
@@ -471,8 +489,9 @@ export default function OwnerPropertiesPage() {
             </Link>
           </div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
-            {filteredProperties.map((property) => {
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '1.5rem' }}>
+              {paginatedProperties.map((property) => {
               const image =
                 property.primaryImage ||
                 (Array.isArray(property.images) && property.images.length > 0
@@ -649,6 +668,26 @@ export default function OwnerPropertiesPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalCount > 0 && (
+            <div style={{ marginTop: '1.5rem' }}>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={limit}
+                onPageChange={(p) => setPage(p)}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemNameAr="عقار"
+                itemNameEn="properties"
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
 

@@ -40,11 +40,20 @@ export class ReviewService {
    * Get Property Reviews
    */
   static async getPropertyReviews(propertyId: string, params?: { page?: number; limit?: number }): Promise<any> {
+    const cleanId = String(propertyId || '').trim();
+    if (!cleanId || cleanId === 'undefined' || cleanId === 'null') {
+      return { data: [], meta: { total: 0, averagePropertyRating: 0, averageOwnerRating: 0 } };
+    }
+
     const query = new URLSearchParams();
-    if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.page !== undefined && params?.page !== null) {
+      query.append('page', String(Math.max(1, Number(params.page) || 1)));
+    }
+    if (params?.limit !== undefined && params?.limit !== null) {
+      query.append('limit', String(Math.max(1, Math.min(100, Number(params.limit) || 20))));
+    }
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/review/property/${propertyId}${queryStr}`);
+    const res = await ApiClient.get<any>(`/review/property/${encodeURIComponent(cleanId)}${queryStr}`);
     return res?.data || res;
   }
 
@@ -53,11 +62,20 @@ export class ReviewService {
    * Get Owner Reviews
    */
   static async getOwnerReviews(ownerId: string, params?: { page?: number; limit?: number }): Promise<any> {
+    const cleanId = String(ownerId || '').trim();
+    if (!cleanId || cleanId === 'undefined' || cleanId === 'null') {
+      return { data: [], meta: { total: 0, averagePropertyRating: 0, averageOwnerRating: 0 } };
+    }
+
     const query = new URLSearchParams();
-    if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.page !== undefined && params?.page !== null) {
+      query.append('page', String(Math.max(1, Number(params.page) || 1)));
+    }
+    if (params?.limit !== undefined && params?.limit !== null) {
+      query.append('limit', String(Math.max(1, Math.min(100, Number(params.limit) || 20))));
+    }
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/review/owner/${ownerId}${queryStr}`);
+    const res = await ApiClient.get<any>(`/review/owner/${encodeURIComponent(cleanId)}${queryStr}`);
     return res?.data || res;
   }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { TenantService } from '../../services/tenantService';
@@ -6,6 +6,7 @@ import type { RentalBooking } from '../../services/tenantService';
 import { ReviewService } from '../../services/reviewService';
 import { useTenantRentals } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
+import Pagination from '../../components/common/Pagination';
 
 export default function OwnerMyRentalsPage() {
   const { locale } = useLocale();
@@ -30,6 +31,23 @@ export default function OwnerMyRentalsPage() {
         ? 'تعذر تحميل قائمة حجوزاتك الشخصية من الخادم.'
         : 'Could not load your personal bookings from the server.')
     : null;
+
+  // Pagination & Filtering state
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const [statusFilter, setStatusFilter] = useState<string>('ALL');
+
+  const filteredRentals = useMemo(() => {
+    if (statusFilter === 'ALL') return rentals;
+    return rentals.filter((r) => (r.status || '').toUpperCase() === statusFilter);
+  }, [rentals, statusFilter]);
+
+  const totalCount = filteredRentals.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / limit));
+  const paginatedRentals = useMemo(() => {
+    const start = (page - 1) * limit;
+    return filteredRentals.slice(start, start + limit);
+  }, [filteredRentals, page, limit]);
 
   // Cancellation modal state
   const [cancellingBooking, setCancellingBooking] = useState<RentalBooking | null>(null);
@@ -356,6 +374,59 @@ export default function OwnerMyRentalsPage() {
           </button>
         </div>
 
+        {/* Status Filter Tabs */}
+        {rentals.length > 0 && (
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.75rem' }}>
+            {[
+              { id: 'ALL', labelAr: 'كافة الحجوزات', labelEn: 'All Rentals', count: rentals.length },
+              { id: 'PENDING', labelAr: 'قيد المراجعة', labelEn: 'Pending', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length },
+              { id: 'CONTACTED', labelAr: 'تم التواصل', labelEn: 'Contacted', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CONTACTED').length },
+              { id: 'CLOSED', labelAr: 'مكتملة ومؤكدة', labelEn: 'Closed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CLOSED').length },
+              { id: 'CANCELLED', labelAr: 'ملغية', labelEn: 'Cancelled', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CANCELLED').length },
+            ].map((tab) => {
+              const isActive = statusFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(tab.id);
+                    setPage(1);
+                  }}
+                  style={{
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid',
+                    borderColor: isActive ? 'var(--dary-navy)' : '#CBD5E1',
+                    backgroundColor: isActive ? 'var(--dary-navy)' : '#FFFFFF',
+                    color: isActive ? '#FFFFFF' : '#475569',
+                    fontSize: '0.825rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>{locale === 'ar' ? tab.labelAr : tab.labelEn}</span>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      padding: '0.1rem 0.4rem',
+                      borderRadius: '999px',
+                      backgroundColor: isActive ? 'rgba(255,255,255,0.2)' : '#F1F5F9',
+                      color: isActive ? '#FFFFFF' : '#64748B',
+                    }}
+                  >
+                    {tab.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div style={{ padding: '3.5rem 0', textAlign: 'center', color: '#64748B' }}>
             <div
@@ -381,7 +452,7 @@ export default function OwnerMyRentalsPage() {
               {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </button>
           </div>
-        ) : rentals.length === 0 ? (
+        ) : filteredRentals.length === 0 ? (
           <div
             style={{
               padding: '3.5rem 1.5rem',
@@ -393,32 +464,52 @@ export default function OwnerMyRentalsPage() {
           >
             <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🧳</div>
             <h4 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0B2A4A', margin: '0 0 0.5rem' }}>
-              {locale === 'ar' ? 'لم تقم بحجز أي عقار لنفسك حتى الآن' : 'No Personal Bookings Found'}
+              {statusFilter === 'ALL'
+                ? (locale === 'ar' ? 'لم تقم بحجز أي عقار لنفسك حتى الآن' : 'No Personal Bookings Found')
+                : (locale === 'ar' ? 'لا توجد حجوزات شخصية بهذه الحالة' : 'No Bookings with this status')}
             </h4>
             <p style={{ fontSize: '0.875rem', color: '#64748B', maxWidth: '460px', margin: '0 auto 1.5rem' }}>
-              {locale === 'ar'
-                ? 'إذا كنت تبحث عن سكن لنفسك أو لإقامتك في مدينة أخرى، يمكنك تصفح كافة العقارات المتاحة وتقديم طلب حجز فوراً.'
-                : 'If you want to stay in student housing or book accommodation in another city, browse available properties and book directly.'}
+              {statusFilter === 'ALL'
+                ? (locale === 'ar'
+                    ? 'إذا كنت تبحث عن سكن لنفسك أو لإقامتك في مدينة أخرى، يمكنك تصفح كافة العقارات المتاحة وتقديم طلب حجز فوراً.'
+                    : 'If you want to stay in student housing or book accommodation in another city, browse available properties and book directly.')
+                : (locale === 'ar'
+                    ? 'لم نجد أي طلبات حجز تطابق الفلتر المحدد.'
+                    : 'No booking requests match the selected filter.')}
             </p>
-            <Link
-              to={`${basePath}/explore`}
-              className="dary-primary-btn"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.75rem 1.5rem',
-                fontSize: '0.95rem',
-                textDecoration: 'none',
-              }}
-            >
-              <span>🧭</span>
-              <span>{locale === 'ar' ? 'تصفح العقارات المتاحة الآن' : 'Explore Properties Now'}</span>
-            </Link>
+            {statusFilter !== 'ALL' ? (
+              <button
+                type="button"
+                className="dary-primary-btn"
+                onClick={() => {
+                  setStatusFilter('ALL');
+                  setPage(1);
+                }}
+              >
+                {locale === 'ar' ? 'عرض كافة الحجوزات' : 'View All Bookings'}
+              </button>
+            ) : (
+              <Link
+                to={`${basePath}/explore`}
+                className="dary-primary-btn"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.5rem',
+                  fontSize: '0.95rem',
+                  textDecoration: 'none',
+                }}
+              >
+                <span>🧭</span>
+                <span>{locale === 'ar' ? 'تصفح العقارات المتاحة الآن' : 'Explore Properties Now'}</span>
+              </Link>
+            )}
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            {rentals.map((rental) => {
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+              {paginatedRentals.map((rental) => {
               const canCancel = (rental.status || '').toUpperCase() === 'PENDING';
               return (
                 <div
@@ -597,6 +688,26 @@ export default function OwnerMyRentalsPage() {
               );
             })}
           </div>
+
+          {/* Pagination Controls */}
+          {totalCount > 0 && (
+            <div style={{ marginTop: '1.25rem' }}>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                totalCount={totalCount}
+                limit={limit}
+                onPageChange={(p) => setPage(p)}
+                onLimitChange={(l) => {
+                  setLimit(l);
+                  setPage(1);
+                }}
+                itemNameAr="حجز"
+                itemNameEn="bookings"
+              />
+            </div>
+          )}
+          </>
         )}
       </div>
 

@@ -3,6 +3,7 @@ import { useLocale } from '../../utils/LocaleContext';
 import { SupportTicketService } from '../../services/supportTicketService';
 import type { SupportTicketItem, TicketMessageItem } from '../../services/supportTicketService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
+import Pagination from '../../components/common/Pagination';
 
 export default function AdminSupportTicketsPage() {
   const { locale } = useLocale();
@@ -12,10 +13,12 @@ export default function AdminSupportTicketsPage() {
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Filters
+  // Filters & Pagination
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [searchTerm, setSearchTerm] = useState('');
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
 
   // Active Thread Modal
   const [selectedTicket, setSelectedTicket] = useState<SupportTicketItem | null>(null);
@@ -263,6 +266,9 @@ export default function AdminSupportTicketsPage() {
     return true;
   });
 
+  const totalPages = Math.max(1, Math.ceil(filteredTickets.length / limit));
+  const paginatedTickets = filteredTickets.slice((page - 1) * limit, page * limit);
+
   return (
     <div className="dary-page-container">
       {/* Header */}
@@ -325,7 +331,7 @@ export default function AdminSupportTicketsPage() {
       <div className="dary-metrics-grid" style={{ marginBottom: '1.5rem' }}>
         <div
           className="dary-metric-card"
-          onClick={() => setStatusFilter('ALL')}
+          onClick={() => { setStatusFilter('ALL'); setPage(1); }}
           style={{ cursor: 'pointer', border: statusFilter === 'ALL' ? '2px solid #0B2A4A' : undefined }}
         >
           <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#EEF3FF', color: '#2F6BFF' }}>
@@ -341,7 +347,7 @@ export default function AdminSupportTicketsPage() {
 
         <div
           className="dary-metric-card"
-          onClick={() => setStatusFilter('OPEN')}
+          onClick={() => { setStatusFilter('OPEN'); setPage(1); }}
           style={{ cursor: 'pointer', border: statusFilter === 'OPEN' ? '2px solid #2563EB' : undefined }}
         >
           <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#EFF6FF', color: '#2563EB' }}>
@@ -357,7 +363,7 @@ export default function AdminSupportTicketsPage() {
 
         <div
           className="dary-metric-card"
-          onClick={() => setStatusFilter('INVESTIGATING')}
+          onClick={() => { setStatusFilter('INVESTIGATING'); setPage(1); }}
           style={{ cursor: 'pointer', border: statusFilter === 'INVESTIGATING' ? '2px solid #D97706' : undefined }}
         >
           <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
@@ -373,7 +379,7 @@ export default function AdminSupportTicketsPage() {
 
         <div
           className="dary-metric-card"
-          onClick={() => setStatusFilter('RESOLVED')}
+          onClick={() => { setStatusFilter('RESOLVED'); setPage(1); }}
           style={{ cursor: 'pointer', border: statusFilter === 'RESOLVED' ? '2px solid #16A34A' : undefined }}
         >
           <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#DCFCE7', color: '#16A34A' }}>
@@ -403,7 +409,7 @@ export default function AdminSupportTicketsPage() {
               <button
                 key={tab.key}
                 type="button"
-                onClick={() => setStatusFilter(tab.key)}
+                onClick={() => { setStatusFilter(tab.key); setPage(1); }}
                 style={{
                   padding: '0.4rem 0.85rem',
                   borderRadius: '8px',
@@ -426,7 +432,10 @@ export default function AdminSupportTicketsPage() {
             {categories.length > 0 && (
               <select
                 value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
+                onChange={(e) => {
+                  setCategoryFilter(e.target.value);
+                  setPage(1);
+                }}
                 style={{
                   padding: '0.45rem 0.85rem',
                   borderRadius: '8px',
@@ -449,7 +458,10 @@ export default function AdminSupportTicketsPage() {
               type="text"
               placeholder={locale === 'ar' ? 'بحث بالموضوع، التفاصيل، أو البريد...' : 'Search subject, user, email...'}
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
               style={{
                 padding: '0.45rem 0.85rem',
                 borderRadius: '8px',
@@ -494,7 +506,8 @@ export default function AdminSupportTicketsPage() {
             </p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
+          <>
+            <div style={{ overflowX: 'auto' }}>
             <table className="dary-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #E2E8F0', textAlign: locale === 'ar' ? 'right' : 'left' }}>
@@ -508,7 +521,7 @@ export default function AdminSupportTicketsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filteredTickets.map((t) => {
+                {paginatedTickets.map((t) => {
                   const submitterName =
                     t.user?.name ||
                     `${t.user?.firstName || ''} ${t.user?.lastName || ''}`.trim() ||
@@ -625,7 +638,22 @@ export default function AdminSupportTicketsPage() {
               </tbody>
             </table>
           </div>
-        )}
+
+          {/* Reusable Modern Pagination */}
+          <Pagination
+            currentPage={page}
+            totalPages={totalPages}
+            totalCount={filteredTickets.length}
+            limit={limit}
+            onPageChange={(newPage) => setPage(newPage)}
+            onLimitChange={(newLimit) => {
+              setLimit(newLimit);
+              setPage(1);
+            }}
+            limitOptions={[10, 20, 50]}
+          />
+        </>
+      )}
       </div>
 
       {/* Live Thread & Reply Modal */}
