@@ -294,6 +294,35 @@ export class AdminService {
   }
 
   /**
+   * POST /auth/create-admin (or /admin/users)
+   * Directly creates an active, verified admin in database without OTP
+   */
+  static async createAdmin(data: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    password: string;
+    roleName?: string;
+  }): Promise<any> {
+    try {
+      const res = await ApiClient.post<any>('/auth/create-admin', data);
+      return res?.data || res;
+    } catch (err: any) {
+      if (err?.status === 404) {
+        try {
+          const res = await ApiClient.post<any>('/admin/users', data);
+          return res?.data || res;
+        } catch {
+          const res = await ApiClient.post<any>('/auth/admin', data);
+          return res?.data || res;
+        }
+      }
+      throw err;
+    }
+  }
+
+  /**
    * GET /dashboard/booking/calendar
    */
   static async getBookingCalendar(startDate?: string, endDate?: string): Promise<any> {

@@ -8,6 +8,7 @@ import {
   useOwnerBookingsStatus,
   useOwnerRevenue,
   useOwnerCalendar,
+  useTenantRentals,
 } from '../../hooks/useDashboardQueries';
 
 export default function OwnerOverviewPage() {
@@ -83,6 +84,13 @@ export default function OwnerOverviewPage() {
         ? 'تعذر تحميل ملخص التقويم من الخادم.'
         : 'Could not load calendar summary from the server.')
     : null;
+
+  // 5. Personal Rentals Query (Bookings made by this owner on other properties)
+  const {
+    data: rawPersonalRentals,
+    isLoading: loadingPersonalRentals,
+  } = useTenantRentals();
+  const personalRentals = Array.isArray(rawPersonalRentals) ? rawPersonalRentals : [];
 
   // Helper to safely parse status counts
   function extractStatusEntries(raw: any): Array<{ status: string; count: number }> {
@@ -171,6 +179,14 @@ export default function OwnerOverviewPage() {
 
         <div className="dary-welcome-actions" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <Link
+            to={`${basePath}/explore`}
+            className="dary-primary-btn"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#2F6BFF', textDecoration: 'none' }}
+          >
+            <span>🧭</span>
+            <span>{locale === 'ar' ? 'تصفح وحجز عقار' : 'Browse & Book'}</span>
+          </Link>
+          <Link
             to={`${basePath}/properties/new`}
             className="dary-primary-btn"
             style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', backgroundColor: '#16A34A', textDecoration: 'none' }}
@@ -178,16 +194,19 @@ export default function OwnerOverviewPage() {
             <span>+</span>
             <span>{locale === 'ar' ? 'إضافة عقار جديد' : 'Add Property'}</span>
           </Link>
-          <Link to={`${basePath}/properties`} className="dary-primary-btn" style={{ textDecoration: 'none' }}>
+          <Link to={`${basePath}/properties`} className="dary-secondary-btn" style={{ textDecoration: 'none' }}>
             <span>{locale === 'ar' ? 'إدارة العقارات' : 'Manage Properties'}</span>
           </Link>
           <Link to={`${basePath}/bookings`} className="dary-secondary-btn" style={{ textDecoration: 'none' }}>
-            <span>{locale === 'ar' ? 'عرض الحجوزات' : 'View Bookings'}</span>
+            <span>{locale === 'ar' ? 'طلبات الحجز الواردة' : 'Incoming Bookings'}</span>
+          </Link>
+          <Link to={`${basePath}/my-rentals`} className="dary-secondary-btn" style={{ textDecoration: 'none' }}>
+            <span>{locale === 'ar' ? 'حجوزاتي الشخصية' : 'My Bookings'}</span>
           </Link>
         </div>
       </div>
 
-      {/* 2. Top Metric Cards (Revenue + Counts + Occupancy) */}
+      {/* 2. Top Metric Cards (Revenue + Counts + Occupancy + Personal Bookings) */}
       <div className="dary-metrics-grid" style={{ marginBottom: '1.5rem' }}>
         {/* Revenue Card */}
         <div className="dary-metric-card">
@@ -228,10 +247,10 @@ export default function OwnerOverviewPage() {
           </div>
         </div>
 
-        {/* Bookings Total */}
+        {/* Bookings Total (Incoming) */}
         <div className="dary-metric-card">
           <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#EFF6FF', color: '#2F6BFF' }}>
-            📋
+            📥
           </div>
           <div>
             <h3 className="dary-metric-number">
@@ -242,7 +261,26 @@ export default function OwnerOverviewPage() {
               />
             </h3>
             <p className="dary-metric-label">
-              {locale === 'ar' ? 'إجمالي طلبات الحجز' : 'Total Bookings'}
+              {locale === 'ar' ? 'طلبات الحجز الواردة' : 'Incoming Bookings'}
+            </p>
+          </div>
+        </div>
+
+        {/* Personal Bookings Card */}
+        <div className="dary-metric-card">
+          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#F0FDF4', color: '#047857' }}>
+            🧳
+          </div>
+          <div>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter
+                value={personalRentals.length}
+                loading={loadingPersonalRentals}
+                fallback="0"
+              />
+            </h3>
+            <p className="dary-metric-label">
+              {locale === 'ar' ? 'حجوزاتي الشخصية' : 'Personal Bookings'}
             </p>
           </div>
         </div>

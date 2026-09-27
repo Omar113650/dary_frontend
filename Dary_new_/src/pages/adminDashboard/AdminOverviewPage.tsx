@@ -1,6 +1,7 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
+import { hasAdminModuleAccess } from '../../utils/adminPermissions';
 import type { AdminStatusCount, AdminReportItem } from '../../services/adminService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import {
@@ -175,312 +176,345 @@ export default function AdminOverviewPage() {
         </div>
 
         <div className="dary-welcome-actions">
-          <Link to={`${basePath}/users`} className="dary-primary-btn" style={{ backgroundColor: '#2F6BFF' }}>
-            <span>{locale === 'ar' ? 'إدارة المستخدمين' : 'Manage Users'}</span>
-          </Link>
-          <Link to={`${basePath}/reports`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
-            <span>{locale === 'ar' ? 'معالجة البلاغات' : 'Triage Reports'}</span>
-          </Link>
-          <Link to={`${basePath}/tickets`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
-            <span>{locale === 'ar' ? 'تذاكر الدعم' : 'Support Tickets'}</span>
-          </Link>
+          {hasAdminModuleAccess(user, 'properties') && (
+            <Link to={`${basePath}/properties`} className="dary-primary-btn" style={{ backgroundColor: '#16A34A' }}>
+              <span>{locale === 'ar' ? 'معاينة السكنات' : 'Review Properties'}</span>
+            </Link>
+          )}
+          {hasAdminModuleAccess(user, 'users') && (
+            <Link to={`${basePath}/users`} className="dary-primary-btn" style={{ backgroundColor: '#2F6BFF' }}>
+              <span>{locale === 'ar' ? 'إدارة المستخدمين' : 'Manage Users'}</span>
+            </Link>
+          )}
+          {hasAdminModuleAccess(user, 'bookings') && (
+            <Link to={`${basePath}/bookings`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
+              <span>{locale === 'ar' ? 'إدارة الحجوزات' : 'Bookings'}</span>
+            </Link>
+          )}
+          {hasAdminModuleAccess(user, 'reports') && (
+            <Link to={`${basePath}/reports`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
+              <span>{locale === 'ar' ? 'معالجة البلاغات' : 'Triage Reports'}</span>
+            </Link>
+          )}
+          {hasAdminModuleAccess(user, 'tickets') && (
+            <Link to={`${basePath}/tickets`} className="dary-secondary-btn" style={{ borderColor: '#B69F77', color: '#FFFFFF' }}>
+              <span>{locale === 'ar' ? 'تذاكر الدعم' : 'Support Tickets'}</span>
+            </Link>
+          )}
         </div>
       </div>
 
       {/* 2. Top Metric KPI Grid */}
       <div className="dary-metrics-grid">
         {/* Total Users */}
-        <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#EEF3FF', color: '#2F6BFF' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
+        {hasAdminModuleAccess(user, 'users') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#EEF3FF', color: '#2F6BFF' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={usersError ? null : totalUsers}
+                  loading={loadingUsers}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'إجمالي المستخدمين' : 'Total Users'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="dary-metric-number">
-              <AnimatedCounter
-                value={usersError ? null : totalUsers}
-                loading={loadingUsers}
-                fallback="—"
-              />
-            </h3>
-            <p className="dary-metric-label">
-              {locale === 'ar' ? 'إجمالي المستخدمين' : 'Total Users'}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Total Properties */}
-        <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#F0FDF4', color: '#16A34A' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
+        {hasAdminModuleAccess(user, 'properties') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#F0FDF4', color: '#16A34A' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={propsError ? null : totalProps}
+                  loading={loadingProps}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'العقارات المسجلة' : 'Registered Properties'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="dary-metric-number">
-              <AnimatedCounter
-                value={propsError ? null : totalProps}
-                loading={loadingProps}
-                fallback="—"
-              />
-            </h3>
-            <p className="dary-metric-label">
-              {locale === 'ar' ? 'العقارات المسجلة' : 'Registered Properties'}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Total Bookings */}
-        <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF9C3', color: '#CA8A04' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-            </svg>
+        {hasAdminModuleAccess(user, 'bookings') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF9C3', color: '#CA8A04' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={bookingsError ? null : totalBookings}
+                  loading={loadingBookings}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'إجمالي الحجوزات' : 'Total Bookings'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="dary-metric-number">
-              <AnimatedCounter
-                value={bookingsError ? null : totalBookings}
-                loading={loadingBookings}
-                fallback="—"
-              />
-            </h3>
-            <p className="dary-metric-label">
-              {locale === 'ar' ? 'إجمالي الحجوزات' : 'Total Bookings'}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Total Revenue */}
-        <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="1" x2="12" y2="23" />
-              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-            </svg>
+        {hasAdminModuleAccess(user, 'analytics') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="1" x2="12" y2="23" />
+                <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={revenueError ? null : parsedRevenue}
+                  loading={loadingRevenue}
+                  suffix={` ${revenueCurrency}`}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Platform Revenue'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="dary-metric-number">
-              <AnimatedCounter
-                value={revenueError ? null : parsedRevenue}
-                loading={loadingRevenue}
-                suffix={` ${revenueCurrency}`}
-                fallback="—"
-              />
-            </h3>
-            <p className="dary-metric-label">
-              {locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Platform Revenue'}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Reports / Triage */}
-        <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-              <line x1="12" y1="9" x2="12" y2="13" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
+        {hasAdminModuleAccess(user, 'reports') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={reportsStatusError ? null : totalReports}
+                  loading={loadingReportsStatus}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'البلاغات والشكاوى' : 'Active Reports'}
+              </p>
+            </div>
           </div>
-          <div>
-            <h3 className="dary-metric-number">
-              <AnimatedCounter
-                value={reportsStatusError ? null : totalReports}
-                loading={loadingReportsStatus}
-                fallback="—"
-              />
-            </h3>
-            <p className="dary-metric-label">
-              {locale === 'ar' ? 'البلاغات والشكاوى' : 'Active Reports'}
-            </p>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 3. Operational Breakdowns: Users, Properties, Bookings */}
       <div className="dary-sections-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         {/* Properties Breakdown */}
-        <div className="dary-card">
-          <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="dary-card-title">{locale === 'ar' ? 'حالة العقارات المسجلة' : 'Properties by Status'}</h2>
-            <Link to={`${basePath}/properties`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
-              {locale === 'ar' ? 'عرض الكل ←' : 'View All →'}
-            </Link>
-          </div>
-
-          {loadingProps ? (
-            <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
-          ) : propsError ? (
-            <div className="dary-error-alert">
-              <span>{propsError}</span>
-              <button type="button" onClick={fetchPropsStatus} className="dary-retry-btn">
-                {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-              </button>
+        {hasAdminModuleAccess(user, 'properties') && (
+          <div className="dary-card">
+            <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 className="dary-card-title">{locale === 'ar' ? 'حالة العقارات المسجلة' : 'Properties by Status'}</h2>
+              <Link to={`${basePath}/properties`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
+                {locale === 'ar' ? 'عرض الكل ←' : 'View All →'}
+              </Link>
             </div>
-          ) : propsStatusList.length === 0 ? (
-            <p style={{ color: '#64748B', padding: '1rem 0', textAlign: 'center' }}>
-              {locale === 'ar' ? 'لا توجد بيانات متاحة حالياً.' : 'No property status records found.'}
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-              {propsStatusList.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.75rem 1rem',
-                    backgroundColor: '#F8FAFC',
-                    borderRadius: '8px',
-                    border: '1px solid #E2E8F0',
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: '#0B2A4A' }}>{item.status}</span>
-                  <span
+
+            {loadingProps ? (
+              <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
+            ) : propsError ? (
+              <div className="dary-error-alert">
+                <span>{propsError}</span>
+                <button type="button" onClick={fetchPropsStatus} className="dary-retry-btn">
+                  {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                </button>
+              </div>
+            ) : propsStatusList.length === 0 ? (
+              <p style={{ color: '#64748B', padding: '1rem 0', textAlign: 'center' }}>
+                {locale === 'ar' ? 'لا توجد بيانات متاحة حالياً.' : 'No property status records found.'}
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+                {propsStatusList.map((item, idx) => (
+                  <div
+                    key={idx}
                     style={{
-                      padding: '0.25rem 0.65rem',
-                      borderRadius: '12px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      backgroundColor:
-                        item.status === 'APPROVED' ? '#DCFCE7' : item.status === 'PENDING' ? '#FEF9C3' : '#F1F5F9',
-                      color:
-                        item.status === 'APPROVED' ? '#15803D' : item.status === 'PENDING' ? '#A16207' : '#475569',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.75rem 1rem',
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
                     }}
                   >
-                    {item.count}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <span style={{ fontWeight: 600, color: '#0B2A4A' }}>{item.status}</span>
+                    <span
+                      style={{
+                        padding: '0.25rem 0.65rem',
+                        borderRadius: '12px',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        backgroundColor:
+                          item.status === 'APPROVED' ? '#DCFCE7' : item.status === 'PENDING' ? '#FEF9C3' : '#F1F5F9',
+                        color:
+                          item.status === 'APPROVED' ? '#15803D' : item.status === 'PENDING' ? '#A16207' : '#475569',
+                      }}
+                    >
+                      {item.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Bookings Breakdown */}
-        <div className="dary-card">
-          <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="dary-card-title">{locale === 'ar' ? 'حالة الحجوزات' : 'Bookings by Status'}</h2>
-            <Link to={`${basePath}/bookings`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
-              {locale === 'ar' ? 'عرض الكل ←' : 'View All →'}
-            </Link>
-          </div>
-
-          {loadingBookings ? (
-            <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
-          ) : bookingsError ? (
-            <div className="dary-error-alert">
-              <span>{bookingsError}</span>
-              <button type="button" onClick={fetchBookingsStatus} className="dary-retry-btn">
-                {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-              </button>
+        {hasAdminModuleAccess(user, 'bookings') && (
+          <div className="dary-card">
+            <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 className="dary-card-title">{locale === 'ar' ? 'حالة الحجوزات' : 'Bookings by Status'}</h2>
+              <Link to={`${basePath}/bookings`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
+                {locale === 'ar' ? 'عرض الكل ←' : 'View All →'}
+              </Link>
             </div>
-          ) : bookingsStatusList.length === 0 ? (
-            <p style={{ color: '#64748B', padding: '1rem 0', textAlign: 'center' }}>
-              {locale === 'ar' ? 'لا توجد بيانات متاحة حالياً.' : 'No booking status records found.'}
-            </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-              {bookingsStatusList.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '0.75rem 1rem',
-                    backgroundColor: '#F8FAFC',
-                    borderRadius: '8px',
-                    border: '1px solid #E2E8F0',
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: '#0B2A4A' }}>{item.status}</span>
-                  <span
+
+            {loadingBookings ? (
+              <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
+            ) : bookingsError ? (
+              <div className="dary-error-alert">
+                <span>{bookingsError}</span>
+                <button type="button" onClick={fetchBookingsStatus} className="dary-retry-btn">
+                  {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                </button>
+              </div>
+            ) : bookingsStatusList.length === 0 ? (
+              <p style={{ color: '#64748B', padding: '1rem 0', textAlign: 'center' }}>
+                {locale === 'ar' ? 'لا توجد بيانات متاحة حالياً.' : 'No booking status records found.'}
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+                {bookingsStatusList.map((item, idx) => (
+                  <div
+                    key={idx}
                     style={{
-                      padding: '0.25rem 0.65rem',
-                      borderRadius: '12px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      backgroundColor:
-                        item.status === 'CONFIRMED' ? '#DCFCE7' : item.status === 'PENDING' ? '#FEF9C3' : '#FEE2E2',
-                      color:
-                        item.status === 'CONFIRMED' ? '#15803D' : item.status === 'PENDING' ? '#A16207' : '#B91C1C',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.75rem 1rem',
+                      backgroundColor: '#F8FAFC',
+                      borderRadius: '8px',
+                      border: '1px solid #E2E8F0',
                     }}
                   >
-                    {item.count}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+                    <span style={{ fontWeight: 600, color: '#0B2A4A' }}>{item.status}</span>
+                    <span
+                      style={{
+                        padding: '0.25rem 0.65rem',
+                        borderRadius: '12px',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        backgroundColor:
+                          item.status === 'CONFIRMED' ? '#DCFCE7' : item.status === 'PENDING' ? '#FEF9C3' : '#FEE2E2',
+                        color:
+                          item.status === 'CONFIRMED' ? '#15803D' : item.status === 'PENDING' ? '#A16207' : '#B91C1C',
+                      }}
+                    >
+                      {item.count}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 7-Day Analytics Overview Widget */}
-        <div className="dary-card">
-          <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 className="dary-card-title">{locale === 'ar' ? 'نشاط المنصة (7 أيام)' : '7-Day Platform Activity'}</h2>
-            <Link to={`${basePath}/analytics`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
-              {locale === 'ar' ? 'التحليلات التفصيلية ←' : 'Full Analytics →'}
-            </Link>
+        {hasAdminModuleAccess(user, 'analytics') && (
+          <div className="dary-card">
+            <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 className="dary-card-title">{locale === 'ar' ? 'نشاط المنصة (7 أيام)' : '7-Day Platform Activity'}</h2>
+              <Link to={`${basePath}/analytics`} style={{ color: '#2F6BFF', fontSize: '0.85rem', fontWeight: 600, textDecoration: 'none' }}>
+                {locale === 'ar' ? 'التحليلات التفصيلية ←' : 'Full Analytics →'}
+              </Link>
+            </div>
+
+            {loadingAnalytics ? (
+              <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
+            ) : analyticsError ? (
+              <div className="dary-error-alert">
+                <span>{analyticsError}</span>
+                <button type="button" onClick={fetchAnalytics} className="dary-retry-btn">
+                  {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem' }}>
+                <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'معدل الإشغال الإجمالي' : 'Occupancy Rate'}</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
+                    {analyticsData?.occupancyRate !== undefined ? (
+                      <AnimatedCounter value={analyticsData.occupancyRate} suffix="%" />
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'النشاط اليومي (Daily Active Users)' : 'Daily Active Users'}</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
+                    {analyticsData?.dailyActiveUsers !== undefined ? (
+                      <AnimatedCounter value={analyticsData.dailyActiveUsers} />
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
+                  <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'حجم الحجوزات المسجلة' : 'Booking Volume'}</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
+                    {analyticsData?.bookingVolume !== undefined ? (
+                      <AnimatedCounter value={analyticsData.bookingVolume} />
+                    ) : (
+                      '—'
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-
-          {loadingAnalytics ? (
-            <p style={{ color: '#64748B', padding: '1.5rem 0' }}>{locale === 'ar' ? 'جاري التحميل...' : 'Loading...'}</p>
-          ) : analyticsError ? (
-            <div className="dary-error-alert">
-              <span>{analyticsError}</span>
-              <button type="button" onClick={fetchAnalytics} className="dary-retry-btn">
-                {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '1rem' }}>
-              <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'معدل الإشغال الإجمالي' : 'Occupancy Rate'}</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.occupancyRate !== undefined ? (
-                    <AnimatedCounter value={analyticsData.occupancyRate} suffix="%" />
-                  ) : (
-                    '—'
-                  )}
-                </div>
-              </div>
-
-              <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'النشاط اليومي (Daily Active Users)' : 'Daily Active Users'}</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.dailyActiveUsers !== undefined ? (
-                    <AnimatedCounter value={analyticsData.dailyActiveUsers} />
-                  ) : (
-                    '—'
-                  )}
-                </div>
-              </div>
-
-              <div style={{ padding: '0.85rem', background: '#F8FAFC', borderRadius: '8px', border: '1px solid #E2E8F0' }}>
-                <div style={{ fontSize: '0.82rem', color: '#64748B' }}>{locale === 'ar' ? 'حجم الحجوزات المسجلة' : 'Booking Volume'}</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', marginTop: '0.25rem' }}>
-                  {analyticsData?.bookingVolume !== undefined ? (
-                    <AnimatedCounter value={analyticsData.bookingVolume} />
-                  ) : (
-                    '—'
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
       {/* 4. Recent Reports Quick Triage */}
-      <div className="dary-card">
+      {hasAdminModuleAccess(user, 'reports') && (
+        <div className="dary-card">
         <div className="dary-card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <h2 className="dary-card-title">{locale === 'ar' ? 'أحدث البلاغات والشكاوى الواردة' : 'Recent Reports & Inquiries'}</h2>
@@ -614,6 +648,7 @@ export default function AdminOverviewPage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

@@ -33,6 +33,16 @@ export default function OwnerDashboardSidebar({
       ),
     },
     {
+      to: `${basePath}/explore`,
+      label: locale === 'ar' ? 'تصفح العقارات' : 'Browse Properties',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" />
+        </svg>
+      ),
+    },
+    {
       to: `${basePath}/properties`,
       label: locale === 'ar' ? 'عقاراتي' : 'My Properties',
       icon: (
@@ -55,11 +65,22 @@ export default function OwnerDashboardSidebar({
     },
     {
       to: `${basePath}/bookings`,
-      label: locale === 'ar' ? 'الحجوزات' : 'Bookings',
+      label: locale === 'ar' ? 'طلبات الحجز الواردة' : 'Incoming Bookings',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
           <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+      ),
+    },
+    {
+      to: `${basePath}/my-rentals`,
+      label: locale === 'ar' ? 'حجوزاتي الشخصية' : 'My Bookings',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+          <polyline points="16 11 18 13 22 9" />
         </svg>
       ),
     },

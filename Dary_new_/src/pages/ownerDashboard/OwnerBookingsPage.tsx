@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
-import { ContractService } from '../../services/contractService';
-import type { ContractItem } from '../../services/contractService';
 import type {
   OwnerPropertyItem,
   OwnerPropertyBookingItem,
@@ -12,6 +11,10 @@ import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
 export default function OwnerBookingsPage() {
   const { locale } = useLocale();
+  const location = useLocation();
+  const basePath = location.pathname.startsWith('/owner-dashboard-preview')
+    ? '/owner-dashboard-preview'
+    : '/owner-dashboard';
   const queryClient = useQueryClient();
 
   // Booking status breakdown (Cached: 30s)
@@ -40,63 +43,6 @@ export default function OwnerBookingsPage() {
   const [propertyBookings, setPropertyBookings] = useState<OwnerPropertyBookingItem[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
-
-  // Action / Updating state
-  const [updatingBookingId, setUpdatingBookingId] = useState<string | null>(null);
-  const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
-  const [actionErrorMessage, setActionErrorMessage] = useState<string | null>(null);
-
-  // Selected Booking Details Modal State
-  const [selectedBooking, setSelectedBooking] = useState<any | null>(null);
-  const [modalNote, setModalNote] = useState<string>('');
-
-  // Owner Contract Modal State
-  const [contractBooking, setContractBooking] = useState<any | null>(null);
-  const [contractData, setContractData] = useState<ContractItem | null>(null);
-  const [loadingContract, setLoadingContract] = useState(false);
-  const [ownerSigningFile, setOwnerSigningFile] = useState<File | null>(null);
-  const [uploadingOwnerSign, setUploadingOwnerSign] = useState(false);
-  const [contractActionMsg, setContractActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-
-  const openOwnerContractModal = async (booking: any) => {
-    setContractBooking(booking);
-    setContractData(null);
-    setOwnerSigningFile(null);
-    setContractActionMsg(null);
-    setLoadingContract(true);
-    try {
-      const data = await ContractService.getContractByBooking(booking.id);
-      setContractData(data);
-    } catch (err: any) {
-      console.error('Failed to load contract for owner:', err);
-    } finally {
-      setLoadingContract(false);
-    }
-  };
-
-  const handleOwnerSign = async () => {
-    if (!contractData || !ownerSigningFile) return;
-    setUploadingOwnerSign(true);
-    setContractActionMsg(null);
-    try {
-      await ContractService.ownerSignContract(contractData.id, ownerSigningFile);
-      setContractActionMsg({
-        type: 'success',
-        text: locale === 'ar' ? 'تم رفع نسختك الموقعة بنجاح! بانتظار تفعيل العقد من إدارة المنصة.' : 'Owner signature uploaded successfully!',
-      });
-      if (contractBooking) {
-        const updated = await ContractService.getContractByBooking(contractBooking.id);
-        setContractData(updated);
-      }
-    } catch (err: any) {
-      setContractActionMsg({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل رفع توقيع العقد. تأكد من رفع ملف PDF.' : 'Failed to upload contract. Please ensure you select a PDF file.'),
-      });
-    } finally {
-      setUploadingOwnerSign(false);
-    }
-  };
 
   const loadBookingsForProperty = useCallback(
     async (propId: string, currentProps: OwnerPropertyItem[]) => {
@@ -193,81 +139,7 @@ export default function OwnerBookingsPage() {
     }
   }, [loadBookingsForProperty, selectedPropId, properties]);
 
-  // Update Booking Status Handler
-  const handleUpdateStatus = async (bookingId: string, newStatus: string, note?: string) => {
-    setUpdatingBookingId(bookingId);
-    setActionErrorMessage(null);
-    setActionSuccessMessage(null);
-    try {
-      await OwnerService.updateBookingStatus(bookingId, newStatus, note);
-      
-      // Update local state immediately
-      setPropertyBookings((prev) =>
-        prev.map((b: any) =>
-          b.id === bookingId
-            ? { ...b, status: newStatus, note: note || b.note }
-            : b
-        )
-      );
 
-      if (selectedBooking && selectedBooking.id === bookingId) {
-        setSelectedBooking((prev: any) => ({ ...prev, status: newStatus, note: note || prev?.note }));
-      }
-
-      const statusLabels: Record<string, string> = {
-        PENDING: locale === 'ar' ? 'قيد المراجعة' : 'Pending',
-        CONTACTED: locale === 'ar' ? 'تم التواصل مع الطالب' : 'Contacted',
-        CLOSED: locale === 'ar' ? 'مؤكد ومكتمل' : 'Confirmed',
-        CANCELLED: locale === 'ar' ? 'ملغي' : 'Cancelled',
-      };
-
-      setActionSuccessMessage(
-        locale === 'ar'
-          ? `✓ تم تغيير حالة الحجز بنجاح إلى: ${statusLabels[newStatus] || newStatus}`
-          : `✓ Booking status updated to: ${statusLabels[newStatus] || newStatus}`
-      );
-
-      // Invalidate and refresh cache
-      queryClient.invalidateQueries({ queryKey: ['owner', 'bookings'] });
-      queryClient.invalidateQueries({ queryKey: ['owner', 'revenue'] });
-    } catch (err: any) {
-      console.error('[OwnerBookingsPage] Update status failed:', err);
-      const rawMessage = err?.response?.data?.message || err?.message;
-      let displayMessage = rawMessage;
-
-      const errorMapAr: Record<string, string> = {
-        'booking.invalidStatusTransition': 'لا يمكن تغيير حالة الحجز بهذا الشكل (تحقق من تسلسل الحالات المسموح به).',
-        'booking.notFound': 'طلب الحجز غير موجود أو تم حذفه.',
-        'booking.alreadyRequested': 'يوجد طلب حجز قائم بالفعل على هذه الغرفة.',
-        'booking.contractNotSigned': 'لا يمكن إغلاق الحجز قبل توقيع العقد من الطرفين.',
-        'booking.cannotCancel': 'لا يمكن إلغاء هذا الحجز في حالته الحالية.',
-      };
-
-      const errorMapEn: Record<string, string> = {
-        'booking.invalidStatusTransition': 'This booking status transition is not allowed.',
-        'booking.notFound': 'Booking request not found.',
-        'booking.alreadyRequested': 'A booking already exists for this room.',
-        'booking.contractNotSigned': 'Booking cannot be closed before contract is signed.',
-        'booking.cannotCancel': 'This booking cannot be cancelled in its current state.',
-      };
-
-      if (rawMessage && (locale === 'ar' ? errorMapAr[rawMessage] : errorMapEn[rawMessage])) {
-        displayMessage = locale === 'ar' ? errorMapAr[rawMessage] : errorMapEn[rawMessage];
-      } else if (!displayMessage) {
-        displayMessage =
-          locale === 'ar'
-            ? 'تعذر تحديث حالة الحجز. يرجى المحاولة مرة أخرى.'
-            : 'Failed to update booking status. Please try again.';
-      }
-
-      setActionErrorMessage(displayMessage);
-    } finally {
-      setUpdatingBookingId(null);
-      setTimeout(() => {
-        setActionSuccessMessage(null);
-      }, 4000);
-    }
-  };
 
   // Filter bookings based on selected status tab and search term
   const filteredBookings = useMemo(() => {
@@ -414,6 +286,77 @@ export default function OwnerBookingsPage() {
 
   return (
     <div>
+      {/* Tabs navigation banner to switch effortlessly between incoming & personal bookings */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '0.5rem',
+          backgroundColor: '#F1F5F9',
+          padding: '0.4rem',
+          borderRadius: '12px',
+          marginBottom: '1.5rem',
+          width: 'fit-content',
+        }}
+      >
+        <Link
+          to={`${basePath}/bookings`}
+          style={{
+            padding: '0.55rem 1.15rem',
+            borderRadius: '9px',
+            backgroundColor: '#0B2A4A',
+            color: '#FFFFFF',
+            fontWeight: 800,
+            fontSize: '0.875rem',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            boxShadow: '0 2px 6px rgba(11, 42, 74, 0.2)',
+          }}
+        >
+          <span>📥</span>
+          <span>{locale === 'ar' ? 'طلبات الحجز الواردة على عقاراتي' : 'Incoming Requests on My Properties'}</span>
+        </Link>
+
+        <Link
+          to={`${basePath}/my-rentals`}
+          style={{
+            padding: '0.55rem 1.15rem',
+            borderRadius: '9px',
+            backgroundColor: 'transparent',
+            color: '#64748B',
+            fontWeight: 700,
+            fontSize: '0.875rem',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+          }}
+        >
+          <span>🧳</span>
+          <span>{locale === 'ar' ? 'حجوزاتي الشخصية كنزيل' : 'My Personal Bookings'}</span>
+        </Link>
+
+        <Link
+          to={`${basePath}/explore`}
+          style={{
+            padding: '0.55rem 1.15rem',
+            borderRadius: '9px',
+            backgroundColor: 'transparent',
+            color: '#2F6BFF',
+            fontWeight: 700,
+            fontSize: '0.875rem',
+            textDecoration: 'none',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+          }}
+        >
+          <span>🧭</span>
+          <span>{locale === 'ar' ? 'تصفح وحجز سكن' : 'Explore Properties'}</span>
+        </Link>
+      </div>
+
       <div className="dary-section-card" style={{ marginBottom: '1.5rem' }}>
         <div
           className="dary-section-header"
@@ -428,12 +371,12 @@ export default function OwnerBookingsPage() {
         >
           <div>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0B2A4A', margin: 0 }}>
-              {locale === 'ar' ? '📋 طلبات الحجز وإدارة حالاتها' : '📋 Student Booking Requests & Status'}
+              {locale === 'ar' ? '📋 طلبات الحجز الواردة على عقاراتي' : '📋 Incoming Booking Requests'}
             </h2>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.875rem', color: '#64748B' }}>
               {locale === 'ar'
-                ? 'متابعة وتغيير حالة طلبات الحجز (قيد المراجعة، تم التواصل، تأكيد، أو إلغاء) والتواصل مع الطلاب.'
-                : 'Review, update booking status (Pending, Contacted, Confirmed, Cancelled), and communicate with students.'}
+                ? 'متابعة كافة طلبات الحجز الواردة على سكنك الطلابي؛ تتولى إدارة منصة داري التواصل مع الطلاب واعتماد الحجوزات نيابةً عنك.'
+                : 'Track booking requests on your properties. Dary Administration verifies, communicates with students, and confirms bookings on your behalf.'}
             </p>
           </div>
 
@@ -458,60 +401,34 @@ export default function OwnerBookingsPage() {
           </button>
         </div>
 
-        {/* Action Success / Error Banners */}
-        {actionSuccessMessage && (
-          <div
-            style={{
-              padding: '0.85rem 1.25rem',
-              borderRadius: '10px',
-              backgroundColor: '#DCFCE7',
-              color: '#15803D',
-              border: '1px solid #BBF7D0',
-              fontWeight: 700,
-              fontSize: '0.875rem',
-              marginBottom: '1.25rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span>{actionSuccessMessage}</span>
-            <button
-              type="button"
-              onClick={() => setActionSuccessMessage(null)}
-              style={{ background: 'none', border: 'none', color: '#15803D', cursor: 'pointer', fontWeight: 800 }}
-            >
-              ✕
-            </button>
+        {/* Centralized Management Notice */}
+        <div
+          style={{
+            padding: '1rem 1.25rem',
+            borderRadius: '12px',
+            backgroundColor: '#EFF6FF',
+            border: '1px solid #BFDBFE',
+            color: '#1E40AF',
+            fontSize: '0.875rem',
+            marginBottom: '1.5rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.85rem',
+            lineHeight: 1.6,
+          }}
+        >
+          <span style={{ fontSize: '1.5rem' }}>🛡️</span>
+          <div>
+            <strong style={{ display: 'block', marginBottom: '0.2rem', color: '#1D4ED8' }}>
+              {locale === 'ar' ? 'نظام الحجوزات المركزي لحماية الملاك والطلاب:' : 'Centralized Booking Protection:'}
+            </strong>
+            {locale === 'ar'
+              ? 'تتم إدارة كافة طلبات الحجز، التواصل مع المستأجرين، وتأكيد أو إلغاء الحجوزات حصرياً بواسطة إدارة منصة داري لضمان مصداقية المستأجرين وسداد المستحقات. يمكنك هنا متابعة تفاصيل الطلبات وحالاتها المسجلة دون أي أعباء إدارية.'
+              : 'All booking requests, student vetting, confirmations, and cancellations are handled centrally by Dary Administration. You can track booking status and details without administrative overhead.'}
           </div>
-        )}
+        </div>
 
-        {actionErrorMessage && (
-          <div
-            style={{
-              padding: '0.85rem 1.25rem',
-              borderRadius: '10px',
-              backgroundColor: '#FEE2E2',
-              color: '#B91C1C',
-              border: '1px solid #FECACA',
-              fontWeight: 700,
-              fontSize: '0.875rem',
-              marginBottom: '1.25rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <span>{actionErrorMessage}</span>
-            <button
-              type="button"
-              onClick={() => setActionErrorMessage(null)}
-              style={{ background: 'none', border: 'none', color: '#B91C1C', cursor: 'pointer', fontWeight: 800 }}
-            >
-              ✕
-            </button>
-          </div>
-        )}
+
 
         {/* 1. Status Overview Metric Badges */}
         {loadingStatus ? (
@@ -801,26 +718,194 @@ export default function OwnerBookingsPage() {
               const tenantName = b.tenant?.firstName
                 ? `${b.tenant.firstName} ${b.tenant.lastName || ''}`.trim()
                 : b.tenant?.name || (locale === 'ar' ? 'طالب مستأجر' : 'Student Tenant');
-              const tenantPhone = b.tenant?.whatsappPhone || b.tenant?.phone;
-              const propertyTitle = b.property?.title || selectedPropertyObj?.title || (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
+              const propertyTitle = b.property?.title || (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
               const propertyLocation = b.property?.city || b.property?.address || '';
               const roomType = b.room?.roomType ? `غرفة ${b.room.roomType}` : null;
               const beds = b.bedsRequested || 1;
               const currentStatus = (b.status || '').toUpperCase();
-              const isUpdating = updatingBookingId === b.id;
 
               return (
                 <div
                   key={b.id}
                   style={{
-                    border: currentStatus === 'PENDING' ? '1.5px solid #FCD34D' : '1px solid #E2E8F0',
+                    border: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                      ? '1.5px solid #86EFAC'
+                      : currentStatus === 'PENDING'
+                      ? '1.5px solid #FCD34D'
+                      : '1px solid #E2E8F0',
                     borderRadius: '14px',
                     padding: '1.35rem',
-                    backgroundColor: currentStatus === 'PENDING' ? '#FFFDF5' : '#FFFFFF',
-                    boxShadow: currentStatus === 'PENDING' ? '0 4px 12px rgba(245, 158, 11, 0.08)' : '0 1px 3px rgba(0,0,0,0.03)',
+                    backgroundColor: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                      ? '#F8FCF9'
+                      : currentStatus === 'PENDING'
+                      ? '#FFFDF5'
+                      : '#FFFFFF',
+                    boxShadow: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                      ? '0 4px 14px rgba(22, 163, 74, 0.08)'
+                      : currentStatus === 'PENDING'
+                      ? '0 4px 12px rgba(245, 158, 11, 0.08)'
+                      : '0 1px 3px rgba(0,0,0,0.03)',
                     transition: 'all 0.15s ease-in-out',
                   }}
                 >
+                  {/* Automated Dary Team Communication Status Banner */}
+                  {(currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED') && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1.15rem',
+                        borderRadius: '12px',
+                        backgroundColor: '#F0FDF4',
+                        border: '1.5px solid #86EFAC',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
+                        <span style={{ fontSize: '1.6rem' }}>🎉</span>
+                        <div>
+                          <div style={{ fontWeight: 800, color: '#166534', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+                            {locale === 'ar' ? 'تم اعتماد وإتمام حجز هذا العقار بنجاح!' : 'Booking Confirmed by Dary Admin!'}
+                          </div>
+                          <div style={{ fontSize: '0.835rem', color: '#15803D', lineHeight: 1.5 }}>
+                            {locale === 'ar'
+                              ? 'تلقى عقارك حجزاً مؤكداً. قام السوبر أدمن بإتمام الحجز وسيتواصل معك فريق منصة داري (Dary Team) فوراً لتنسيق تسليم الغرفة واستلام مستحقاتك.'
+                              : 'Your property has received a confirmed booking. Super Admin completed it and Dary team will contact you shortly to coordinate handover and payouts.'}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#DCFCE7',
+                          color: '#15803D',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          border: '1px solid #BBF7D0',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        📞 {locale === 'ar' ? 'تيم داري سيتواصل معك' : 'Dary Team will contact you'}
+                      </span>
+                    </div>
+                  )}
+
+                  {currentStatus === 'CONTACTED' && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1.15rem',
+                        borderRadius: '12px',
+                        backgroundColor: '#EFF6FF',
+                        border: '1.5px solid #93C5FD',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
+                        <span style={{ fontSize: '1.5rem' }}>📞</span>
+                        <div>
+                          <div style={{ fontWeight: 800, color: '#1E40AF', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+                            {locale === 'ar' ? 'عقارك تلقى طلباً — جاري التنسيق بواسطة فريق داري' : 'Booking in progress by Dary Team'}
+                          </div>
+                          <div style={{ fontSize: '0.835rem', color: '#1D4ED8', lineHeight: 1.5 }}>
+                            {locale === 'ar'
+                              ? 'يتواصل فريق داري حالياً مع المستأجر لترتيب كافة المواعيد والتفاصيل، وسيتواصل معك تيم داري فور الانتهاء.'
+                              : 'Dary team is coordinating with the student and will contact you once finalized.'}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#DBEAFE',
+                          color: '#1E40AF',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          border: '1px solid #BFDBFE',
+                        }}
+                      >
+                        🔄 {locale === 'ar' ? 'جاري التنسيق مع الطالب' : 'Coordinating with student'}
+                      </span>
+                    </div>
+                  )}
+
+                  {currentStatus === 'PENDING' && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1.15rem',
+                        borderRadius: '12px',
+                        backgroundColor: '#FFFBEB',
+                        border: '1.5px solid #FDE68A',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
+                        <span style={{ fontSize: '1.5rem' }}>⏳</span>
+                        <div>
+                          <div style={{ fontWeight: 800, color: '#92400E', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+                            {locale === 'ar' ? 'طلب حجز جديد على عقارك — قيد مراجعة السوبر أدمن' : 'New Booking Request under Review'}
+                          </div>
+                          <div style={{ fontSize: '0.835rem', color: '#B45309', lineHeight: 1.5 }}>
+                            {locale === 'ar'
+                              ? 'تم تسجيل طلب حجز جديد على هذا العقار. يراجع المشرف العام الطلب وسيتواصل فريق داري معك لتأكيد الحجز.'
+                              : 'A new booking request has been submitted. Admin is reviewing it and Dary team will reach out.'}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#FEF3C7',
+                          color: '#92400E',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          border: '1px solid #FDE68A',
+                        }}
+                      >
+                        ⏳ {locale === 'ar' ? 'بانتظار مراجعة الإدارة' : 'Pending Admin Review'}
+                      </span>
+                    </div>
+                  )}
+
+                  {currentStatus === 'CANCELLED' && (
+                    <div
+                      style={{
+                        padding: '0.75rem 1rem',
+                        borderRadius: '10px',
+                        backgroundColor: '#FEF2F2',
+                        border: '1px solid #FECACA',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem',
+                      }}
+                    >
+                      <span style={{ fontSize: '1.25rem' }}>✕</span>
+                      <div style={{ fontSize: '0.835rem', color: '#991B1B', fontWeight: 600 }}>
+                        {locale === 'ar'
+                          ? 'تم إلغاء هذا الطلب بواسطة إدارة داري، وتظل الغرفة متاحة لاستقبال طلبات حجز جديدة.'
+                          : 'This booking was cancelled by Dary admin. The room is available for other requests.'}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Top Row: Tenant & Accommodation Overview */}
                   <div
                     style={{
@@ -893,199 +978,31 @@ export default function OwnerBookingsPage() {
                       gap: '0.85rem',
                     }}
                   >
-                    {/* Status Management Actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#64748B' }}>
-                        {locale === 'ar' ? 'تغيير الحالة:' : 'Change Status:'}
+                    {/* Admin Supervision Status Pill */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#475569' }}>
+                        🛡️ {locale === 'ar' ? 'إشراف إدارة داري:' : 'Dary Admin Supervision:'}
                       </span>
-
-                      {/* 1. Contacted Action */}
-                      {currentStatus !== 'CONTACTED' && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(b.id, 'CONTACTED')}
-                          style={{
-                            padding: '0.4rem 0.75rem',
-                            borderRadius: '6px',
-                            backgroundColor: '#E0F2FE',
-                            color: '#0369A1',
-                            border: '1px solid #BAE6FD',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: isUpdating ? 'not-allowed' : 'pointer',
-                            opacity: isUpdating ? 0.6 : 1,
-                          }}
-                        >
-                          📞 {locale === 'ar' ? 'تم التواصل' : 'Mark Contacted'}
-                        </button>
-                      )}
-
-                      {/* 2. Confirm / Closed Action */}
-                      {currentStatus !== 'CLOSED' && currentStatus !== 'CONFIRMED' && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(b.id, 'CLOSED', 'تم تأكيد وقبول الحجز من قبل المالك')}
-                          style={{
-                            padding: '0.4rem 0.75rem',
-                            borderRadius: '6px',
-                            backgroundColor: '#DCFCE7',
-                            color: '#15803D',
-                            border: '1px solid #BBF7D0',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: isUpdating ? 'not-allowed' : 'pointer',
-                            opacity: isUpdating ? 0.6 : 1,
-                          }}
-                        >
-                          ✓ {locale === 'ar' ? 'تأكيد الحجز' : 'Confirm & Accept'}
-                        </button>
-                      )}
-
-                      {/* 3. Revert to Pending */}
-                      {currentStatus !== 'PENDING' && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => handleUpdateStatus(b.id, 'PENDING')}
-                          style={{
-                            padding: '0.4rem 0.75rem',
-                            borderRadius: '6px',
-                            backgroundColor: '#FEF9C3',
-                            color: '#A16207',
-                            border: '1px solid #FEF08A',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: isUpdating ? 'not-allowed' : 'pointer',
-                            opacity: isUpdating ? 0.6 : 1,
-                          }}
-                        >
-                          ⏳ {locale === 'ar' ? 'إعادة للمراجعة' : 'Set Pending'}
-                        </button>
-                      )}
-
-                      {/* 4. Cancel Action */}
-                      {currentStatus !== 'CANCELLED' && (
-                        <button
-                          type="button"
-                          disabled={isUpdating}
-                          onClick={() => {
-                            const reason = window.prompt(
-                              locale === 'ar' ? 'سبب إلغاء الطلب (اختياري):' : 'Reason for cancellation:'
-                            );
-                            handleUpdateStatus(b.id, 'CANCELLED', reason || 'تم الإلغاء من قبل مالك العقار');
-                          }}
-                          style={{
-                            padding: '0.4rem 0.75rem',
-                            borderRadius: '6px',
-                            backgroundColor: '#FEE2E2',
-                            color: '#B91C1C',
-                            border: '1px solid #FECACA',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: isUpdating ? 'not-allowed' : 'pointer',
-                            opacity: isUpdating ? 0.6 : 1,
-                          }}
-                        >
-                          ✕ {locale === 'ar' ? 'إلغاء الطلب' : 'Cancel'}
-                        </button>
-                      )}
-
-                      {isUpdating && (
-                        <span style={{ fontSize: '0.75rem', color: '#64748B', fontWeight: 600 }}>
-                          {locale === 'ar' ? 'جاري الحفظ...' : 'Saving...'}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Communication & Modal Details Buttons */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      {/* Contract button */}
-                      <button
-                        type="button"
-                        onClick={() => openOwnerContractModal(b)}
+                      <span
                         style={{
-                          padding: '0.45rem 0.85rem',
-                          borderRadius: '8px',
-                          backgroundColor: '#EFF6FF',
-                          color: '#2F6BFF',
-                          fontWeight: 700,
                           fontSize: '0.8rem',
-                          cursor: 'pointer',
+                          color: '#0B2A4A',
+                          backgroundColor: '#F8FAFC',
+                          padding: '0.3rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid #E2E8F0',
+                          fontWeight: 700,
                           display: 'inline-flex',
                           alignItems: 'center',
                           gap: '0.35rem',
-                          border: '1px solid #BFDBFE',
                         }}
                       >
-                        <span>📝</span>
-                        <span>{locale === 'ar' ? 'العقد والتوقيع' : 'Contract & Sign'}</span>
-                      </button>
-
-                      {tenantPhone && (
-                        <a
-                          href={`https://wa.me/${tenantPhone.replace(/[^0-9]/g, '')}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={{
-                            padding: '0.45rem 0.85rem',
-                            borderRadius: '8px',
-                            backgroundColor: '#DCFCE7',
-                            color: '#15803D',
-                            fontWeight: 700,
-                            fontSize: '0.8rem',
-                            textDecoration: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            border: '1px solid #BBF7D0',
-                          }}
-                        >
-                          💬 {locale === 'ar' ? 'واتساب' : 'WhatsApp'}
-                        </a>
-                      )}
-
-                      {tenantPhone && (
-                        <a
-                          href={`tel:${tenantPhone}`}
-                          style={{
-                            padding: '0.45rem 0.85rem',
-                            borderRadius: '8px',
-                            backgroundColor: '#EFF6FF',
-                            color: '#1D4ED8',
-                            fontWeight: 700,
-                            fontSize: '0.8rem',
-                            textDecoration: 'none',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.35rem',
-                            border: '1px solid #DBEAFE',
-                          }}
-                        >
-                          📞 {locale === 'ar' ? 'اتصال' : 'Call'}
-                        </a>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedBooking(b);
-                          setModalNote(b.note || '');
-                        }}
-                        style={{
-                          padding: '0.45rem 0.95rem',
-                          borderRadius: '8px',
-                          border: '1px solid #CBD5E1',
-                          backgroundColor: '#FFFFFF',
-                          color: '#0B2A4A',
-                          fontWeight: 700,
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {locale === 'ar' ? 'التفاصيل 🔍' : 'Details 🔍'}
-                      </button>
+                        {currentStatus === 'PENDING' && (locale === 'ar' ? '⏳ قيد المراجعة والتحقق من الإدارة' : 'Pending Admin Verification')}
+                        {currentStatus === 'CONTACTED' && (locale === 'ar' ? '📞 جارٍ التواصل والترتيب مع الطالب' : 'Admin Contacting Student')}
+                        {(currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED') && (locale === 'ar' ? '✓ تم التأكيد والاعتماد رسمياً' : 'Confirmed by Dary Admin')}
+                        {currentStatus === 'CANCELLED' && (locale === 'ar' ? '✕ تم إلغاء الطلب من قِبل الإدارة' : 'Cancelled by Admin')}
+                        {!['PENDING', 'CONTACTED', 'CLOSED', 'CONFIRMED', 'CANCELLED'].includes(currentStatus) && (locale === 'ar' ? 'تتم المتابعة بواسطة الإدارة' : 'Managed by Admin')}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1094,571 +1011,6 @@ export default function OwnerBookingsPage() {
           </div>
         )}
       </div>
-
-      {/* 4. Booking Details Modal */}
-      {selectedBooking && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.55)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem',
-          }}
-          onClick={() => setSelectedBooking(null)}
-        >
-          <div
-            style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: '16px',
-              padding: '1.75rem',
-              maxWidth: '560px',
-              width: '100%',
-              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15)',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: '1.25rem',
-                borderBottom: '1px solid #E2E8F0',
-                paddingBottom: '0.85rem',
-              }}
-            >
-              <div>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#0B2A4A', margin: 0 }}>
-                  {locale === 'ar' ? '📄 تفاصيل وتحديث حالة الحجز' : '📄 Booking Details & Status'}
-                </h3>
-                <span style={{ fontSize: '0.75rem', color: '#64748B', fontFamily: 'monospace' }}>
-                  ID: {selectedBooking.id}
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedBooking(null)}
-                style={{
-                  background: '#F1F5F9',
-                  border: 'none',
-                  borderRadius: '50%',
-                  width: '32px',
-                  height: '32px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  fontSize: '1rem',
-                  fontWeight: 700,
-                  color: '#475569',
-                }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* Status Selector in Modal */}
-            <div
-              style={{
-                padding: '1rem',
-                backgroundColor: '#F8FAFC',
-                borderRadius: '12px',
-                marginBottom: '1.25rem',
-                border: '1px solid #E2E8F0',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0B2A4A' }}>
-                  {locale === 'ar' ? 'تحديث حالة الحجز:' : 'Update Status:'}
-                </span>
-                {getStatusBadge(selectedBooking.status)}
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
-                {[
-                  { id: 'PENDING', labelAr: '⏳ قيد المراجعة', bg: '#FEF9C3', text: '#A16207' },
-                  { id: 'CONTACTED', labelAr: '📞 تم التواصل', bg: '#E0F2FE', text: '#0369A1' },
-                  { id: 'CLOSED', labelAr: '✓ مؤكد / مكتمل', bg: '#DCFCE7', text: '#15803D' },
-                  { id: 'CANCELLED', labelAr: '✕ ملغي', bg: '#FEE2E2', text: '#B91C1C' },
-                ].map((s) => {
-                  const isCurrent = (selectedBooking.status || '').toUpperCase() === s.id;
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      disabled={updatingBookingId === selectedBooking.id}
-                      onClick={() => handleUpdateStatus(selectedBooking.id, s.id, modalNote)}
-                      style={{
-                        padding: '0.5rem 0.75rem',
-                        borderRadius: '8px',
-                        border: isCurrent ? `2px solid ${s.text}` : '1px solid #CBD5E1',
-                        backgroundColor: isCurrent ? s.bg : '#FFFFFF',
-                        color: s.text,
-                        fontWeight: 700,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.35rem',
-                      }}
-                    >
-                      {s.labelAr} {isCurrent && '●'}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Student (Tenant) Info Section */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.65rem' }}>
-                👤 {locale === 'ar' ? 'بيانات الطالب (المستأجر)' : 'Student Details'}
-              </h4>
-              <div style={{ backgroundColor: '#F8FAFC', borderRadius: '10px', padding: '1rem', border: '1px solid #E2E8F0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'الاسم:' : 'Name:'}</span>
-                  <strong style={{ fontSize: '0.875rem', color: '#0B2A4A' }}>
-                    {selectedBooking.tenant?.firstName
-                      ? `${selectedBooking.tenant.firstName} ${selectedBooking.tenant.lastName || ''}`.trim()
-                      : selectedBooking.tenant?.name || '—'}
-                  </strong>
-                </div>
-
-                {selectedBooking.tenant?.email && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                    <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'البريد الإلكتروني:' : 'Email:'}</span>
-                    <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>{selectedBooking.tenant.email}</strong>
-                  </div>
-                )}
-
-                {(selectedBooking.tenant?.whatsappPhone || selectedBooking.tenant?.phone) && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid #E2E8F0' }}>
-                    <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'رقم الهاتف والواتساب:' : 'WhatsApp & Phone:'}</span>
-                    <a
-                      href={`https://wa.me/${(selectedBooking.tenant?.whatsappPhone || selectedBooking.tenant?.phone).replace(/[^0-9]/g, '')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        borderRadius: '6px',
-                        backgroundColor: '#DCFCE7',
-                        color: '#15803D',
-                        fontWeight: 700,
-                        fontSize: '0.78rem',
-                        textDecoration: 'none',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.3rem',
-                      }}
-                    >
-                      💬 {selectedBooking.tenant?.whatsappPhone || selectedBooking.tenant?.phone}
-                    </a>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Accommodation Details */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.65rem' }}>
-                🏠 {locale === 'ar' ? 'تفاصيل السكن والغرفة المطلوبة' : 'Accommodation & Room'}
-              </h4>
-              <div style={{ backgroundColor: '#F8FAFC', borderRadius: '10px', padding: '1rem', border: '1px solid #E2E8F0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'العقار:' : 'Property:'}</span>
-                  <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                    {selectedBooking.property?.title || selectedPropertyObj?.title || 'سكن جامعي'}
-                  </strong>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'نوع الغرفة:' : 'Room Type:'}</span>
-                  <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                    {selectedBooking.room?.roomType ? `غرفة ${selectedBooking.room.roomType}` : 'غرفة مخصصة للطلاب'}
-                  </strong>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'الأسرة المطلوبة:' : 'Requested Beds:'}</span>
-                  <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                    {selectedBooking.bedsRequested || 1} {locale === 'ar' ? 'سرير' : 'beds'}
-                  </strong>
-                </div>
-
-                {selectedBooking.monthsCount && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                    <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'مدة الإقامة:' : 'Duration:'}</span>
-                    <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                      {selectedBooking.monthsCount} {locale === 'ar' ? 'أشهر' : 'months'}
-                    </strong>
-                  </div>
-                )}
-
-                {selectedBooking.room?.pricePerBed && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                    <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'سعر السرير شهرياً:' : 'Monthly Rate / Bed:'}</span>
-                    <strong style={{ fontSize: '0.85rem', color: '#16A34A' }}>
-                      {Number(selectedBooking.room.pricePerBed).toLocaleString()} {locale === 'ar' ? 'ج.م' : 'EGP'}
-                    </strong>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Stay Period & Dates */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.65rem' }}>
-                📅 {locale === 'ar' ? 'فترة الإقامة وتواريخ الحجز' : 'Stay Duration & Dates'}
-              </h4>
-              <div style={{ backgroundColor: '#F8FAFC', borderRadius: '10px', padding: '1rem', border: '1px solid #E2E8F0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'تاريخ الوصول (Move-in):' : 'Check-in:'}</span>
-                  <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                    {selectedBooking.startDate ? new Date(selectedBooking.startDate).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}
-                  </strong>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.45rem' }}>
-                  <span style={{ fontSize: '0.825rem', color: '#64748B' }}>{locale === 'ar' ? 'تاريخ المغادرة (Move-out):' : 'Check-out:'}</span>
-                  <strong style={{ fontSize: '0.85rem', color: '#0B2A4A' }}>
-                    {selectedBooking.endDate ? new Date(selectedBooking.endDate).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}
-                  </strong>
-                </div>
-
-                {selectedBooking.totalPrice !== undefined && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px solid #E2E8F0' }}>
-                    <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0B2A4A' }}>{locale === 'ar' ? 'إجمالي الحجز المقدر:' : 'Estimated Total:'}</span>
-                    <strong style={{ fontSize: '1.1rem', fontWeight: 800, color: '#2F6BFF' }}>
-                      {Number(selectedBooking.totalPrice).toLocaleString()} {locale === 'ar' ? 'ج.م' : 'EGP'}
-                    </strong>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Booking Notes (Editable / Viewable) */}
-            <div style={{ marginBottom: '1.25rem' }}>
-              <h4 style={{ fontSize: '0.85rem', fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', marginBottom: '0.65rem' }}>
-                📝 {locale === 'ar' ? 'ملاحظات الحجز' : 'Notes'}
-              </h4>
-              <textarea
-                value={modalNote}
-                onChange={(e) => setModalNote(e.target.value)}
-                placeholder={locale === 'ar' ? 'أضف ملاحظات خاصة بهذا الحجز...' : 'Add notes for this booking...'}
-                rows={3}
-                style={{
-                  width: '100%',
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: '10px',
-                  border: '1px solid #CBD5E1',
-                  backgroundColor: '#FFFFFF',
-                  fontSize: '0.85rem',
-                  color: '#0B2A4A',
-                  outline: 'none',
-                  resize: 'vertical',
-                }}
-              />
-            </div>
-
-            {/* Modal Actions */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', marginTop: '1.5rem' }}>
-              {(selectedBooking.tenant?.whatsappPhone || selectedBooking.tenant?.phone) ? (
-                <a
-                  href={`https://wa.me/${(selectedBooking.tenant?.whatsappPhone || selectedBooking.tenant?.phone).replace(/[^0-9]/g, '')}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={{
-                    padding: '0.6rem 1.25rem',
-                    borderRadius: '8px',
-                    backgroundColor: '#16A34A',
-                    color: '#FFFFFF',
-                    fontWeight: 700,
-                    fontSize: '0.875rem',
-                    textDecoration: 'none',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                  }}
-                >
-                  💬 {locale === 'ar' ? 'مراسلة عبر واتساب' : 'Chat on WhatsApp'}
-                </a>
-              ) : <div />}
-
-              <button
-                type="button"
-                onClick={() => setSelectedBooking(null)}
-                style={{
-                  padding: '0.6rem 1.5rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: '#0B2A4A',
-                  color: '#FFFFFF',
-                  fontWeight: 700,
-                  fontSize: '0.875rem',
-                  cursor: 'pointer',
-                }}
-              >
-                {locale === 'ar' ? 'إغلاق' : 'Close'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Owner Digital Contract Modal */}
-      {contractBooking && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(11, 42, 74, 0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1.5rem',
-            zIndex: 60,
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: '20px',
-              padding: '2rem',
-              maxWidth: '560px',
-              width: '100%',
-              boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-              <h3 style={{ margin: 0, color: 'var(--dary-navy)', fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span>📝</span>
-                <span>{locale === 'ar' ? 'عقد الإيجار الإلكتروني للمالك' : 'Owner Digital Contract'}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setContractBooking(null)}
-                style={{ fontSize: '1.2rem', color: '#94A3B8', cursor: 'pointer', border: 'none', background: 'none' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            {loadingContract ? (
-              <div style={{ padding: '2.5rem 0', textAlign: 'center', color: 'var(--dary-muted)' }}>
-                <div style={{ width: '32px', height: '32px', border: '3px solid #E2E8F0', borderTopColor: '#2F6BFF', borderRadius: '50%', margin: '0 auto 1rem', animation: 'spin 0.8s linear infinite' }} />
-                <p style={{ margin: 0, fontSize: '0.9rem' }}>{locale === 'ar' ? 'جاري جلب بيانات العقد...' : 'Loading contract...'}</p>
-              </div>
-            ) : !contractData ? (
-              <div style={{ textAlign: 'center', padding: '2rem 1rem' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>📄</div>
-                <h4 style={{ margin: '0 0 0.5rem', color: 'var(--dary-navy)', fontWeight: 700 }}>
-                  {locale === 'ar' ? 'لم يتم إنشاء مسودة العقد بعد' : 'No Contract Draft Created Yet'}
-                </h4>
-                <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--dary-muted)', lineHeight: 1.6 }}>
-                  {locale === 'ar'
-                    ? 'سيقوم المشرف العام للمنصة بإنشاء العقد ورفع المسودة، وستظهر هنا فور جاهزيتها لتتمكن من مراجعتها وتوقيعها.'
-                    : 'The administration will create the contract draft after agreement.'}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setContractBooking(null)}
-                  style={{
-                    marginTop: '1.5rem',
-                    padding: '0.6rem 1.5rem',
-                    borderRadius: '10px',
-                    backgroundColor: '#F1F5F9',
-                    border: 'none',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {locale === 'ar' ? 'إغلاق' : 'Close'}
-                </button>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {contractActionMsg && (
-                  <div
-                    style={{
-                      padding: '0.75rem 1rem',
-                      borderRadius: '10px',
-                      backgroundColor: contractActionMsg.type === 'success' ? '#F0FDF4' : '#FEF2F2',
-                      border: `1px solid ${contractActionMsg.type === 'success' ? '#BBF7D0' : '#FECACA'}`,
-                      color: contractActionMsg.type === 'success' ? '#166534' : '#991B1B',
-                      fontSize: '0.85rem',
-                      fontWeight: 700,
-                    }}
-                  >
-                    {contractActionMsg.text}
-                  </div>
-                )}
-
-                {/* Contract Status Overview */}
-                <div style={{ padding: '1rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--dary-muted)', display: 'block' }}>
-                      {locale === 'ar' ? 'رقم العقد:' : 'Contract Number:'}
-                    </span>
-                    <strong style={{ color: 'var(--dary-navy)', fontFamily: 'monospace' }}>
-                      {contractData.contractNumber || contractData.id.slice(0, 8)}
-                    </strong>
-                  </div>
-                  <div>
-                    <span
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        borderRadius: '6px',
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
-                        backgroundColor:
-                          contractData.status === 'ACTIVE'
-                            ? '#DCFCE7'
-                            : contractData.status === 'SIGNED'
-                            ? '#EFF6FF'
-                            : contractData.status === 'SENT'
-                            ? '#FEF9C3'
-                            : '#F1F5F9',
-                        color:
-                          contractData.status === 'ACTIVE'
-                            ? '#15803D'
-                            : contractData.status === 'SIGNED'
-                            ? '#1D4ED8'
-                            : contractData.status === 'SENT'
-                            ? '#A16207'
-                            : '#475569',
-                      }}
-                    >
-                      {contractData.status}
-                    </span>
-                  </div>
-                </div>
-
-                {/* PDF Downloads */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  {contractData.draftPdfUrl && (
-                    <div style={{ padding: '0.85rem 1rem', border: '1px dashed #CBD5E1', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)' }}>
-                        {locale === 'ar' ? 'مسودة العقد الأساسية' : 'Official Draft'}
-                      </span>
-                      <a
-                        href={contractData.draftPdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ padding: '0.4rem 0.85rem', backgroundColor: '#0B2A4A', color: '#FFFFFF', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
-                      >
-                        📥 {locale === 'ar' ? 'تحميل المسودة' : 'Download Draft'}
-                      </a>
-                    </div>
-                  )}
-
-                  {contractData.tenantSignedPdfUrl && (
-                    <div style={{ padding: '0.85rem 1rem', border: '1px dashed #BBF7D0', backgroundColor: '#F0FDF4', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#166534' }}>
-                        {locale === 'ar' ? '✓ نسخة توقيع الطالب المستأجر' : '✓ Tenant Signed Copy'}
-                      </span>
-                      <a
-                        href={contractData.tenantSignedPdfUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ padding: '0.4rem 0.85rem', backgroundColor: '#16A34A', color: '#FFFFFF', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700, textDecoration: 'none' }}
-                      >
-                        📄 {locale === 'ar' ? 'معاينة توقيع الطالب' : 'View Tenant Signature'}
-                      </a>
-                    </div>
-                  )}
-                </div>
-
-                {/* Signatures status */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', fontSize: '0.825rem' }}>
-                  <div style={{ padding: '0.75rem', backgroundColor: contractData.tenantSignedAt ? '#F0FDF4' : '#FFFBEB', borderRadius: '8px', border: `1px solid ${contractData.tenantSignedAt ? '#BBF7D0' : '#FDE68A'}` }}>
-                    <div style={{ fontWeight: 700, color: contractData.tenantSignedAt ? '#15803D' : '#B45309' }}>
-                      {contractData.tenantSignedAt ? '✓ تم توقيع المستأجر' : '⏳ بانتظار توقيع المستأجر'}
-                    </div>
-                    {contractData.tenantSignedAt && (
-                      <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: '0.25rem' }}>
-                        {new Date(contractData.tenantSignedAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ padding: '0.75rem', backgroundColor: contractData.ownerSignedAt ? '#F0FDF4' : '#FFFBEB', borderRadius: '8px', border: `1px solid ${contractData.ownerSignedAt ? '#BBF7D0' : '#FDE68A'}` }}>
-                    <div style={{ fontWeight: 700, color: contractData.ownerSignedAt ? '#15803D' : '#B45309' }}>
-                      {contractData.ownerSignedAt ? '✓ تم توقيعك كمالك' : '⏳ بانتظار توقيعك'}
-                    </div>
-                    {contractData.ownerSignedAt && (
-                      <div style={{ fontSize: '0.75rem', color: '#166534', marginTop: '0.25rem' }}>
-                        {new Date(contractData.ownerSignedAt).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Upload Owner Signed PDF */}
-                {!contractData.ownerSignedAt && contractData.status !== 'CANCELLED' && (
-                  <div style={{ padding: '1rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
-                    <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
-                      {locale === 'ar' ? 'رفع نسختك الموقعة كمالك (ملف PDF)' : 'Upload Owner Signed PDF'}
-                    </label>
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      onChange={(e) => setOwnerSigningFile(e.target.files?.[0] || null)}
-                      style={{ fontSize: '0.85rem', marginBottom: '0.75rem', width: '100%' }}
-                    />
-                    <button
-                      type="button"
-                      disabled={!ownerSigningFile || uploadingOwnerSign}
-                      onClick={handleOwnerSign}
-                      style={{
-                        padding: '0.6rem 1.25rem',
-                        backgroundColor: ownerSigningFile && !uploadingOwnerSign ? '#16A34A' : '#94A3B8',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
-                        fontWeight: 700,
-                        cursor: ownerSigningFile && !uploadingOwnerSign ? 'pointer' : 'not-allowed',
-                      }}
-                    >
-                      {uploadingOwnerSign
-                        ? (locale === 'ar' ? 'جاري الرفع...' : 'Uploading...')
-                        : (locale === 'ar' ? 'تأكيد توقيع المالك ✍️' : 'Confirm Owner Signature ✍️')}
-                    </button>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setContractBooking(null)}
-                    style={{
-                      padding: '0.55rem 1.25rem',
-                      borderRadius: '8px',
-                      backgroundColor: '#F1F5F9',
-                      border: 'none',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {locale === 'ar' ? 'إغلاق' : 'Close'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

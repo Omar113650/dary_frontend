@@ -25,8 +25,11 @@ import OwnerRevenuePage from './pages/ownerDashboard/OwnerRevenuePage';
 import OwnerCalendarPage from './pages/ownerDashboard/OwnerCalendarPage';
 import OwnerProfilePage from './pages/ownerDashboard/OwnerProfilePage';
 import AddPropertyPage from './pages/ownerDashboard/AddPropertyPage';
+import OwnerExplorePropertiesPage from './pages/ownerDashboard/OwnerExplorePropertiesPage';
+import OwnerMyRentalsPage from './pages/ownerDashboard/OwnerMyRentalsPage';
 import DevOwnerDashboardPreview from './components/ownerDashboard/DevOwnerDashboardPreview';
 import AdminRoute from './components/auth/AdminRoute';
+import AdminModuleGuard from './components/auth/AdminModuleGuard';
 import AdminDashboardLayout from './components/adminDashboard/AdminDashboardLayout';
 import AdminOverviewPage from './pages/adminDashboard/AdminOverviewPage';
 import AdminUsersPage from './pages/adminDashboard/AdminUsersPage';
@@ -117,10 +120,13 @@ export default function App() {
               }
             >
               <Route index element={<OwnerOverviewPage />} />
+              <Route path="explore" element={<OwnerExplorePropertiesPage />} />
               <Route path="properties" element={<OwnerPropertiesPage />} />
               <Route path="properties/new" element={<AddPropertyPage />} />
               <Route path="add-property" element={<AddPropertyPage />} />
               <Route path="bookings" element={<OwnerBookingsPage />} />
+              <Route path="my-rentals" element={<OwnerMyRentalsPage />} />
+              <Route path="my-bookings" element={<OwnerMyRentalsPage />} />
               <Route path="revenue" element={<OwnerRevenuePage />} />
               <Route path="calendar" element={<OwnerCalendarPage />} />
               <Route path="notifications" element={<NotificationsPage />} />
@@ -131,10 +137,13 @@ export default function App() {
             {import.meta.env.DEV && (
               <Route path="/owner-dashboard-preview" element={<DevOwnerDashboardPreview />}>
                 <Route index element={<OwnerOverviewPage />} />
+                <Route path="explore" element={<OwnerExplorePropertiesPage />} />
                 <Route path="properties" element={<OwnerPropertiesPage />} />
                 <Route path="properties/new" element={<AddPropertyPage />} />
                 <Route path="add-property" element={<AddPropertyPage />} />
                 <Route path="bookings" element={<OwnerBookingsPage />} />
+                <Route path="my-rentals" element={<OwnerMyRentalsPage />} />
+                <Route path="my-bookings" element={<OwnerMyRentalsPage />} />
                 <Route path="revenue" element={<OwnerRevenuePage />} />
                 <Route path="calendar" element={<OwnerCalendarPage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
@@ -152,17 +161,17 @@ export default function App() {
               }
             >
               <Route index element={<AdminOverviewPage />} />
-              <Route path="users" element={<AdminUsersPage />} />
-              <Route path="properties" element={<AdminPropertiesPage />} />
-              <Route path="bookings" element={<AdminBookingsPage />} />
-              <Route path="reports" element={<AdminReportsPage />} />
-              <Route path="tickets" element={<AdminSupportTicketsPage />} />
-              <Route path="support" element={<AdminSupportTicketsPage />} />
-              <Route path="reviews" element={<AdminReviewsPage />} />
-              <Route path="analytics" element={<AdminAnalyticsPage />} />
-              <Route path="calendar" element={<AdminCalendarPage />} />
-              <Route path="notifications" element={<NotificationsPage />} />
-              <Route path="profile" element={<AdminProfilePage />} />
+              <Route path="users" element={<AdminModuleGuard module="users"><AdminUsersPage /></AdminModuleGuard>} />
+              <Route path="properties" element={<AdminModuleGuard module="properties"><AdminPropertiesPage /></AdminModuleGuard>} />
+              <Route path="bookings" element={<AdminModuleGuard module="bookings"><AdminBookingsPage /></AdminModuleGuard>} />
+              <Route path="reports" element={<AdminModuleGuard module="reports"><AdminReportsPage /></AdminModuleGuard>} />
+              <Route path="tickets" element={<AdminModuleGuard module="tickets"><AdminSupportTicketsPage /></AdminModuleGuard>} />
+              <Route path="support" element={<AdminModuleGuard module="tickets"><AdminSupportTicketsPage /></AdminModuleGuard>} />
+              <Route path="reviews" element={<AdminModuleGuard module="reviews"><AdminReviewsPage /></AdminModuleGuard>} />
+              <Route path="analytics" element={<AdminModuleGuard module="analytics"><AdminAnalyticsPage /></AdminModuleGuard>} />
+              <Route path="calendar" element={<AdminModuleGuard module="calendar"><AdminCalendarPage /></AdminModuleGuard>} />
+              <Route path="notifications" element={<AdminModuleGuard module="notifications"><NotificationsPage /></AdminModuleGuard>} />
+              <Route path="profile" element={<AdminModuleGuard module="profile"><AdminProfilePage /></AdminModuleGuard>} />
             </Route>
 
             {/* Development-Only Admin Preview Route */}

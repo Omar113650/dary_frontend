@@ -1338,7 +1338,7 @@ export default function PropertyDetailsPage() {
                           </div>
                         </div>
 
-                        {!isAdmin && !isOwner && isAvailable && (
+                        {!isAdmin && (!isOwner || !isThisOwnerProperty) && isAvailable && (
                           <button
                             type="button"
                             onClick={() => {
@@ -1655,59 +1655,56 @@ export default function PropertyDetailsPage() {
                   {locale === 'ar' ? 'إدارة العقارات في لوحة الأدمن ←' : 'Manage Properties in Admin ←'}
                 </Link>
               </div>
-            ) : isOwner ? (
-              isThisOwnerProperty ? (
-                <div style={{ backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: '12px', padding: '1rem', textAlign: 'center', marginBottom: '0.75rem' }}>
-                  <div style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>🏢</div>
-                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#166534', marginBottom: '0.25rem' }}>
-                    {locale === 'ar' ? 'أنت مالك هذا السكن' : 'You own this property'}
-                  </div>
-                  <p style={{ fontSize: '0.78rem', color: '#15803D', margin: '0 0 0.75rem' }}>
-                    {locale === 'ar' ? 'يمكنك متابعة حجوزات هذا العقار وتعديل بياناته عبر لوحة تحكم المالك.' : 'Manage this listing and track bookings in your owner dashboard.'}
-                  </p>
-                  <Link
-                    to="/owner-dashboard/properties"
-                    style={{
-                      display: 'block',
-                      padding: '0.6rem',
-                      borderRadius: '8px',
-                      backgroundColor: '#16A34A',
-                      color: '#FFFFFF',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
-                      textDecoration: 'none',
-                    }}
-                  >
-                    {locale === 'ar' ? 'إدارة العقار في لوحة التحكم ←' : 'Manage in Dashboard →'}
-                  </Link>
+            ) : isOwner && isThisOwnerProperty ? (
+              <div style={{ backgroundColor: '#F0FDF4', border: '1px solid #86EFAC', borderRadius: '12px', padding: '1rem', textAlign: 'center', marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>🏢</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#166534', marginBottom: '0.25rem' }}>
+                  {locale === 'ar' ? 'أنت مالك هذا السكن' : 'You own this property'}
                 </div>
-              ) : (
-                <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #CBD5E1', borderRadius: '12px', padding: '1rem', textAlign: 'center', marginBottom: '0.75rem' }}>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0B2A4A', marginBottom: '0.35rem' }}>
-                    {locale === 'ar' ? 'أنت مسجل كمالك عقار' : 'Registered as Property Owner'}
-                  </div>
-                  <p style={{ fontSize: '0.78rem', color: '#64748B', margin: '0 0 0.75rem' }}>
-                    {locale === 'ar' ? 'طلبات الحجز مخصصة للطلاب والمستأجرين. يمكنك إدارة عقاراتك عبر لوحة التحكم.' : 'Booking is for tenants/students. Manage your listings in the owner dashboard.'}
-                  </p>
-                  <Link
-                    to="/owner-dashboard"
-                    style={{
-                      display: 'block',
-                      padding: '0.6rem',
-                      borderRadius: '8px',
-                      backgroundColor: '#0B2A4A',
-                      color: '#FFFFFF',
-                      fontWeight: 600,
-                      fontSize: '0.85rem',
-                      textDecoration: 'none',
-                    }}
-                  >
-                    {locale === 'ar' ? 'لوحة تحكم المالك ←' : 'Owner Dashboard →'}
-                  </Link>
-                </div>
-              )
+                <p style={{ fontSize: '0.78rem', color: '#15803D', margin: '0 0 0.75rem' }}>
+                  {locale === 'ar' ? 'يمكنك متابعة حجوزات هذا العقار وتعديل بياناته عبر لوحة تحكم المالك.' : 'Manage this listing and track bookings in your owner dashboard.'}
+                </p>
+                <Link
+                  to="/owner-dashboard/properties"
+                  style={{
+                    display: 'block',
+                    padding: '0.6rem',
+                    borderRadius: '8px',
+                    backgroundColor: '#16A34A',
+                    color: '#FFFFFF',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    textDecoration: 'none',
+                  }}
+                >
+                  {locale === 'ar' ? 'إدارة العقار في لوحة التحكم ←' : 'Manage in Dashboard →'}
+                </Link>
+              </div>
             ) : (
               <>
+                {isOwner && (
+                  <div
+                    style={{
+                      backgroundColor: '#EFF6FF',
+                      border: '1px solid #BFDBFE',
+                      borderRadius: '10px',
+                      padding: '0.65rem 0.85rem',
+                      marginBottom: '0.75rem',
+                      fontSize: '0.8rem',
+                      color: '#1E40AF',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <span>ℹ️</span>
+                    <span>
+                      {locale === 'ar'
+                        ? 'يمكنك كمالك حجز هذا السكن لنفسك، وستتمكن من متابعة حجزك وتوقيع العقد في "حجوزاتي الشخصية".'
+                        : 'You can book this accommodation for yourself and track it in "My Personal Bookings".'}
+                    </span>
+                  </div>
+                )}
                 {isFullyBooked ? (
                   <div
                     style={{
@@ -2083,7 +2080,26 @@ export default function PropertyDetailsPage() {
                   </a>
                 ) : null}
 
-                <div>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <Link
+                    to={isOwner ? '/owner-dashboard/my-rentals' : '/dashboard/rentals'}
+                    style={{
+                      padding: '0.65rem 1.25rem',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--color-blue)',
+                      color: '#FFFFFF',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                    }}
+                  >
+                    <span>📋</span>
+                    <span>{isOwner ? (locale === 'ar' ? 'عرض حجوزاتي في لوحة التحكم' : 'View My Bookings') : (locale === 'ar' ? 'عرض إيجاراتي' : 'View My Rentals')}</span>
+                  </Link>
+
                   <button
                     type="button"
                     onClick={() => {
@@ -2091,7 +2107,7 @@ export default function PropertyDetailsPage() {
                       setBookingSuccess(false);
                     }}
                     style={{
-                      padding: '0.5rem 1.25rem',
+                      padding: '0.65rem 1.25rem',
                       borderRadius: '8px',
                       backgroundColor: '#F1F5F9',
                       color: 'var(--color-navy)',

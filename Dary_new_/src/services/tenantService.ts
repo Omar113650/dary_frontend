@@ -73,33 +73,71 @@ export class TenantService {
   // RENTALS (GET /dashboard/rentals & /booking/my fallback)
   // ==========================================
   static async getRentals(): Promise<RentalBooking[]> {
-    try {
-      const res = await ApiClient.get<any>('/dashboard/rentals');
-      const list =
-        (Array.isArray(res?.data) ? res.data : null) ||
-        (Array.isArray(res?.data?.data) ? res.data.data : null) ||
-        (Array.isArray(res?.data?.rentals) ? res.data.rentals : null) ||
+    const combinedMap = new Map<string, RentalBooking>();
+
+    const extractList = (res: any): any[] => {
+      const candidate =
         (Array.isArray(res?.data?.bookings) ? res.data.bookings : null) ||
-        (Array.isArray(res?.rentals) ? res.rentals : null) ||
+        (Array.isArray(res?.data?.rentals) ? res.data.rentals : null) ||
+        (Array.isArray(res?.data?.data) ? res.data.data : null) ||
+        (Array.isArray(res?.data?.items) ? res.data.items : null) ||
+        (Array.isArray(res?.data) ? res.data : null) ||
         (Array.isArray(res?.bookings) ? res.bookings : null) ||
+        (Array.isArray(res?.rentals) ? res.rentals : null) ||
+        (Array.isArray(res?.items) ? res.items : null) ||
         (Array.isArray(res) ? res : null);
-      if (Array.isArray(list)) return list;
-    } catch (e) {
-      console.warn('[TenantService] /dashboard/rentals failed, attempting /booking/my fallback:', e);
-    }
+      return Array.isArray(candidate) ? candidate : [];
+    };
+
+    // 1. Fetch from /booking/my (Primary database source for authenticated tenant bookings)
     try {
-      const res2 = await ApiClient.get<any>('/booking/my');
-      const list2 =
-        (Array.isArray(res2?.data) ? res2.data : null) ||
-        (Array.isArray(res2?.data?.data) ? res2.data.data : null) ||
-        (Array.isArray(res2?.data?.bookings) ? res2.data.bookings : null) ||
-        (Array.isArray(res2?.bookings) ? res2.bookings : null) ||
-        (Array.isArray(res2) ? res2 : null);
-      if (Array.isArray(list2)) return list2;
+      const resMy = await ApiClient.get<any>('/booking/my');
+      const listMy = extractList(resMy);
+      for (const item of listMy) {
+        if (item?.id) {
+          combinedMap.set(item.id, item);
+        }
+      }
     } catch (e) {
-      console.warn('[TenantService] /booking/my fallback failed:', e);
+      console.warn('[TenantService] /booking/my failed:', e);
     }
-    return [];
+
+    // 2. Fetch from /dashboard/rentals (Dashboard aggregated rentals)
+    try {
+      const resDash = await ApiClient.get<any>('/dashboard/rentals');
+      const listDash = extractList(resDash);
+      for (const item of listDash) {
+        if (item?.id) {
+          const existing = combinedMap.get(item.id);
+          // If already in map from /booking/my, merge any extra properties from /dashboard/rentals
+          combinedMap.set(item.id, { ...item, ...existing });
+        }
+      }
+    } catch (e) {
+      console.warn('[TenantService] /dashboard/rentals failed:', e);
+    }
+
+    // 3. Fallback: If still empty, check /booking endpoint
+    if (combinedMap.size === 0) {
+      try {
+        const resBk = await ApiClient.get<any>('/booking');
+        const listBk = extractList(resBk);
+        for (const item of listBk) {
+          if (item?.id) combinedMap.set(item.id, item);
+        }
+      } catch (e) {
+        // Ignored
+      }
+    }
+
+    const result = Array.from(combinedMap.values());
+    result.sort((a: any, b: any) => {
+      const dateA = new Date(a.createdAt || a.startDate || 0).getTime();
+      const dateB = new Date(b.createdAt || b.startDate || 0).getTime();
+      return dateB - dateA;
+    });
+
+    return result;
   }
 
   /**

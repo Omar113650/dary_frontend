@@ -2,8 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useLocale } from '../../utils/LocaleContext';
 import { AdminService } from '../../services/adminService';
 import type { AdminBookingItem, AdminStatusCount } from '../../services/adminService';
-import { ContractService } from '../../services/contractService';
-import type { ContractItem } from '../../services/contractService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useAdminBookingsStatus, useAdminRevenue } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
@@ -40,6 +38,7 @@ export default function AdminBookingsPage() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
@@ -128,9 +127,18 @@ export default function AdminBookingsPage() {
 
   const revenueCurrency = revenueData?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
 
-  const filteredBookings = statusFilter
-    ? bookings.filter((b) => b.status === statusFilter)
-    : bookings;
+  const filteredBookings = bookings.filter((b: any) => {
+    if (statusFilter && b.status !== statusFilter) return false;
+    if (searchTerm.trim()) {
+      const term = searchTerm.trim().toLowerCase();
+      const tenant = `${b.tenant?.name || ''} ${b.tenant?.firstName || ''} ${b.tenant?.lastName || ''} ${b.tenant?.phone || ''} ${b.tenant?.email || ''}`.toLowerCase();
+      const prop = `${b.property?.title || ''} ${b.property?.city || ''}`.toLowerCase();
+      const owner = `${b.property?.owner?.name || b.owner?.name || ''} ${b.property?.owner?.phone || b.owner?.phone || ''}`.toLowerCase();
+      const idMatch = String(b.id || '').toLowerCase();
+      return tenant.includes(term) || prop.includes(term) || owner.includes(term) || idMatch.includes(term);
+    }
+    return true;
+  });
 
   // Action state
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -138,123 +146,7 @@ export default function AdminBookingsPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Digital Contract Management State
-  const [contractBooking, setContractBooking] = useState<AdminBookingItem | null>(null);
-  const [contractData, setContractData] = useState<ContractItem | null>(null);
-  const [loadingContract, setLoadingContract] = useState(false);
-  const [draftPdfFile, setDraftPdfFile] = useState<File | null>(null);
-  const [isSendingDraft, setIsSendingDraft] = useState(false);
-  const [isActivatingContract, setIsActivatingContract] = useState(false);
-  const [isCreatingContract, setIsCreatingContract] = useState(false);
-  const [contractModalMsg, setContractModalMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const openContractModal = async (booking: AdminBookingItem) => {
-    setContractBooking(booking);
-    setContractData(null);
-    setDraftPdfFile(null);
-    setContractModalMsg(null);
-    setLoadingContract(true);
-    try {
-      const data = await ContractService.getContractByBooking(booking.id);
-      setContractData(data);
-    } catch (err: any) {
-      console.error('Failed to load contract:', err);
-    } finally {
-      setLoadingContract(false);
-    }
-  };
-
-  const handleCreateContract = async () => {
-    if (!contractBooking) return;
-    setIsCreatingContract(true);
-    setContractModalMsg(null);
-    try {
-      const created = await ContractService.createContract(contractBooking.id);
-      setContractData(created?.contract || created);
-      setContractModalMsg({
-        type: 'success',
-        text: locale === 'ar' ? 'تم إنشاء مسودة العقد بنجاح! يمكنك الآن رفع ملف PDF المسودة.' : 'Contract draft created successfully! Upload draft PDF.',
-      });
-    } catch (err: any) {
-      setContractModalMsg({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل إنشاء العقد.' : 'Failed to create contract.'),
-      });
-    } finally {
-      setIsCreatingContract(false);
-    }
-  };
-
-  const handleSendDraft = async () => {
-    if (!contractData || !draftPdfFile) return;
-    setIsSendingDraft(true);
-    setContractModalMsg(null);
-    try {
-      await ContractService.sendContract(contractData.id, draftPdfFile);
-      setContractModalMsg({
-        type: 'success',
-        text: locale === 'ar' ? 'تم إرسال مسودة العقد بنجاح إلى المستأجر والمالك للتوقيع.' : 'Contract sent to tenant and owner for signature.',
-      });
-      if (contractBooking) {
-        const updated = await ContractService.getContractByBooking(contractBooking.id);
-        setContractData(updated);
-      }
-    } catch (err: any) {
-      setContractModalMsg({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل إرسال مسودة العقد.' : 'Failed to send contract draft.'),
-      });
-    } finally {
-      setIsSendingDraft(false);
-    }
-  };
-
-  const handleActivateContract = async () => {
-    if (!contractData) return;
-    setIsActivatingContract(true);
-    setContractModalMsg(null);
-    try {
-      await ContractService.activateContract(contractData.id);
-      setContractModalMsg({
-        type: 'success',
-        text: locale === 'ar' ? 'تم تفعيل العقد بنجاح وخصم الأسرة من الغرفة!' : 'Contract activated successfully!',
-      });
-      if (contractBooking) {
-        const updated = await ContractService.getContractByBooking(contractBooking.id);
-        setContractData(updated);
-      }
-      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
-    } catch (err: any) {
-      setContractModalMsg({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل تفعيل العقد.' : 'Failed to activate contract.'),
-      });
-    } finally {
-      setIsActivatingContract(false);
-    }
-  };
-
-  const handleCancelContract = async () => {
-    if (!contractData) return;
-    if (!window.confirm(locale === 'ar' ? 'هل أنت متأكد من رغبتك في إلغاء هذا العقد؟' : 'Are you sure you want to cancel this contract?')) return;
-    try {
-      await ContractService.cancelContract(contractData.id);
-      setContractModalMsg({
-        type: 'success',
-        text: locale === 'ar' ? 'تم إلغاء العقد وإعادة الأسرة للغرفة.' : 'Contract cancelled successfully.',
-      });
-      if (contractBooking) {
-        const updated = await ContractService.getContractByBooking(contractBooking.id);
-        setContractData(updated);
-      }
-      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
-    } catch (err: any) {
-      setContractModalMsg({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل إلغاء العقد.' : 'Failed to cancel contract.'),
-      });
-    }
-  };
 
   // Auto clear banner
   useEffect(() => {
@@ -273,9 +165,17 @@ export default function AdminBookingsPage() {
     setActionMessage(null);
     try {
       await AdminService.updateBookingStatus(bookingId, status, note);
+      const statusLabels: Record<string, string> = {
+        CONTACTED: locale === 'ar' ? 'تم التواصل' : 'Contacted',
+        CLOSED: locale === 'ar' ? 'مؤكد ومعتمد رسمياً' : 'Confirmed',
+        CANCELLED: locale === 'ar' ? 'ملغي' : 'Cancelled',
+      };
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? `تم تحديث حالة الحجز إلى "${status}" بنجاح.` : `Booking status updated to "${status}" successfully.`,
+        text:
+          locale === 'ar'
+            ? `✓ تم تحديث حالة الحجز إلى "${statusLabels[status] || status}" وإشعار مالك العقار بنجاح.`
+            : `✓ Booking status updated to "${statusLabels[status] || status}" and property owner notified.`,
       });
       queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
@@ -298,7 +198,7 @@ export default function AdminBookingsPage() {
       await AdminService.updateBookingStatus(cancelModalBookingId, 'CANCELLED', reason);
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? 'تم إلغاء الحجز بنجاح.' : 'Booking has been cancelled successfully.',
+        text: locale === 'ar' ? '✓ تم إلغاء الحجز وإشعار مالك العقار بنجاح.' : '✓ Booking cancelled and property owner notified.',
       });
       setCancelModalBookingId(null);
       setCancelReason('');
@@ -403,31 +303,79 @@ export default function AdminBookingsPage() {
         ))}
       </div>
 
-      {/* Filter Tabs */}
-      <div className="dary-card" style={{ marginBottom: '1.5rem', padding: '0.75rem 1.25rem' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-          <span style={{ fontWeight: 600, color: '#0B2A4A', fontSize: '0.9rem' }}>
-            {locale === 'ar' ? 'تصفية الحالة:' : 'Filter Status:'}
-          </span>
-          {['', 'CONFIRMED', 'PENDING', 'CONTACTED', 'CLOSED', 'CANCELLED'].map((st) => (
-            <button
-              key={st}
-              type="button"
-              onClick={() => setStatusFilter(st)}
-              style={{
-                padding: '0.4rem 0.85rem',
-                borderRadius: '6px',
-                border: 'none',
-                backgroundColor: statusFilter === st ? '#2F6BFF' : '#F1F5F9',
-                color: statusFilter === st ? '#FFFFFF' : '#475569',
-                fontWeight: statusFilter === st ? 700 : 500,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-              }}
-            >
-              {st === '' ? (locale === 'ar' ? 'الكل' : 'All') : st}
-            </button>
-          ))}
+      {/* Search & Filter Controls */}
+      <div className="dary-card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {/* Row 1: Search Box */}
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 320px' }}>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder={
+                  locale === 'ar'
+                    ? '🔍 بحث باسم الطالب، الهاتف، العقار، أو المالك...'
+                    : '🔍 Search student, phone, property, or owner...'
+                }
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#FFFFFF',
+                  fontSize: '0.875rem',
+                  color: '#0B2A4A',
+                  outline: 'none',
+                }}
+              />
+            </div>
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                style={{
+                  padding: '0.55rem 0.85rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  backgroundColor: '#F1F5F9',
+                  color: '#475569',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ {locale === 'ar' ? 'مسح البحث' : 'Clear'}
+              </button>
+            )}
+          </div>
+
+          {/* Row 2: Status Filter Tabs */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', borderTop: '1px solid #F1F5F9', paddingTop: '0.75rem' }}>
+            <span style={{ fontWeight: 700, color: '#0B2A4A', fontSize: '0.85rem', marginInlineEnd: '0.25rem' }}>
+              {locale === 'ar' ? 'تصفية الحالة:' : 'Filter Status:'}
+            </span>
+            {['', 'PENDING', 'CONTACTED', 'CONFIRMED', 'CLOSED', 'CANCELLED'].map((st) => (
+              <button
+                key={st}
+                type="button"
+                onClick={() => setStatusFilter(st)}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '6px',
+                  border: '1px solid',
+                  borderColor: statusFilter === st ? '#2F6BFF' : '#CBD5E1',
+                  backgroundColor: statusFilter === st ? '#2F6BFF' : '#FFFFFF',
+                  color: statusFilter === st ? '#FFFFFF' : '#475569',
+                  fontWeight: statusFilter === st ? 700 : 500,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {st === '' ? (locale === 'ar' ? 'الكل' : 'All') : st}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -470,170 +418,282 @@ export default function AdminBookingsPage() {
                 <thead>
                   <tr style={{ backgroundColor: '#F8FAFC', borderBottom: '1px solid #E2E8F0', color: '#475569', fontSize: '0.85rem' }}>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'معرف الحجز' : 'Booking ID'}</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المستأجر' : 'Tenant'}</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'العقار / الغرفة' : 'Property / Room'}</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المستأجر (الطالب)' : 'Tenant (Student)'}</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'العقار والمالك' : 'Property & Owner'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المدة المطلوبة' : 'Duration'}</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'الإيجار الشهري' : 'Rent / mo'}</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المبلغ الإجمالي' : 'Total / Rent'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'الحالة' : 'Status'}</th>
-                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'الإجراءات' : 'Actions'}</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'إجراءات الإدارة' : 'Admin Actions'}</th>
                   </tr>
                 </thead>
                 <tbody style={{ fontSize: '0.875rem' }}>
-                  {filteredBookings.map((b) => (
-                    <tr key={b.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                      <td style={{ padding: '0.85rem 1rem', fontFamily: 'monospace', fontWeight: 600, color: '#0B2A4A' }}>
-                        {b.id ? b.id.substring(0, 8) : '—'}...
-                      </td>
+                  {filteredBookings.map((b) => {
+                    const tenantName =
+                      b.tenant?.name ||
+                      `${b.tenant?.firstName || ''} ${b.tenant?.lastName || ''}`.trim() ||
+                      b.tenantId ||
+                      (locale === 'ar' ? 'طالب مستأجر' : 'Student Tenant');
+                    const tenantPhone = b.tenant?.whatsappPhone || b.tenant?.phone;
+                    const cleanTenantPhone = tenantPhone ? String(tenantPhone).replace(/[^0-9]/g, '') : null;
 
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <div style={{ fontWeight: 600, color: '#0B2A4A' }}>
-                          {b.tenant?.name || `${b.tenant?.firstName || ''} ${b.tenant?.lastName || ''}`.trim() || b.tenantId || '—'}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
-                          {b.tenant?.email || b.tenant?.phone || '—'}
-                        </div>
-                      </td>
+                    const propertyTitle = b.property?.title || (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
+                    const propertyCity = b.property?.city || b.property?.address || '';
+                    const roomInfo = b.room?.roomType ? `غرفة ${b.room.roomType}` : b.room?.type ? `غرفة ${b.room.type}` : '';
 
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <div style={{ fontWeight: 600, color: '#0B2A4A' }}>
-                          {b.property?.title || 'عقار جامعي'}
-                        </div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
-                          {b.room?.roomType ? `غرفة ${b.room.roomType}` : b.room?.type ? `غرفة ${b.room.type}` : b.property?.city || 'غرفة دراسية'}
-                        </div>
-                      </td>
+                    const ownerObj = (b.property as any)?.owner || (b as any).owner;
+                    const ownerName =
+                      ownerObj?.name ||
+                      ownerObj?.firstName ||
+                      (b.ownerId ? `${locale === 'ar' ? 'مالك' : 'Owner'} #${b.ownerId.slice(0, 6)}` : '—');
+                    const ownerPhone = ownerObj?.whatsappPhone || ownerObj?.phone;
+                    const cleanOwnerPhone = ownerPhone ? String(ownerPhone).replace(/[^0-9]/g, '') : null;
 
-                      <td style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem' }}>
-                        <div>{b.startDate || b.moveInDate ? new Date(b.startDate || b.moveInDate!).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}</div>
-                        <div style={{ color: '#94A3B8' }}>↓</div>
-                        <div>{b.endDate || b.moveOutDate ? new Date(b.endDate || b.moveOutDate!).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}</div>
-                      </td>
+                    const tenantWaText = encodeURIComponent(
+                      locale === 'ar'
+                        ? `مرحباً ${tenantName}، معك إدارة منصة داري بخصوص طلب حجزك لسكن (${propertyTitle}). نود استكمال ومتابعة إجراءات الحجز معك.`
+                        : `Hello ${tenantName}, this is Dary Administration regarding your booking request for (${propertyTitle}).`
+                    );
 
-                      <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: '#0B2A4A' }}>
-                        {b.totalPrice !== undefined
-                          ? `${b.totalPrice.toLocaleString()} ${revenueCurrency}`
-                          : (b.room?.pricePerBed || b.room?.monthlyRent)
-                          ? `${Number(
-                              b.room?.pricePerBed || b.room?.monthlyRent
-                            ).toLocaleString()} ${revenueCurrency}`
-                          : '—'}
-                      </td>
+                    const ownerWaText = encodeURIComponent(
+                      locale === 'ar'
+                        ? `مرحباً ${ownerName}، معك إدارة منصة داري. نود إبلاغك بوجود طلب حجز جديد على عقارك (${propertyTitle}) من الطالب (${tenantName})، ونقوم حالياً بمتابعة وتأكيد الحجز نيابة عنك.`
+                        : `Hello ${ownerName}, this is Dary Admin regarding a new booking on your property (${propertyTitle}) by (${tenantName}).`
+                    );
 
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <span
-                          style={{
-                            display: 'inline-block',
-                            padding: '0.25rem 0.6rem',
-                            borderRadius: '9999px',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            backgroundColor:
-                              b.status === 'CONFIRMED' || b.status === 'CLOSED'
-                                ? '#DCFCE7'
-                                : b.status === 'CONTACTED'
-                                ? '#E0F2FE'
-                                : b.status === 'PENDING'
-                                ? '#FEF9C3'
-                                : '#FEE2E2',
-                            color:
-                              b.status === 'CONFIRMED' || b.status === 'CLOSED'
-                                ? '#15803D'
-                                : b.status === 'CONTACTED'
-                                ? '#0369A1'
-                                : b.status === 'PENDING'
-                                ? '#A16207'
-                                : '#B91C1C',
-                          }}
-                        >
-                          {b.status || 'PENDING'}
-                        </span>
-                      </td>
+                    return (
+                      <tr key={b.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ padding: '0.85rem 1rem', fontFamily: 'monospace', fontWeight: 600, color: '#0B2A4A' }}>
+                          {b.id ? b.id.substring(0, 8) : '—'}...
+                        </td>
 
-                      <td style={{ padding: '0.85rem 1rem' }}>
-                        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                          <button
-                            type="button"
-                            onClick={() => openContractModal(b)}
+                        {/* Tenant Column */}
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <div style={{ fontWeight: 700, color: '#0B2A4A' }}>
+                            👤 {tenantName}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.15rem' }}>
+                            {b.tenant?.email || '—'}
+                          </div>
+                          {cleanTenantPhone && (
+                            <div style={{ marginTop: '0.35rem', display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                              <a
+                                href={`https://wa.me/${cleanTenantPhone}?text=${tenantWaText}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={locale === 'ar' ? 'مراسلة الطالب مباشرة عبر واتساب' : 'WhatsApp Student'}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  padding: '0.2rem 0.5rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#15803D',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 700,
+                                  textDecoration: 'none',
+                                  border: '1px solid #BBF7D0',
+                                }}
+                              >
+                                💬 {locale === 'ar' ? 'واتساب الطالب' : 'WhatsApp'}
+                              </a>
+                              <a
+                                href={`tel:${cleanTenantPhone}`}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  padding: '0.2rem 0.5rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#EFF6FF',
+                                  color: '#1D4ED8',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 600,
+                                  textDecoration: 'none',
+                                  border: '1px solid #DBEAFE',
+                                }}
+                              >
+                                📞 {tenantPhone}
+                              </a>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Property & Owner Column */}
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <div style={{ fontWeight: 700, color: '#0B2A4A' }}>
+                            🏢 {propertyTitle}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                            {roomInfo} {propertyCity ? `• ${propertyCity}` : ''}
+                          </div>
+                          {/* Owner Details */}
+                          <div
                             style={{
-                              padding: '0.3rem 0.6rem',
-                              borderRadius: '6px',
-                              border: '1px solid #6366F1',
-                              backgroundColor: '#EEF2FF',
-                              color: '#4F46E5',
+                              marginTop: '0.45rem',
+                              paddingTop: '0.35rem',
+                              borderTop: '1px dashed #E2E8F0',
                               fontSize: '0.75rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
                             }}
                           >
-                            📝 {locale === 'ar' ? 'العقد' : 'Contract'}
-                          </button>
+                            <span style={{ fontWeight: 700, color: '#475569' }}>
+                              🔑 {locale === 'ar' ? 'المالك:' : 'Owner:'} {ownerName}
+                            </span>
+                            {cleanOwnerPhone && (
+                              <div style={{ marginTop: '0.25rem', display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                                <a
+                                  href={`https://wa.me/${cleanOwnerPhone}?text=${ownerWaText}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  title={locale === 'ar' ? 'إشعار ومراسلة المالك عبر واتساب' : 'WhatsApp Owner'}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.2rem',
+                                    padding: '0.18rem 0.45rem',
+                                    borderRadius: '5px',
+                                    backgroundColor: '#EFF6FF',
+                                    color: '#2563EB',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    textDecoration: 'none',
+                                    border: '1px solid #BFDBFE',
+                                  }}
+                                >
+                                  💬 {locale === 'ar' ? 'واتساب المالك' : 'WhatsApp Owner'}
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        </td>
 
-                          {b.status === 'PENDING' && (
-                            <button
-                              type="button"
-                              disabled={actionLoading}
-                              onClick={() => handleUpdateStatus(b.id, 'CONTACTED', 'تم التواصل من الإدارة')}
-                              style={{
-                                padding: '0.3rem 0.6rem',
-                                borderRadius: '6px',
-                                border: '1px solid #0284C7',
-                                backgroundColor: '#E0F2FE',
-                                color: '#0369A1',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                cursor: actionLoading ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              📞 {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
-                            </button>
-                          )}
+                        {/* Stay Duration Column */}
+                        <td style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.8rem' }}>
+                          <div>{b.startDate || b.moveInDate ? new Date(b.startDate || b.moveInDate!).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}</div>
+                          <div style={{ color: '#94A3B8' }}>↓</div>
+                          <div>{b.endDate || b.moveOutDate ? new Date(b.endDate || b.moveOutDate!).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US') : '—'}</div>
+                        </td>
 
-                          {b.status === 'CONTACTED' && (
-                            <button
-                              type="button"
-                              disabled={actionLoading}
-                              onClick={() => handleUpdateStatus(b.id, 'CLOSED', 'تم إتمام وتأكيد الحجز')}
-                              style={{
-                                padding: '0.3rem 0.6rem',
-                                borderRadius: '6px',
-                                border: '1px solid #16A34A',
-                                backgroundColor: '#DCFCE7',
-                                color: '#15803D',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                cursor: actionLoading ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              ✓ {locale === 'ar' ? 'إتمام الحجز' : 'Close / Finish'}
-                            </button>
-                          )}
+                        {/* Price Column */}
+                        <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: '#0B2A4A' }}>
+                          {b.totalPrice !== undefined
+                            ? `${b.totalPrice.toLocaleString()} ${revenueCurrency}`
+                            : (b.room?.pricePerBed || b.room?.monthlyRent)
+                            ? `${Number(
+                                b.room?.pricePerBed || b.room?.monthlyRent
+                              ).toLocaleString()} ${revenueCurrency}`
+                            : '—'}
+                        </td>
 
-                          {(b.status === 'PENDING' || b.status === 'CONTACTED') && (
-                            <button
-                              type="button"
-                              disabled={actionLoading}
-                              onClick={() => {
-                                setCancelModalBookingId(b.id);
-                                setCancelReason('');
-                              }}
-                              style={{
-                                padding: '0.3rem 0.6rem',
-                                borderRadius: '6px',
-                                border: '1px solid #EF4444',
-                                backgroundColor: '#FEE2E2',
-                                color: '#B91C1C',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                cursor: actionLoading ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              ✕ {locale === 'ar' ? 'إلغاء' : 'Cancel'}
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        {/* Status Column */}
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <span
+                            style={{
+                              display: 'inline-block',
+                              padding: '0.25rem 0.65rem',
+                              borderRadius: '9999px',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              backgroundColor:
+                                b.status === 'CONFIRMED' || b.status === 'CLOSED'
+                                  ? '#DCFCE7'
+                                  : b.status === 'CONTACTED'
+                                  ? '#E0F2FE'
+                                  : b.status === 'PENDING'
+                                  ? '#FEF9C3'
+                                  : '#FEE2E2',
+                              color:
+                                b.status === 'CONFIRMED' || b.status === 'CLOSED'
+                                  ? '#15803D'
+                                  : b.status === 'CONTACTED'
+                                  ? '#0369A1'
+                                  : b.status === 'PENDING'
+                                  ? '#A16207'
+                                  : '#B91C1C',
+                            }}
+                          >
+                            {b.status === 'CLOSED' || b.status === 'CONFIRMED'
+                              ? (locale === 'ar' ? '✓ مؤكد ومعتمد' : 'Confirmed')
+                              : b.status === 'CONTACTED'
+                              ? (locale === 'ar' ? '📞 تم التواصل' : 'Contacted')
+                              : b.status === 'PENDING'
+                              ? (locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending')
+                              : (locale === 'ar' ? '✕ ملغي' : 'Cancelled')}
+                          </span>
+                        </td>
+
+                        {/* Actions Column */}
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+
+
+                            {b.status === 'PENDING' && (
+                              <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => handleUpdateStatus(b.id, 'CONTACTED', 'تم التواصل مع الطالب والمالك من قبل الإدارة')}
+                                style={{
+                                  padding: '0.35rem 0.65rem',
+                                  borderRadius: '6px',
+                                  border: '1px solid #0284C7',
+                                  backgroundColor: '#E0F2FE',
+                                  color: '#0369A1',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                📞 {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
+                              </button>
+                            )}
+
+                            {b.status === 'CONTACTED' && (
+                              <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => handleUpdateStatus(b.id, 'CLOSED', 'تم إتمام وتأكيد الحجز رسمياً')}
+                                style={{
+                                  padding: '0.35rem 0.65rem',
+                                  borderRadius: '6px',
+                                  border: '1px solid #16A34A',
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#15803D',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                ✓ {locale === 'ar' ? 'إتمام وتأكيد' : 'Close / Finish'}
+                              </button>
+                            )}
+
+                            {(b.status === 'PENDING' || b.status === 'CONTACTED') && (
+                              <button
+                                type="button"
+                                disabled={actionLoading}
+                                onClick={() => {
+                                  setCancelModalBookingId(b.id);
+                                  setCancelReason('');
+                                }}
+                                style={{
+                                  padding: '0.35rem 0.65rem',
+                                  borderRadius: '6px',
+                                  border: '1px solid #EF4444',
+                                  backgroundColor: '#FEE2E2',
+                                  color: '#B91C1C',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                ✕ {locale === 'ar' ? 'إلغاء' : 'Cancel'}
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -783,341 +843,7 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
-      {/* Digital Contract Modal for Admin */}
-      {contractBooking && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(15, 23, 42, 0.6)',
-            backdropFilter: 'blur(4px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 9999,
-            padding: '1rem',
-          }}
-        >
-          <div
-            style={{
-              backgroundColor: '#FFFFFF',
-              borderRadius: '16px',
-              padding: '2rem',
-              maxWidth: '650px',
-              width: '100%',
-              maxHeight: '90vh',
-              overflowY: 'auto',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
-              textAlign: locale === 'ar' ? 'right' : 'left',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.75rem' }}>
-              <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#0B2A4A', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span>📝</span>
-                <span>{locale === 'ar' ? 'العقد الإلكتروني للحجز' : 'Digital Contract'}</span>
-              </h3>
-              <button
-                type="button"
-                onClick={() => setContractBooking(null)}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  fontSize: '1.5rem',
-                  cursor: 'pointer',
-                  color: '#64748B',
-                }}
-              >
-                ×
-              </button>
-            </div>
 
-            {/* Contract Modal Message Banner */}
-            {contractModalMsg && (
-              <div
-                style={{
-                  marginBottom: '1rem',
-                  padding: '0.75rem 1rem',
-                  borderRadius: '8px',
-                  backgroundColor: contractModalMsg.type === 'success' ? '#DEF7EC' : '#FDE8E8',
-                  color: contractModalMsg.type === 'success' ? '#03543F' : '#9B1C1C',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                }}
-              >
-                {contractModalMsg.type === 'success' ? '✓ ' : '✕ '}{contractModalMsg.text}
-              </div>
-            )}
-
-            {/* Booking Summary Box */}
-            <div style={{ backgroundColor: '#F8FAFC', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem', fontSize: '0.875rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-                <div>
-                  <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'المستأجر:' : 'Tenant:'} </span>
-                  <strong>{contractBooking.tenant?.name || contractBooking.tenant?.firstName || '—'}</strong>
-                </div>
-                <div>
-                  <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'العقار:' : 'Property:'} </span>
-                  <strong>{contractBooking.property?.title || 'عقار جامعي'}</strong>
-                </div>
-                <div>
-                  <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'الحجز ID:' : 'Booking ID:'} </span>
-                  <span style={{ fontFamily: 'monospace' }}>{contractBooking.id.substring(0, 8)}...</span>
-                </div>
-              </div>
-            </div>
-
-            {loadingContract ? (
-              <div style={{ padding: '2.5rem', textAlign: 'center', color: '#64748B' }}>
-                {locale === 'ar' ? 'جاري جلب بيانات العقد...' : 'Loading contract details...'}
-              </div>
-            ) : !contractData ? (
-              <div style={{ textAlign: 'center', padding: '2rem 1rem', backgroundColor: '#F9FAFB', borderRadius: '12px', border: '1px dashed #CBD5E1' }}>
-                <p style={{ color: '#475569', marginBottom: '1.25rem' }}>
-                  {locale === 'ar'
-                    ? 'لم يتم إنشاء عقد إلكتروني لهذا الحجز بعد. يمكنك إنشاء مسودة الآن وتحديد الشروط.'
-                    : 'No digital contract exists for this booking yet. Create a draft to proceed.'}
-                </p>
-                <button
-                  type="button"
-                  disabled={isCreatingContract}
-                  onClick={handleCreateContract}
-                  style={{
-                    padding: '0.65rem 1.5rem',
-                    borderRadius: '8px',
-                    backgroundColor: '#2F6BFF',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    fontWeight: 700,
-                    cursor: isCreatingContract ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {isCreatingContract
-                    ? (locale === 'ar' ? 'جاري الإنشاء...' : 'Creating...')
-                    : (locale === 'ar' ? '📄 إنشاء مسودة العقد (Draft)' : '📄 Create Contract Draft')}
-                </button>
-              </div>
-            ) : (
-              <div>
-                {/* Contract Status Banner */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', padding: '0.75rem 1rem', backgroundColor: '#EEF2FF', borderRadius: '8px' }}>
-                  <span style={{ fontWeight: 600, color: '#3730A3', fontSize: '0.9rem' }}>
-                    {locale === 'ar' ? 'حالة العقد:' : 'Contract Status:'}
-                  </span>
-                  <span
-                    style={{
-                      padding: '0.3rem 0.8rem',
-                      borderRadius: '9999px',
-                      fontSize: '0.8rem',
-                      fontWeight: 700,
-                      backgroundColor:
-                        contractData.status === 'ACTIVE'
-                          ? '#DCFCE7'
-                          : contractData.status === 'SIGNED'
-                          ? '#E0E7FF'
-                          : contractData.status === 'SENT'
-                          ? '#E0F2FE'
-                          : contractData.status === 'DRAFT'
-                          ? '#FEF9C3'
-                          : '#FEE2E2',
-                      color:
-                        contractData.status === 'ACTIVE'
-                          ? '#15803D'
-                          : contractData.status === 'SIGNED'
-                          ? '#4338CA'
-                          : contractData.status === 'SENT'
-                          ? '#0369A1'
-                          : contractData.status === 'DRAFT'
-                          ? '#A16207'
-                          : '#B91C1C',
-                    }}
-                  >
-                    {contractData.status}
-                  </span>
-                </div>
-
-                {/* Draft PDF Upload & View */}
-                <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '1rem', marginBottom: '1.25rem' }}>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0B2A4A', marginBottom: '0.75rem' }}>
-                    {locale === 'ar' ? '1. مسودة العقد (Draft PDF)' : '1. Contract Draft (PDF)'}
-                  </h4>
-                  {contractData.contractUrl ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                      <a
-                        href={contractData.contractUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          color: '#2F6BFF',
-                          textDecoration: 'underline',
-                          fontWeight: 600,
-                          fontSize: '0.875rem',
-                        }}
-                      >
-                        📄 {locale === 'ar' ? 'عرض / تحميل ملف المسودة المرفوع' : 'View / Download Uploaded Draft'}
-                      </a>
-                    </div>
-                  ) : (
-                    <p style={{ fontSize: '0.85rem', color: '#94A3B8', marginBottom: '0.75rem' }}>
-                      {locale === 'ar' ? 'لم يتم رفع ملف المسودة بعد.' : 'No draft PDF uploaded yet.'}
-                    </p>
-                  )}
-
-                  {/* Upload new / updated draft */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-                    <input
-                      type="file"
-                      accept="application/pdf"
-                      onChange={(e) => setDraftPdfFile(e.target.files?.[0] || null)}
-                      style={{ fontSize: '0.85rem' }}
-                    />
-                    <button
-                      type="button"
-                      disabled={!draftPdfFile || isSendingDraft}
-                      onClick={handleSendDraft}
-                      style={{
-                        padding: '0.45rem 1rem',
-                        borderRadius: '6px',
-                        backgroundColor: !draftPdfFile || isSendingDraft ? '#CBD5E1' : '#2F6BFF',
-                        color: '#FFFFFF',
-                        border: 'none',
-                        fontWeight: 600,
-                        fontSize: '0.85rem',
-                        cursor: !draftPdfFile || isSendingDraft ? 'not-allowed' : 'pointer',
-                      }}
-                    >
-                      {isSendingDraft
-                        ? (locale === 'ar' ? 'جاري الإرسال...' : 'Sending...')
-                        : (locale === 'ar' ? '📤 إرسال المسودة للأطراف للتوقيع' : '📤 Send Draft for Signatures')}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Signatures Progress */}
-                <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '1rem', marginBottom: '1.25rem' }}>
-                  <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0B2A4A', marginBottom: '0.75rem' }}>
-                    {locale === 'ar' ? '2. توقيعات الأطراف' : '2. Signatures Status'}
-                  </h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                    {/* Tenant Status */}
-                    <div style={{ padding: '0.85rem', borderRadius: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                      <div style={{ fontWeight: 700, color: '#0B2A4A', marginBottom: '0.4rem', fontSize: '0.875rem' }}>
-                        {locale === 'ar' ? 'المستأجر (Tenant)' : 'Tenant'}
-                      </div>
-                      <div style={{ fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                        {contractData.tenantSigned ? (
-                          <span style={{ color: '#15803D', fontWeight: 600 }}>✅ {locale === 'ar' ? 'قام بالتوقيع' : 'Signed'}</span>
-                        ) : (
-                          <span style={{ color: '#A16207', fontWeight: 600 }}>⏳ {locale === 'ar' ? 'بانتظار التوقيع' : 'Pending'}</span>
-                        )}
-                      </div>
-                      {contractData.tenantSignedPdfUrl && (
-                        <a
-                          href={contractData.tenantSignedPdfUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: '#2F6BFF', fontSize: '0.8rem', textDecoration: 'underline' }}
-                        >
-                          📄 {locale === 'ar' ? 'عرض توقيع المستأجر' : 'View signed copy'}
-                        </a>
-                      )}
-                    </div>
-
-                    {/* Owner Status */}
-                    <div style={{ padding: '0.85rem', borderRadius: '8px', backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
-                      <div style={{ fontWeight: 700, color: '#0B2A4A', marginBottom: '0.4rem', fontSize: '0.875rem' }}>
-                        {locale === 'ar' ? 'المالك (Owner)' : 'Owner'}
-                      </div>
-                      <div style={{ fontSize: '0.85rem', marginBottom: '0.35rem' }}>
-                        {contractData.ownerSigned ? (
-                          <span style={{ color: '#15803D', fontWeight: 600 }}>✅ {locale === 'ar' ? 'قام بالتوقيع' : 'Signed'}</span>
-                        ) : (
-                          <span style={{ color: '#A16207', fontWeight: 600 }}>⏳ {locale === 'ar' ? 'بانتظار التوقيع' : 'Pending'}</span>
-                        )}
-                      </div>
-                      {contractData.ownerSignedPdfUrl && (
-                        <a
-                          href={contractData.ownerSignedPdfUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ color: '#2F6BFF', fontSize: '0.8rem', textDecoration: 'underline' }}
-                        >
-                          📄 {locale === 'ar' ? 'عرض توقيع المالك' : 'View signed copy'}
-                        </a>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Final Admin Action Buttons */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', justifyContent: 'flex-end', paddingTop: '0.5rem' }}>
-                  {contractData.status !== 'ACTIVE' && contractData.status !== 'CANCELLED' && (
-                    <button
-                      type="button"
-                      disabled={isActivatingContract || (!contractData.tenantSigned && !contractData.ownerSigned)}
-                      onClick={handleActivateContract}
-                      title={!contractData.tenantSigned || !contractData.ownerSigned ? 'يتطلب توقيع الطرفين أولاً' : ''}
-                      style={{
-                        padding: '0.6rem 1.25rem',
-                        borderRadius: '8px',
-                        border: 'none',
-                        backgroundColor: '#16A34A',
-                        color: '#FFFFFF',
-                        fontWeight: 700,
-                        fontSize: '0.875rem',
-                        cursor: isActivatingContract ? 'not-allowed' : 'pointer',
-                        opacity: (!contractData.tenantSigned || !contractData.ownerSigned) ? 0.6 : 1,
-                      }}
-                    >
-                      {isActivatingContract
-                        ? (locale === 'ar' ? 'جاري التفعيل...' : 'Activating...')
-                        : (locale === 'ar' ? '🚀 تفعيل العقد رسمياً (خصم السرير)' : '🚀 Activate Contract')}
-                    </button>
-                  )}
-
-                  {contractData.status !== 'CANCELLED' && (
-                    <button
-                      type="button"
-                      onClick={handleCancelContract}
-                      style={{
-                        padding: '0.6rem 1.25rem',
-                        borderRadius: '8px',
-                        border: '1px solid #EF4444',
-                        backgroundColor: '#FEE2E2',
-                        color: '#B91C1C',
-                        fontWeight: 700,
-                        fontSize: '0.875rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ✕ {locale === 'ar' ? 'إلغاء العقد وإتاحة السرير' : 'Cancel Contract'}
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => setContractBooking(null)}
-                    style={{
-                      padding: '0.6rem 1.25rem',
-                      borderRadius: '8px',
-                      border: '1px solid #CBD5E1',
-                      backgroundColor: '#FFFFFF',
-                      color: '#475569',
-                      fontWeight: 600,
-                      fontSize: '0.875rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {locale === 'ar' ? 'إغلاق' : 'Close'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

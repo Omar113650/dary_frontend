@@ -410,8 +410,42 @@ export default function AdminPropertiesPage() {
                         </td>
 
                         <td style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.85rem' }}>
-                          <div>{p.owner?.name || p.ownerId || '—'}</div>
-                          {p.owner?.email && <div style={{ fontSize: '0.78rem', color: '#94A3B8' }}>{p.owner.email}</div>}
+                          <div style={{ fontWeight: 700, color: '#0B2A4A' }}>
+                            👤 {p.owner?.name || (p.ownerId ? `${locale === 'ar' ? 'المالك' : 'Owner'} #${p.ownerId.slice(0, 6)}` : '—')}
+                          </div>
+                          {p.owner?.email && <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.15rem' }}>{p.owner.email}</div>}
+                          {(p.owner?.phone || (p.owner as any)?.whatsappPhone) && (
+                            <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                              <a
+                                href={`https://wa.me/${String(p.owner.phone || (p.owner as any).whatsappPhone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                                  locale === 'ar'
+                                    ? `مرحباً ${p.owner?.name || ''}، معك إدارة منصة داري بخصوص مراجعة عقارك المسجل (${p.title}).`
+                                    : `Hello ${p.owner?.name || ''}, this is Dary Admin regarding your property listing (${p.title}).`
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={locale === 'ar' ? 'مراسلة المالك عبر واتساب' : 'WhatsApp Owner'}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.2rem',
+                                  padding: '0.18rem 0.45rem',
+                                  borderRadius: '5px',
+                                  backgroundColor: '#DCFCE7',
+                                  color: '#15803D',
+                                  fontSize: '0.7rem',
+                                  fontWeight: 700,
+                                  textDecoration: 'none',
+                                  border: '1px solid #BBF7D0',
+                                }}
+                              >
+                                💬 {locale === 'ar' ? 'واتساب المالك' : 'WhatsApp'}
+                              </a>
+                              <span style={{ fontSize: '0.7rem', color: '#64748B' }}>
+                                {p.owner.phone || (p.owner as any).whatsappPhone}
+                              </span>
+                            </div>
+                          )}
                         </td>
 
                         <td style={{ padding: '0.85rem 1rem', color: '#475569', fontSize: '0.85rem' }}>

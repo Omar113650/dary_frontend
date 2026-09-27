@@ -1,6 +1,8 @@
 import { NavLink, Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
+import { hasAdminModuleAccess, getAdminAssignedModules, ADMIN_ROLE_PRESETS } from '../../utils/adminPermissions';
+import type { AdminModule } from '../../utils/adminPermissions';
 import logo from '../../assets/branding/FINAL-LOGO1.png';
 
 interface AdminDashboardSidebarProps {
@@ -15,14 +17,21 @@ export default function AdminDashboardSidebar({
   onCloseMobile,
 }: AdminDashboardSidebarProps) {
   const navigate = useNavigate();
-  const { user, logout, role } = useAuth();
+  const { user, logout, role, isSuperAdmin } = useAuth();
   const { t, locale } = useLocale();
 
-  const navItems = [
+  const allNavItems: Array<{
+    to: string;
+    end?: boolean;
+    label: string;
+    module: AdminModule;
+    icon: React.ReactNode;
+  }> = [
     {
       to: basePath,
       end: true,
       label: locale === 'ar' ? 'نظرة عامة' : 'Overview',
+      module: 'overview',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="3" width="7" height="7" rx="1" />
@@ -33,8 +42,63 @@ export default function AdminDashboardSidebar({
       ),
     },
     {
+      to: `${basePath}/properties`,
+      label: locale === 'ar' ? 'معاينة واعتماد العقارات' : 'Properties & Inspection',
+      module: 'properties',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+          <polyline points="9 22 9 12 15 12 15 22" />
+        </svg>
+      ),
+    },
+    {
+      to: `${basePath}/tickets`,
+      label: locale === 'ar' ? 'تذاكر الدعم والمساعدة' : 'Support Tickets',
+      module: 'tickets',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      ),
+    },
+    {
+      to: `${basePath}/bookings`,
+      label: locale === 'ar' ? 'الحجوزات والعقود' : 'Bookings & Contracts',
+      module: 'bookings',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+        </svg>
+      ),
+    },
+    {
+      to: `${basePath}/reports`,
+      label: locale === 'ar' ? 'البلاغات والشكاوى' : 'Reports & Complaints',
+      module: 'reports',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      ),
+    },
+    {
+      to: `${basePath}/reviews`,
+      label: locale === 'ar' ? 'التقييمات والمراجعات' : 'Reviews & Ratings',
+      module: 'reviews',
+      icon: (
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+        </svg>
+      ),
+    },
+    {
       to: `${basePath}/users`,
-      label: locale === 'ar' ? 'المستخدمين' : 'Users',
+      label: locale === 'ar' ? 'المستخدمين والصلاحيات' : 'Users & Roles',
+      module: 'users',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -45,57 +109,9 @@ export default function AdminDashboardSidebar({
       ),
     },
     {
-      to: `${basePath}/properties`,
-      label: locale === 'ar' ? 'العقارات' : 'Properties',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-          <polyline points="9 22 9 12 15 12 15 22" />
-        </svg>
-      ),
-    },
-    {
-      to: `${basePath}/bookings`,
-      label: locale === 'ar' ? 'الحجوزات' : 'Bookings',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-        </svg>
-      ),
-    },
-    {
-      to: `${basePath}/reports`,
-      label: locale === 'ar' ? 'البلاغات والشكاوى' : 'Reports',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-          <line x1="12" y1="9" x2="12" y2="13" />
-          <line x1="12" y1="17" x2="12.01" y2="17" />
-        </svg>
-      ),
-    },
-    {
-      to: `${basePath}/tickets`,
-      label: locale === 'ar' ? 'تذاكر الدعم والمساعدة' : 'Support Tickets',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
-      ),
-    },
-    {
-      to: `${basePath}/reviews`,
-      label: locale === 'ar' ? 'التقييمات والمراجعات' : 'Reviews & Ratings',
-      icon: (
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-        </svg>
-      ),
-    },
-    {
       to: `${basePath}/analytics`,
-      label: locale === 'ar' ? 'التحليلات' : 'Analytics',
+      label: locale === 'ar' ? 'التحليلات ومؤشرات الأداء' : 'Analytics & Revenue',
+      module: 'analytics',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <line x1="18" y1="20" x2="18" y2="10" />
@@ -107,6 +123,7 @@ export default function AdminDashboardSidebar({
     {
       to: `${basePath}/calendar`,
       label: locale === 'ar' ? 'تقويم الإشغال' : 'Calendar',
+      module: 'calendar',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
@@ -119,6 +136,7 @@ export default function AdminDashboardSidebar({
     {
       to: `${basePath}/notifications`,
       label: locale === 'ar' ? 'الإشعارات' : 'Notifications',
+      module: 'notifications',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -129,6 +147,7 @@ export default function AdminDashboardSidebar({
     {
       to: `${basePath}/profile`,
       label: locale === 'ar' ? 'الملف الشخصي' : 'Profile',
+      module: 'profile',
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
@@ -138,14 +157,34 @@ export default function AdminDashboardSidebar({
     },
   ];
 
+  // Dynamically filter navigation items based on assigned modules!
+  const navItems = allNavItems.filter((item) => {
+    if (isSuperAdmin) return true;
+    return hasAdminModuleAccess(user, item.module);
+  });
+
   const displayName = user?.firstName
     ? `${user.firstName} ${user.lastName || ''}`.trim()
     : (user?.name || user?.email?.split('@')[0] || (locale === 'ar' ? 'مدير النظام' : 'Administrator'));
   const avatarLetter = (displayName[0] || 'A').toUpperCase();
 
-  const roleLabel = role === 'super_admin'
-    ? (locale === 'ar' ? 'المدير العام (Super Admin)' : 'Super Admin')
-    : (locale === 'ar' ? 'مدير النظام (Admin)' : 'System Admin');
+  // Dynamic role title
+  let roleLabel = locale === 'ar' ? 'مدير النظام' : 'System Admin';
+  if (isSuperAdmin) {
+    roleLabel = locale === 'ar' ? '👑 المدير العام (Super Admin)' : '👑 Super Admin';
+  } else {
+    const assigned = getAdminAssignedModules(user);
+    const matchingPreset = ADMIN_ROLE_PRESETS.find(
+      (p) => p.modules.length === assigned.length && p.modules.every((m) => assigned.includes(m))
+    );
+    if (matchingPreset) {
+      roleLabel = locale === 'ar' ? matchingPreset.nameAr : matchingPreset.nameEn;
+    } else if (assigned.length === 1) {
+      if (assigned[0] === 'properties') roleLabel = locale === 'ar' ? 'مشرف معاينة السكنات' : 'Inspection Specialist';
+      if (assigned[0] === 'tickets') roleLabel = locale === 'ar' ? 'مشرف الدعم الفني' : 'Support Specialist';
+      if (assigned[0] === 'bookings') roleLabel = locale === 'ar' ? 'مشرف الحجوزات' : 'Bookings Admin';
+    }
+  }
 
   return (
     <aside className={`dary-sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
