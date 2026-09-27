@@ -87,9 +87,9 @@ export default function AdminBookingsPage() {
   // On-demand fetch for any property not yet in map
   useEffect(() => {
     if (!bookings || bookings.length === 0) return;
-    const missingIds = bookings
-      .map((b: any) => b.propertyId || b.property?.id)
-      .filter((id: string) => id && !propertiesMap[id]);
+    const missingIds: string[] = bookings
+      .map((b: any) => (b.propertyId || b.property?.id) as string | undefined)
+      .filter((id): id is string => Boolean(id) && !propertiesMap[id!]);
 
     if (missingIds.length > 0) {
       Promise.allSettled(
@@ -588,27 +588,32 @@ export default function AdminBookingsPage() {
                     const tenantPhone = b.tenant?.whatsappPhone || b.tenant?.phone;
                     const cleanTenantPhone = tenantPhone ? String(tenantPhone).replace(/[^0-9]/g, '') : null;
 
-                    const linkedProp = propertiesMap[b.propertyId] || propertiesMap[b.property?.id] || b.property || {};
-                    const propertyTitle =
-                      (typeof linkedProp.title === 'object' ? (linkedProp.title[locale] || linkedProp.title.ar || linkedProp.title.en) : linkedProp.title) ||
-                      (typeof b.property?.title === 'object' ? (b.property.title[locale] || b.property.title.ar || b.property.title.en) : b.property?.title) ||
-                      (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
+                    const propId = b.propertyId || b.property?.id;
+                    const linkedProp: any = (propId && propertiesMap[propId]) ? propertiesMap[propId] : (b.property || {});
+                    const rawPropTitle: any = linkedProp.title ?? b.property?.title;
+                    const propertyTitle: string =
+                      typeof rawPropTitle === 'object' && rawPropTitle !== null
+                        ? (rawPropTitle[locale] || rawPropTitle.ar || rawPropTitle.en || '')
+                        : typeof rawPropTitle === 'string'
+                        ? rawPropTitle
+                        : (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
                     const propertyCity = linkedProp.city || b.property?.city || linkedProp.address || b.property?.address || '';
                     const roomInfo = b.room?.roomType ? `غرفة ${b.room.roomType}` : b.room?.type ? `غرفة ${b.room.type}` : '';
 
-                    const ownerId =
-                      linkedProp.ownerId ||
-                      linkedProp.userId ||
+                    const ownerId: string | null =
+                      (typeof linkedProp.ownerId === 'string' ? linkedProp.ownerId : null) ||
+                      (typeof linkedProp.userId === 'string' ? linkedProp.userId : null) ||
                       (typeof linkedProp.owner === 'string' ? linkedProp.owner : null) ||
-                      (typeof linkedProp.owner === 'object' ? linkedProp.owner?.id : null) ||
-                      b.ownerId ||
-                      b.property?.ownerId ||
-                      b.property?.userId ||
-                      (typeof b.property?.owner === 'string' ? b.property.owner : null) ||
-                      (typeof b.property?.owner === 'object' ? b.property.owner?.id : null) ||
-                      b.room?.property?.ownerId;
+                      (typeof linkedProp.owner === 'object' && linkedProp.owner?.id ? String(linkedProp.owner.id) : null) ||
+                      (typeof b.ownerId === 'string' ? b.ownerId : null) ||
+                      (typeof b.property?.ownerId === 'string' ? (b.property as any).ownerId : null) ||
+                      (typeof (b.property as any)?.userId === 'string' ? (b.property as any).userId : null) ||
+                      (typeof (b.property as any)?.owner === 'string' ? (b.property as any).owner : null) ||
+                      (typeof (b.property as any)?.owner === 'object' && (b.property as any)?.owner?.id ? String((b.property as any).owner.id) : null) ||
+                      (typeof (b.room as any)?.property?.ownerId === 'string' ? (b.room as any).property.ownerId : null) ||
+                      null;
 
-                    const matchedUser = ownerId ? usersMap[ownerId] : null;
+                    const matchedUser: any = ownerId ? usersMap[ownerId] : null;
 
                     const ownerObj =
                       (typeof linkedProp.owner === 'object' && linkedProp.owner !== null ? linkedProp.owner : null) ||

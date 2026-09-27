@@ -205,7 +205,11 @@ export default function BookingDetailsModal({
   const tenantPhone = booking?.tenant?.whatsappPhone || booking?.tenant?.phone;
   const cleanTenantPhone = tenantPhone ? String(tenantPhone).replace(/[^0-9]/g, '') : null;
 
-  const propertyTitle = booking?.property?.title || (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
+  const rawPropTitle: any = booking?.property?.title;
+  const propertyTitle =
+    typeof rawPropTitle === 'object' && rawPropTitle !== null
+      ? (rawPropTitle[locale] || rawPropTitle.ar || rawPropTitle.en || '')
+      : (typeof rawPropTitle === 'string' ? rawPropTitle : (locale === 'ar' ? 'سكن جامعي' : 'Student Housing'));
   const propertyCity = booking?.property?.city || '';
   const propertyDistrict = booking?.property?.district || '';
   const propertyAddress = booking?.property?.address || '';
