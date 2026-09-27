@@ -282,8 +282,6 @@ export default function OwnerBookingsPage() {
     );
   }
 
-  const selectedPropertyObj = properties.find((p) => p.id === selectedPropId);
-
   return (
     <div>
       {/* Tabs navigation banner to switch effortlessly between incoming & personal bookings */}

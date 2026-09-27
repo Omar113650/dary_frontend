@@ -367,6 +367,7 @@ export default function AdminPropertiesPage() {
                           ? p.images[0]
                           : p.images[0]?.url
                         : null;
+                    const ownerPhone = p.owner?.phone || (p.owner as any)?.whatsappPhone;
 
                     return (
                       <tr key={p.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -414,10 +415,10 @@ export default function AdminPropertiesPage() {
                             👤 {p.owner?.name || (p.ownerId ? `${locale === 'ar' ? 'المالك' : 'Owner'} #${p.ownerId.slice(0, 6)}` : '—')}
                           </div>
                           {p.owner?.email && <div style={{ fontSize: '0.75rem', color: '#64748B', marginTop: '0.15rem' }}>{p.owner.email}</div>}
-                          {(p.owner?.phone || (p.owner as any)?.whatsappPhone) && (
+                          {ownerPhone && (
                             <div style={{ marginTop: '0.3rem', display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                               <a
-                                href={`https://wa.me/${String(p.owner.phone || (p.owner as any).whatsappPhone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
+                                href={`https://wa.me/${String(ownerPhone).replace(/[^0-9]/g, '')}?text=${encodeURIComponent(
                                   locale === 'ar'
                                     ? `مرحباً ${p.owner?.name || ''}، معك إدارة منصة داري بخصوص مراجعة عقارك المسجل (${p.title}).`
                                     : `Hello ${p.owner?.name || ''}, this is Dary Admin regarding your property listing (${p.title}).`
@@ -442,7 +443,7 @@ export default function AdminPropertiesPage() {
                                 💬 {locale === 'ar' ? 'واتساب المالك' : 'WhatsApp'}
                               </a>
                               <span style={{ fontSize: '0.7rem', color: '#64748B' }}>
-                                {p.owner.phone || (p.owner as any).whatsappPhone}
+                                {ownerPhone}
                               </span>
                             </div>
                           )}

@@ -1654,7 +1654,13 @@ export default function AdminUsersPage() {
                   >
                     <option value="">{locale === 'ar' ? '-- اختر مستخدماً من القائمة --' : '-- Choose a user --'}</option>
                     {users.map((u) => {
-                      const isAdm = u.roles?.some((r) => r.name === 'admin' || r.name === 'super_admin');
+                      const isAdm =
+                        u.role === 'admin' ||
+                        u.role === 'super_admin' ||
+                        u.roles?.some((r: any) => {
+                          const roleName = typeof r === 'string' ? r : r?.name || r?.role?.name;
+                          return roleName === 'admin' || roleName === 'super_admin';
+                        });
                       return (
                         <option key={u.id} value={u.id}>
                           {u.name || (locale === 'ar' ? 'مستخدم بدون اسم' : 'User')} — {u.email} ({isAdm ? (locale === 'ar' ? 'مسؤول حالي' : 'Current Admin') : (locale === 'ar' ? 'مستخدم عادي' : 'Regular User')}) {u.isVerified ? '✅' : '⏳'}
