@@ -561,13 +561,20 @@ export default function AdminPropertiesPage() {
                 </thead>
                 <tbody>
                   {filteredProperties.map((p) => {
-                    const primaryImg =
-                      p.primaryImage ||
-                      (Array.isArray(p.images) && p.images.length > 0
-                        ? (p.images.find((img: any) => img?.isPrimary)?.url ||
-                           (typeof p.images[0] === 'string' ? p.images[0] : p.images[0]?.url))
-                        : null) ||
-                      (Array.isArray(p.rooms_) && p.rooms_[0]?.photoUrl ? p.rooms_[0].photoUrl : null);
+                    const primaryImg = (() => {
+                      if (p.primaryImage) return p.primaryImage;
+                      if (Array.isArray(p.images) && p.images.length > 0) {
+                        const found = (p.images as any[]).find((img: any) => typeof img === 'object' && img?.isPrimary);
+                        if (found && typeof found === 'object' && found.url) return found.url as string;
+                        const first = p.images[0] as any;
+                        if (typeof first === 'string') return first;
+                        if (first && typeof first === 'object' && first.url) return first.url as string;
+                      }
+                      if (Array.isArray(p.rooms_) && p.rooms_[0]?.photoUrl) {
+                        return p.rooms_[0].photoUrl as string;
+                      }
+                      return null;
+                    })();
 
                     const ownerFullName =
                       [p.owner?.firstName, p.owner?.lastName].filter(Boolean).join(' ').trim() ||
