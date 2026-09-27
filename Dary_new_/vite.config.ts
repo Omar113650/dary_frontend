@@ -7,9 +7,39 @@ export default defineConfig({
   server: {
     proxy: {
       '/api/v1': {
-        target: 'http://localhost:8003',
+        target: 'https://dary-gold.vercel.app/',
         changeOrigin: true,
       },
     },
   },
 })
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// import react from '@vitejs/plugin-react'
+// import { defineConfig } from 'vite'
+
+// // https://vite.dev/config/
+// export default defineConfig({
+//   plugins: [react()],
+//   server: {
+//     proxy: {
+//       '/api/v1': {
+//         target: 'http://localhost:8003',
+//         changeOrigin: true,
+//       },
+//     },
+//   },
+// })
