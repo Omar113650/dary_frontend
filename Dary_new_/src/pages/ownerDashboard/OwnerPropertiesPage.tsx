@@ -7,6 +7,7 @@ import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
 import Pagination from '../../components/common/Pagination';
+import ImageManagerModal from '../../components/ownerDashboard/ImageManagerModal';
 
 export default function OwnerPropertiesPage() {
   const { locale } = useLocale();
@@ -24,6 +25,9 @@ export default function OwnerPropertiesPage() {
   // Manage Rooms state
   const [manageRoomsProperty, setManageRoomsProperty] = useState<OwnerPropertyItem | null>(null);
   const [roomsList, setRoomsList] = useState<any[]>([]);
+
+  // Image Manager state
+  const [imageManagerProperty, setImageManagerProperty] = useState<OwnerPropertyItem | null>(null);
   const [newRoomType, setNewRoomType] = useState<'SINGLE' | 'DOUBLE' | 'TRIPLE' | 'QUAD'>('SINGLE');
   const [newPricePerBed, setNewPricePerBed] = useState<number>(2000);
   const [newTotalBeds, setNewTotalBeds] = useState<number>(1);
@@ -204,22 +208,19 @@ export default function OwnerPropertiesPage() {
     setIsAddingRoom(true);
     setRoomModalMessage(null);
     try {
-      const payload = {
-        roomType: newRoomType,
-        pricePerBed: Number(newPricePerBed),
-        totalBeds: Number(newTotalBeds),
-        availableBeds: Number(newAvailableBeds),
-      };
-      const res = await propertyService.addRoom(manageRoomsProperty.id, payload);
-      const createdRoom = res?.room || res;
-
-      if (newRoomPhoto && createdRoom?.id) {
-        try {
-          await propertyService.updateRoomPhoto(createdRoom.id, newRoomPhoto);
-        } catch (photoErr) {
-          console.error('Failed to upload room photo:', photoErr);
-        }
+      // Always send as FormData so the backend receives the photo in the same request.
+      // The backend requires the photo to be present (roomPhotoRequired validation).
+      const formData = new FormData();
+      formData.append('roomType', newRoomType);
+      formData.append('pricePerBed', String(Number(newPricePerBed)));
+      formData.append('totalBeds', String(Number(newTotalBeds)));
+      formData.append('availableBeds', String(Number(newAvailableBeds)));
+      if (newRoomPhoto) {
+        formData.append('photo', newRoomPhoto);
       }
+
+      const res = await propertyService.addRoom(manageRoomsProperty.id, formData);
+      const createdRoom = res?.room || res?.data?.room || res?.data || res;
 
       setRoomModalMessage({
         type: 'success',
@@ -227,6 +228,11 @@ export default function OwnerPropertiesPage() {
       });
       setRoomsList((prev) => [...prev, createdRoom]);
       setNewRoomPhoto(null);
+      // Reset form to defaults
+      setNewRoomType('SINGLE');
+      setNewPricePerBed(2000);
+      setNewTotalBeds(1);
+      setNewAvailableBeds(1);
       queryClient.invalidateQueries({ queryKey: ['owner', 'my-properties'] });
       fetchProperties();
     } catch (err: any) {
@@ -625,6 +631,46 @@ export default function OwnerPropertiesPage() {
                         >
                           🛏️ {locale === 'ar' ? 'الغرف' : 'Rooms'}
                         </button>
+
+                        {/* Image Manager */}
+                        <button
+                          type="button"
+                          onClick={() => setImageManagerProperty(property)}
+                          title={locale === 'ar' ? 'إدارة صور العقار' : 'Manage property images'}
+                          style={{
+                            padding: '0.35rem 0.65rem',
+                            borderRadius: '6px',
+                            border: '1px solid #A78BFA',
+                            backgroundColor: '#F5F3FF',
+                            color: '#7C3AED',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🖼️ {locale === 'ar' ? 'الصور' : 'Images'}
+                        </button>
+
+                        {/* Edit Property */}
+                        <Link
+                          to={`/owner-dashboard/properties/${property.id}/edit`}
+                          title={locale === 'ar' ? 'تعديل بيانات العقار' : 'Edit property details'}
+                          style={{
+                            padding: '0.35rem 0.65rem',
+                            borderRadius: '6px',
+                            border: '1px solid #FCD34D',
+                            backgroundColor: '#FFFBEB',
+                            color: '#92400E',
+                            fontSize: '0.75rem',
+                            fontWeight: 700,
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                          }}
+                        >
+                          ✏️ {locale === 'ar' ? 'تعديل' : 'Edit'}
+                        </Link>
 
                         {/* View Listing */}
                         <Link
@@ -1085,6 +1131,15 @@ export default function OwnerPropertiesPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Image Manager Modal ───────────────────────────────────────────── */}
+      {imageManagerProperty && (
+        <ImageManagerModal
+          propertyId={imageManagerProperty.id}
+          propertyTitle={String(imageManagerProperty.title || '')}
+          onClose={() => setImageManagerProperty(null)}
+        />
       )}
     </div>
   );

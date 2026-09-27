@@ -6,6 +6,9 @@ import AnimatedCounter from '../../components/common/AnimatedCounter';
 import Pagination from '../../components/common/Pagination';
 import { useAdminBookingsStatus, useAdminRevenue } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import BookingDetailsModal from '../../components/common/BookingDetailsModal';
+import { BookingService } from '../../services/bookingService';
+import { propertyService } from '../../services/propertyService';
 
 export default function AdminBookingsPage() {
   const { locale } = useLocale();
@@ -44,6 +47,67 @@ export default function AdminBookingsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [hasPrevPage, setHasPrevPage] = useState(false);
+
+  // Properties map & Users map to resolve real property owners
+  const [propertiesMap, setPropertiesMap] = useState<Record<string, any>>({});
+  const [usersMap, setUsersMap] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    // 1. Load properties (limit 50)
+    AdminService.getProperties({ limit: 50 })
+      .then((res: any) => {
+        const list = res?.properties || res?.data?.properties || res?.data?.items || res?.items || res?.data || (Array.isArray(res) ? res : []);
+        const map: Record<string, any> = {};
+        for (const p of list) {
+          if (p?.id) map[p.id] = p;
+        }
+        setPropertiesMap((prev) => ({ ...prev, ...map }));
+      })
+      .catch((err) => console.warn('Failed to load admin properties map:', err));
+
+    // 2. Load users to resolve owners by ownerId
+    AdminService.getUsers({ limit: 50 })
+      .then((res: any) => {
+        const list =
+          res?.users ||
+          res?.items ||
+          res?.data?.users ||
+          res?.data?.items ||
+          (Array.isArray(res?.data) ? res.data : null) ||
+          (Array.isArray(res) ? res : []);
+        const map: Record<string, any> = {};
+        for (const u of list) {
+          if (u?.id) map[u.id] = u;
+        }
+        setUsersMap((prev) => ({ ...prev, ...map }));
+      })
+      .catch((err) => console.warn('Failed to load admin users map:', err));
+  }, []);
+
+  // On-demand fetch for any property not yet in map
+  useEffect(() => {
+    if (!bookings || bookings.length === 0) return;
+    const missingIds = bookings
+      .map((b: any) => b.propertyId || b.property?.id)
+      .filter((id: string) => id && !propertiesMap[id]);
+
+    if (missingIds.length > 0) {
+      Promise.allSettled(
+        missingIds.map((id: string) => propertyService.getPropertyById(id))
+      ).then((results) => {
+        const newMap: Record<string, any> = {};
+        for (const r of results) {
+          if (r.status === 'fulfilled' && r.value) {
+            const prop = r.value?.property || r.value?.data || r.value;
+            if (prop?.id) newMap[prop.id] = prop;
+          }
+        }
+        if (Object.keys(newMap).length > 0) {
+          setPropertiesMap((prev) => ({ ...prev, ...newMap }));
+        }
+      });
+    }
+  }, [bookings, propertiesMap]);
 
   // Debounce search term
   useEffect(() => {
@@ -201,6 +265,28 @@ export default function AdminBookingsPage() {
   const [cancelModalBookingId, setCancelModalBookingId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [selectedBookingForDetails, setSelectedBookingForDetails] = useState<any | null>(null);
+
+  const handleAssignToMe = async (bookingId: string) => {
+    setActionLoading(true);
+    setActionMessage(null);
+    try {
+      await AdminService.assignBooking(bookingId);
+      setActionMessage({
+        type: 'success',
+        text: locale === 'ar' ? '✓ تم تعيين هذا الحجز لك بنجاح.' : '✓ Booking successfully assigned to you.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
+      await fetchBookings();
+    } catch (e: any) {
+      setActionMessage({
+        type: 'error',
+        text: e?.message || (locale === 'ar' ? 'فشل تعيين الحجز.' : 'Failed to assign booking.'),
+      });
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
 
 
@@ -251,15 +337,21 @@ export default function AdminBookingsPage() {
     setActionLoading(true);
     try {
       const reason = cancelReason.trim() || (locale === 'ar' ? 'ملغى من إدارة المنصة' : 'Cancelled by platform admin');
-      await AdminService.updateBookingStatus(cancelModalBookingId, 'CANCELLED', reason);
+      try {
+        await AdminService.updateBookingStatus(cancelModalBookingId, 'CANCELLED', reason);
+      } catch (errStatus: any) {
+        // Fallback to /booking/:id/cancel
+        await BookingService.cancelBooking(cancelModalBookingId, reason);
+      }
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? '✓ تم إلغاء الحجز وإشعار مالك العقار بنجاح.' : '✓ Booking cancelled and property owner notified.',
+        text: locale === 'ar' ? '✓ تم إلغاء الحجز بنجاح وإعادة إتاحة الغرفة والسرير للحجز مجدداً.' : '✓ Booking cancelled and room/bed returned to availability.',
       });
       setCancelModalBookingId(null);
       setCancelReason('');
       queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchBookings(), fetchMetrics()]);
     } catch (e: any) {
       setActionMessage({
@@ -481,6 +573,7 @@ export default function AdminBookingsPage() {
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'العقار والمالك' : 'Property & Owner'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المدة المطلوبة' : 'Duration'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المبلغ الإجمالي' : 'Total / Rent'}</th>
+                    <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'المشرف المسؤول' : 'Assigned Admin'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'الحالة' : 'Status'}</th>
                     <th style={{ padding: '0.85rem 1rem' }}>{locale === 'ar' ? 'إجراءات الإدارة' : 'Admin Actions'}</th>
                   </tr>
@@ -495,16 +588,50 @@ export default function AdminBookingsPage() {
                     const tenantPhone = b.tenant?.whatsappPhone || b.tenant?.phone;
                     const cleanTenantPhone = tenantPhone ? String(tenantPhone).replace(/[^0-9]/g, '') : null;
 
-                    const propertyTitle = b.property?.title || (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
-                    const propertyCity = b.property?.city || b.property?.address || '';
+                    const linkedProp = propertiesMap[b.propertyId] || propertiesMap[b.property?.id] || b.property || {};
+                    const propertyTitle =
+                      (typeof linkedProp.title === 'object' ? (linkedProp.title[locale] || linkedProp.title.ar || linkedProp.title.en) : linkedProp.title) ||
+                      (typeof b.property?.title === 'object' ? (b.property.title[locale] || b.property.title.ar || b.property.title.en) : b.property?.title) ||
+                      (locale === 'ar' ? 'سكن جامعي' : 'Student Housing');
+                    const propertyCity = linkedProp.city || b.property?.city || linkedProp.address || b.property?.address || '';
                     const roomInfo = b.room?.roomType ? `غرفة ${b.room.roomType}` : b.room?.type ? `غرفة ${b.room.type}` : '';
 
-                    const ownerObj = (b.property as any)?.owner || (b as any).owner;
+                    const ownerId =
+                      linkedProp.ownerId ||
+                      linkedProp.userId ||
+                      (typeof linkedProp.owner === 'string' ? linkedProp.owner : null) ||
+                      (typeof linkedProp.owner === 'object' ? linkedProp.owner?.id : null) ||
+                      b.ownerId ||
+                      b.property?.ownerId ||
+                      b.property?.userId ||
+                      (typeof b.property?.owner === 'string' ? b.property.owner : null) ||
+                      (typeof b.property?.owner === 'object' ? b.property.owner?.id : null) ||
+                      b.room?.property?.ownerId;
+
+                    const matchedUser = ownerId ? usersMap[ownerId] : null;
+
+                    const ownerObj =
+                      (typeof linkedProp.owner === 'object' && linkedProp.owner !== null ? linkedProp.owner : null) ||
+                      (typeof linkedProp.user === 'object' && linkedProp.user !== null ? linkedProp.user : null) ||
+                      (typeof linkedProp.host === 'object' && linkedProp.host !== null ? linkedProp.host : null) ||
+                      matchedUser ||
+                      (typeof (b.property as any)?.owner === 'object' ? (b.property as any).owner : null) ||
+                      (typeof (b.property as any)?.user === 'object' ? (b.property as any).user : null) ||
+                      (typeof (b as any).owner === 'object' ? (b as any).owner : null);
+
                     const ownerName =
+                      [ownerObj?.firstName, ownerObj?.lastName].filter(Boolean).join(' ').trim() ||
                       ownerObj?.name ||
-                      ownerObj?.firstName ||
-                      (b.ownerId ? `${locale === 'ar' ? 'مالك' : 'Owner'} #${b.ownerId.slice(0, 6)}` : '—');
-                    const ownerPhone = ownerObj?.whatsappPhone || ownerObj?.phone;
+                      ownerObj?.fullName ||
+                      (ownerObj?.email ? ownerObj.email.split('@')[0] : null) ||
+                      linkedProp.ownerName ||
+                      linkedProp.owner_name ||
+                      (b.property as any)?.ownerName ||
+                      (b.property as any)?.owner_name ||
+                      (typeof linkedProp.owner === 'string' ? linkedProp.owner : null) ||
+                      (typeof (b.property as any)?.owner === 'string' ? (b.property as any).owner : null) ||
+                      (ownerId ? `${locale === 'ar' ? 'المالك' : 'Owner'} #${String(ownerId).slice(0, 6)}` : '—');
+                    const ownerPhone = ownerObj?.whatsappPhone || ownerObj?.phone || linkedProp.contactPhone || (b.property as any)?.contactPhone;
                     const cleanOwnerPhone = ownerPhone ? String(ownerPhone).replace(/[^0-9]/g, '') : null;
 
                     const tenantWaText = encodeURIComponent(
@@ -644,6 +771,38 @@ export default function AdminBookingsPage() {
                             : '—'}
                         </td>
 
+                        {/* Assigned Admin Column */}
+                        <td style={{ padding: '0.85rem 1rem' }}>
+                          {b.assignedAdmin?.firstName ? (
+                            <span style={{ fontWeight: 700, color: '#0B2A4A', fontSize: '0.8rem' }}>
+                              🛡️ {b.assignedAdmin.firstName} {b.assignedAdmin.lastName || ''}
+                            </span>
+                          ) : b.assignedAdminId ? (
+                            <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
+                              🛡️ #{b.assignedAdminId.slice(0, 6)}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={actionLoading}
+                              onClick={() => handleAssignToMe(b.id)}
+                              title={locale === 'ar' ? 'تعيين هذا الطلب لي لمتابعته' : 'Assign to me'}
+                              style={{
+                                padding: '0.25rem 0.55rem',
+                                borderRadius: '6px',
+                                border: '1px solid #2F6BFF',
+                                backgroundColor: '#EFF6FF',
+                                color: '#1D4ED8',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                cursor: actionLoading ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              🙋‍♂️ {locale === 'ar' ? 'تعيين لي' : 'Assign to Me'}
+                            </button>
+                          )}
+                        </td>
+
                         {/* Status Column */}
                         <td style={{ padding: '0.85rem 1rem' }}>
                           <span
@@ -684,6 +843,24 @@ export default function AdminBookingsPage() {
                         {/* Actions Column */}
                         <td style={{ padding: '0.85rem 1rem' }}>
                           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                            {/* View Details Button */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedBookingForDetails(b)}
+                              title={locale === 'ar' ? 'عرض تفاصيل الحجز كاملة' : 'View booking details'}
+                              style={{
+                                padding: '0.35rem 0.65rem',
+                                borderRadius: '6px',
+                                border: '1px solid #CBD5E1',
+                                backgroundColor: '#FFFFFF',
+                                color: '#0B2A4A',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              👁️ {locale === 'ar' ? 'التفاصيل' : 'Details'}
+                            </button>
 
 
                             {b.status === 'PENDING' && (
@@ -726,7 +903,7 @@ export default function AdminBookingsPage() {
                               </button>
                             )}
 
-                            {(b.status === 'PENDING' || b.status === 'CONTACTED') && (
+                            {b.status !== 'CANCELLED' && (
                               <button
                                 type="button"
                                 disabled={actionLoading}
@@ -871,7 +1048,19 @@ export default function AdminBookingsPage() {
         </div>
       )}
 
-
+      {/* Booking Details Modal */}
+      {selectedBookingForDetails && (
+        <BookingDetailsModal
+          bookingId={selectedBookingForDetails.id}
+          initialData={selectedBookingForDetails}
+          role="admin"
+          onClose={() => setSelectedBookingForDetails(null)}
+          onUpdated={() => {
+            fetchBookings();
+            fetchMetrics();
+          }}
+        />
+      )}
     </div>
   );
 }

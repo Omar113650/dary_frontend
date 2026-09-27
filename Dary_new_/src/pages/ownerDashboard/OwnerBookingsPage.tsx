@@ -9,6 +9,7 @@ import type {
 import { useOwnerBookingsStatus, useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 import Pagination from '../../components/common/Pagination';
+import BookingDetailsModal from '../../components/common/BookingDetailsModal';
 
 export default function OwnerBookingsPage() {
   const { locale } = useLocale();
@@ -48,6 +49,7 @@ export default function OwnerBookingsPage() {
   const [propertyBookings, setPropertyBookings] = useState<OwnerPropertyBookingItem[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
+  const [selectedBookingForDetails, setSelectedBookingForDetails] = useState<any | null>(null);
 
   const loadBookingsForProperty = useCallback(
     async (propId: string, currentProps: OwnerPropertyItem[]) => {
@@ -1021,6 +1023,27 @@ export default function OwnerBookingsPage() {
                         {!['PENDING', 'CONTACTED', 'CLOSED', 'CONFIRMED', 'CANCELLED'].includes(currentStatus) && (locale === 'ar' ? 'تتم المتابعة بواسطة الإدارة' : 'Managed by Admin')}
                       </span>
                     </div>
+
+                    {/* View Booking Details Button */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBookingForDetails(b)}
+                      style={{
+                        padding: '0.4rem 0.85rem',
+                        borderRadius: '8px',
+                        border: '1px solid #2F6BFF',
+                        backgroundColor: '#EFF6FF',
+                        color: '#1D4ED8',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                      }}
+                    >
+                      📋 {locale === 'ar' ? 'عرض تفاصيل الحجز' : 'View Booking Details'}
+                    </button>
                   </div>
                 </div>
               );
@@ -1044,6 +1067,17 @@ export default function OwnerBookingsPage() {
         </>
       )}
       </div>
+
+      {/* Booking Details Modal */}
+      {selectedBookingForDetails && (
+        <BookingDetailsModal
+          bookingId={selectedBookingForDetails.id}
+          initialData={selectedBookingForDetails}
+          role="owner"
+          onClose={() => setSelectedBookingForDetails(null)}
+          onUpdated={reloadAll}
+        />
+      )}
     </div>
   );
 }

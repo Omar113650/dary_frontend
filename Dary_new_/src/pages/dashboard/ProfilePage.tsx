@@ -41,12 +41,15 @@ export default function ProfilePage() {
     name: '',
     email: '',
     phone: '',
+    whatsappPhone: '',
     university: '',
     faculty: '',
     city: '',
     country: '',
     nationality: '',
     gender: '',
+    birthDate: '',
+    address: '',
     bio: '',
     avatar: '',
   });
@@ -60,16 +63,28 @@ export default function ProfilePage() {
       const p = data?.profile || {};
       const u = data?.user || data || {};
 
+      let formattedBirthDate = '';
+      if (p.birthDate) {
+        try {
+          formattedBirthDate = new Date(p.birthDate).toISOString().slice(0, 10);
+        } catch {
+          formattedBirthDate = String(p.birthDate).slice(0, 10);
+        }
+      }
+
       setFormData({
-        name: u.name || user?.name || '',
+        name: u.name || `${u.firstName || ''} ${u.lastName || ''}`.trim() || user?.name || '',
         email: u.email || user?.email || '',
         phone: u.phone || user?.phone || '',
+        whatsappPhone: u.whatsappPhone || user?.whatsappPhone || '',
         university: p.university || u.university || '',
         faculty: p.faculty || u.faculty || '',
         city: p.city || u.city || '',
         country: p.country || u.country || '',
         nationality: p.nationality || u.nationality || '',
-        gender: p.gender || u.gender || '',
+        gender: (p.gender || u.gender || '').toUpperCase(),
+        birthDate: formattedBirthDate,
+        address: p.address || u.address || '',
         bio: p.bio || u.bio || '',
         avatar: u.avatar || user?.avatar || '',
       });
@@ -88,6 +103,7 @@ export default function ProfilePage() {
           name: user.name || '',
           email: user.email || '',
           phone: user.phone || '',
+          whatsappPhone: (user as any).whatsappPhone || '',
           avatar: user.avatar || '',
         }));
       }
@@ -156,15 +172,35 @@ export default function ProfilePage() {
     setError(null);
     setSaveSuccess(false);
 
-    // Payload mapped strictly to confirmed swagger contract
+    // Payload mapped strictly to backend upsertProfileSchema
     const updatePayload: Record<string, any> = {};
-    if (formData.university) updatePayload.university = formData.university;
-    if (formData.faculty) updatePayload.faculty = formData.faculty;
-    if (formData.city) updatePayload.city = formData.city;
-    if (formData.country) updatePayload.country = formData.country;
-    if (formData.nationality) updatePayload.nationality = formData.nationality;
-    if (formData.gender) updatePayload.gender = formData.gender;
-    if (formData.bio) updatePayload.bio = formData.bio;
+    if (formData.university && formData.university.trim().length >= 2) {
+      updatePayload.university = formData.university.trim();
+    }
+    if (formData.faculty && formData.faculty.trim().length >= 2) {
+      updatePayload.faculty = formData.faculty.trim();
+    }
+    if (formData.city && formData.city.trim().length >= 2) {
+      updatePayload.city = formData.city.trim();
+    }
+    if (formData.country && formData.country.trim().length >= 2) {
+      updatePayload.country = formData.country.trim();
+    }
+    if (formData.nationality && formData.nationality.trim().length >= 2) {
+      updatePayload.nationality = formData.nationality.trim();
+    }
+    if (formData.address && formData.address.trim().length >= 5) {
+      updatePayload.address = formData.address.trim();
+    }
+    if (formData.gender && ['MALE', 'FEMALE'].includes(formData.gender.toUpperCase())) {
+      updatePayload.gender = formData.gender.toUpperCase();
+    }
+    if (formData.birthDate && /^\d{4}-\d{2}-\d{2}$/.test(formData.birthDate.trim())) {
+      updatePayload.birthDate = formData.birthDate.trim();
+    }
+    if (formData.bio && formData.bio.trim()) {
+      updatePayload.bio = formData.bio.trim().slice(0, 1000);
+    }
 
     try {
       await ProfileService.updateProfile(updatePayload);
@@ -396,28 +432,6 @@ export default function ProfilePage() {
               marginBottom: '1.5rem',
             }}
           >
-            {/* Name */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
-                {locale === 'ar' ? 'الاسم الكامل' : 'Full Name'}
-              </label>
-              <input
-                type="text"
-                name="name"
-                value={formData.name}
-                disabled
-                style={{
-                  width: '100%',
-                  padding: '0.7rem 0.9rem',
-                  borderRadius: '8px',
-                  border: '1px solid var(--dary-border)',
-                  backgroundColor: '#F8FAFC',
-                  color: 'var(--dary-muted)',
-                  fontSize: '0.9rem',
-                }}
-              />
-            </div>
-
             {/* Email */}
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
@@ -439,6 +453,52 @@ export default function ProfilePage() {
                 }}
               />
             </div>
+
+            {/* Phone */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'رقم الهاتف' : 'Phone Number'}
+              </label>
+              <input
+                type="tel"
+                name="phone"
+                value={formData.phone}
+                disabled
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  backgroundColor: '#F8FAFC',
+                  color: 'var(--dary-muted)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+
+            {/* WhatsApp Phone */}
+            {formData.whatsappPhone && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                  {locale === 'ar' ? 'رقم الواتساب' : 'WhatsApp Number'}
+                </label>
+                <input
+                  type="tel"
+                  name="whatsappPhone"
+                  value={formData.whatsappPhone}
+                  disabled
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 0.9rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--dary-border)',
+                    backgroundColor: '#F8FAFC',
+                    color: 'var(--dary-muted)',
+                    fontSize: '0.9rem',
+                  }}
+                />
+              </div>
+            )}
 
             {/* University */}
             <div>
@@ -482,44 +542,23 @@ export default function ProfilePage() {
               />
             </div>
 
-            {/* City */}
+            {/* Birth Date */}
             <div>
               <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
-                {locale === 'ar' ? 'المدينة' : 'City'}
+                {locale === 'ar' ? 'تاريخ الميلاد' : 'Birth Date'}
               </label>
               <input
-                type="text"
-                name="city"
-                value={formData.city}
+                type="date"
+                name="birthDate"
+                value={formData.birthDate}
                 onChange={handleFieldChange}
-                placeholder={locale === 'ar' ? 'المدينة' : 'City'}
                 style={{
                   width: '100%',
                   padding: '0.7rem 0.9rem',
                   borderRadius: '8px',
                   border: '1px solid var(--dary-border)',
                   fontSize: '0.9rem',
-                }}
-              />
-            </div>
-
-            {/* Nationality */}
-            <div>
-              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
-                {locale === 'ar' ? 'الجنسية' : 'Nationality'}
-              </label>
-              <input
-                type="text"
-                name="nationality"
-                value={formData.nationality}
-                onChange={handleFieldChange}
-                placeholder={locale === 'ar' ? 'الجنسية' : 'Nationality'}
-                style={{
-                  width: '100%',
-                  padding: '0.7rem 0.9rem',
-                  borderRadius: '8px',
-                  border: '1px solid var(--dary-border)',
-                  fontSize: '0.9rem',
+                  backgroundColor: '#FFFFFF',
                 }}
               />
             </div>
@@ -546,6 +585,90 @@ export default function ProfilePage() {
                 <option value="MALE">{locale === 'ar' ? 'ذكر' : 'Male'}</option>
                 <option value="FEMALE">{locale === 'ar' ? 'أنثى' : 'Female'}</option>
               </select>
+            </div>
+
+            {/* Nationality */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'الجنسية' : 'Nationality'}
+              </label>
+              <input
+                type="text"
+                name="nationality"
+                value={formData.nationality}
+                onChange={handleFieldChange}
+                placeholder={locale === 'ar' ? 'مثال: مصري' : 'e.g. Egyptian'}
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+
+            {/* Country */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'الدولة / بلد الإقامة' : 'Country'}
+              </label>
+              <input
+                type="text"
+                name="country"
+                value={formData.country}
+                onChange={handleFieldChange}
+                placeholder={locale === 'ar' ? 'مثال: مصر' : 'e.g. Egypt'}
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+
+            {/* City */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'المدينة' : 'City'}
+              </label>
+              <input
+                type="text"
+                name="city"
+                value={formData.city}
+                onChange={handleFieldChange}
+                placeholder={locale === 'ar' ? 'مثال: المنصورة' : 'e.g. Mansoura'}
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                }}
+              />
+            </div>
+
+            {/* Address */}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'العنوان التفصيلي' : 'Address'}
+              </label>
+              <input
+                type="text"
+                name="address"
+                value={formData.address}
+                onChange={handleFieldChange}
+                placeholder={locale === 'ar' ? 'الشارع، الحي، المبنى...' : 'Street, district, building...'}
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                }}
+              />
             </div>
           </div>
 

@@ -133,9 +133,42 @@ export class OwnerService {
    * Confirmed endpoint: Owner bookings against one of their properties
    */
   static async getPropertyBookings(propertyId: string): Promise<OwnerPropertyBookingItem[]> {
-    const res = await ApiClient.get<any>(`/booking/property/${propertyId}`);
-    const data = res?.data?.bookings || res?.data || res?.bookings || res;
-    return Array.isArray(data) ? data : [];
+    try {
+      const res = await ApiClient.get<any>(`/booking/property/${propertyId}`);
+      const data = res?.data?.bookings || res?.data || res?.bookings || res;
+      return Array.isArray(data) ? data : [];
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/bookings/property/${propertyId}`);
+          const data = res?.data?.bookings || res?.data || res?.bookings || res;
+          return Array.isArray(data) ? data : [];
+        } catch {
+          return [];
+        }
+      }
+      return [];
+    }
+  }
+
+  /**
+   * Get single booking by ID
+   */
+  static async getBookingById(bookingId: string): Promise<any> {
+    try {
+      const res = await ApiClient.get<any>(`/booking/${bookingId}`);
+      return res?.data?.booking || res?.data || res?.booking || res || null;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/bookings/${bookingId}`);
+          return res?.data?.booking || res?.data || res?.booking || res || null;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
   }
 
   /**
@@ -162,8 +195,16 @@ export class OwnerService {
     } else if (status === 'CANCELLED') {
       payload.note = 'تم الإلغاء من قبل مالك العقار';
     }
-    const res = await ApiClient.patch<any>(`/booking/${bookingId}/status`, payload);
-    return res?.data?.booking || res?.data || res?.booking || res;
+    try {
+      const res = await ApiClient.patch<any>(`/booking/${bookingId}/status`, payload);
+      return res?.data?.booking || res?.data || res?.booking || res;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        const res = await ApiClient.patch<any>(`/bookings/${bookingId}/status`, payload);
+        return res?.data?.booking || res?.data || res?.booking || res;
+      }
+      throw e;
+    }
   }
 }
 

@@ -143,8 +143,35 @@ export class TenantService {
   /**
    * Cancels a tenant booking with a mandatory note.
    */
-  static async cancelBooking(bookingId: string, note: string): Promise<any> {
-    return ApiClient.patch(`/booking/${bookingId}/cancel`, { note });
+  static async cancelBooking(bookingId: string, note?: string): Promise<any> {
+    try {
+      return await ApiClient.patch(`/booking/${bookingId}/cancel`, { note });
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        return await ApiClient.patch(`/bookings/${bookingId}/cancel`, { note });
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Fetches single booking details by ID
+   */
+  static async getBookingById(bookingId: string): Promise<RentalBooking | null> {
+    try {
+      const res = await ApiClient.get<any>(`/booking/${bookingId}`);
+      return res?.data?.booking || res?.data || res?.booking || res || null;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/bookings/${bookingId}`);
+          return res?.data?.booking || res?.data || res?.booking || res || null;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
   }
 
   // ==========================================
@@ -207,7 +234,16 @@ export class TenantService {
    * POST /booking with { propertyId, roomId, startDate, endDate, bedsRequested, note }
    */
   static async createBooking(propertyId: string, payload?: Record<string, any>): Promise<any> {
-    return ApiClient.post('/booking', { propertyId, ...payload });
+    try {
+      const res = await ApiClient.post<any>('/booking', { propertyId, ...payload });
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        const res = await ApiClient.post<any>('/bookings', { propertyId, ...payload });
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 
   // ==========================================

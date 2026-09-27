@@ -272,7 +272,19 @@ export function normalizeProperty(raw: any): Property {
     floor,
     area,
     rules,
-    owner: raw.owner || null,
+    ownerId: raw.ownerId || raw.userId || (typeof raw.owner === 'string' ? raw.owner : null) || (typeof raw.owner === 'object' ? raw.owner?.id : undefined),
+    owner:
+      typeof raw.owner === 'object' && raw.owner !== null
+        ? raw.owner
+        : typeof raw.user === 'object' && raw.user !== null
+        ? raw.user
+        : typeof raw.host === 'object' && raw.host !== null
+        ? raw.host
+        : typeof raw.landlord === 'object' && raw.landlord !== null
+        ? raw.landlord
+        : raw.ownerId || raw.userId
+        ? { id: raw.ownerId || raw.userId }
+        : null,
     rating: Number(raw.rating || raw.averageRating || 4.8),
     reviewCount: Number(raw.reviewCount || raw.reviewsCount || 0),
     featured: Boolean(raw.featured || raw.isFeatured),

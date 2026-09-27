@@ -7,6 +7,7 @@ import { ReviewService } from '../../services/reviewService';
 import { useTenantRentals } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
 import Pagination from '../../components/common/Pagination';
+import BookingDetailsModal from '../../components/common/BookingDetailsModal';
 
 export default function RentalsPage() {
   const { locale } = useLocale();
@@ -59,6 +60,9 @@ export default function RentalsPage() {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [reviewSuccessMsg, setReviewSuccessMsg] = useState<string | null>(null);
   const [reviewErrorMsg, setReviewErrorMsg] = useState<string | null>(null);
+
+  // Booking Details Modal State
+  const [selectedBookingForDetails, setSelectedBookingForDetails] = useState<RentalBooking | null>(null);
 
   async function handleReviewSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -412,6 +416,24 @@ export default function RentalsPage() {
                         <span>{locale === 'ar' ? 'تقييم السكن والمالك' : 'Review & Rate'}</span>
                       </button>
                     )}
+
+                    {/* Booking Details Modal Trigger */}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBookingForDetails(rental)}
+                      style={{
+                        padding: '0.5rem 1rem',
+                        borderRadius: '8px',
+                        border: '1px solid #2F6BFF',
+                        backgroundColor: '#EFF6FF',
+                        color: '#1D4ED8',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📋 {locale === 'ar' ? 'تفاصيل الحجز' : 'Booking Details'}
+                    </button>
 
                     {rental.property?.id && (
                       <Link
@@ -767,6 +789,19 @@ export default function RentalsPage() {
             )}
           </div>
         </div>
+      )}
+
+      {/* Booking Details Modal */}
+      {selectedBookingForDetails && (
+        <BookingDetailsModal
+          bookingId={selectedBookingForDetails.id}
+          initialData={selectedBookingForDetails}
+          role="tenant"
+          onClose={() => setSelectedBookingForDetails(null)}
+          onUpdated={() => {
+            fetchRentals();
+          }}
+        />
       )}
     </div>
   );

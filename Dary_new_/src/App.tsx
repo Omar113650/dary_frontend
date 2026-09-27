@@ -25,6 +25,7 @@ import OwnerRevenuePage from './pages/ownerDashboard/OwnerRevenuePage';
 import OwnerCalendarPage from './pages/ownerDashboard/OwnerCalendarPage';
 import OwnerProfilePage from './pages/ownerDashboard/OwnerProfilePage';
 import AddPropertyPage from './pages/ownerDashboard/AddPropertyPage';
+import EditPropertyPage from './pages/ownerDashboard/EditPropertyPage';
 import OwnerExplorePropertiesPage from './pages/ownerDashboard/OwnerExplorePropertiesPage';
 import OwnerMyRentalsPage from './pages/ownerDashboard/OwnerMyRentalsPage';
 import DevOwnerDashboardPreview from './components/ownerDashboard/DevOwnerDashboardPreview';
@@ -123,6 +124,7 @@ export default function App() {
               <Route path="explore" element={<OwnerExplorePropertiesPage />} />
               <Route path="properties" element={<OwnerPropertiesPage />} />
               <Route path="properties/new" element={<AddPropertyPage />} />
+              <Route path="properties/:id/edit" element={<EditPropertyPage />} />
               <Route path="add-property" element={<AddPropertyPage />} />
               <Route path="bookings" element={<OwnerBookingsPage />} />
               <Route path="my-rentals" element={<OwnerMyRentalsPage />} />
@@ -140,6 +142,7 @@ export default function App() {
                 <Route path="explore" element={<OwnerExplorePropertiesPage />} />
                 <Route path="properties" element={<OwnerPropertiesPage />} />
                 <Route path="properties/new" element={<AddPropertyPage />} />
+                <Route path="properties/:id/edit" element={<EditPropertyPage />} />
                 <Route path="add-property" element={<AddPropertyPage />} />
                 <Route path="bookings" element={<OwnerBookingsPage />} />
                 <Route path="my-rentals" element={<OwnerMyRentalsPage />} />

@@ -489,12 +489,41 @@ export class AdminService {
   }
 
   /**
+   * GET /booking/:id
+   * Get single booking by ID with full relations
+   */
+  static async getBookingById(id: string): Promise<any> {
+    try {
+      const res = await ApiClient.get<any>(`/booking/${id}`);
+      return res?.data?.booking || res?.data || res?.booking || res || null;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        try {
+          const res = await ApiClient.get<any>(`/bookings/${id}`);
+          return res?.data?.booking || res?.data || res?.booking || res || null;
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  }
+
+  /**
    * PATCH /booking/:id/status
    * Changes booking status (CONTACTED, CLOSED, CANCELLED)
    */
   static async updateBookingStatus(id: string, status: 'CONTACTED' | 'CLOSED' | 'CANCELLED', note?: string): Promise<any> {
-    const res = await ApiClient.patch<any>(`/booking/${id}/status`, { status, note });
-    return res?.data || res;
+    try {
+      const res = await ApiClient.patch<any>(`/booking/${id}/status`, { status, note });
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        const res = await ApiClient.patch<any>(`/bookings/${id}/status`, { status, note });
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 
   /**
@@ -502,8 +531,16 @@ export class AdminService {
    * Assigns booking to current admin
    */
   static async assignBooking(id: string): Promise<any> {
-    const res = await ApiClient.patch<any>(`/booking/${id}/assign`);
-    return res?.data || res;
+    try {
+      const res = await ApiClient.patch<any>(`/booking/${id}/assign`);
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        const res = await ApiClient.patch<any>(`/bookings/${id}/assign`);
+        return res?.data || res;
+      }
+      throw e;
+    }
   }
 }
 
