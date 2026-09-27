@@ -77,7 +77,9 @@ export default function RentalsPage() {
         ownerRating: Number(ownerRating),
         comment: reviewComment.trim() || undefined,
       });
-      setReviewSuccessMsg(locale === 'ar' ? '✓ تم إرسال تقييمك بنجاح! شكراً لمشاركتك تجربتك.' : '✓ Review submitted successfully! Thank you.');
+      (reviewBooking as any).review = true;
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'rentals'] });
+      setReviewSuccessMsg(locale === 'ar' ? '✓ تم إرسال تقييمك بنجاح وسيكون قيد المراجعة للنشر!' : '✓ Review submitted successfully and pending moderation!');
       setTimeout(() => {
         setReviewBooking(null);
         setReviewSuccessMsg(null);
@@ -387,34 +389,53 @@ export default function RentalsPage() {
 
                     {/* Rate & Review Button (Only for CLOSED bookings) */}
                     {(rental.status || '').toUpperCase() === 'CLOSED' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReviewBooking(rental);
-                          setPropertyRating(5);
-                          setOwnerRating(5);
-                          setReviewComment('');
-                          setReviewSuccessMsg(null);
-                          setReviewErrorMsg(null);
-                        }}
-                        style={{
-                          padding: '0.5rem 1rem',
-                          borderRadius: '8px',
-                          border: 'none',
-                          backgroundColor: '#F59E0B',
-                          color: '#FFFFFF',
-                          fontSize: '0.85rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)',
-                        }}
-                      >
-                        <span>⭐</span>
-                        <span>{locale === 'ar' ? 'تقييم السكن والمالك' : 'Review & Rate'}</span>
-                      </button>
+                      Boolean((rental as any).review) ? (
+                        <span
+                          style={{
+                            padding: '0.45rem 0.85rem',
+                            borderRadius: '8px',
+                            backgroundColor: '#DCFCE7',
+                            color: '#15803D',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            border: '1px solid #BBF7D0',
+                          }}
+                        >
+                          ✓ {locale === 'ar' ? 'تم التقييم' : 'Reviewed'}
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReviewBooking(rental);
+                            setPropertyRating(5);
+                            setOwnerRating(5);
+                            setReviewComment('');
+                            setReviewSuccessMsg(null);
+                            setReviewErrorMsg(null);
+                          }}
+                          style={{
+                            padding: '0.5rem 1rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            backgroundColor: '#F59E0B',
+                            color: '#FFFFFF',
+                            fontSize: '0.85rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            boxShadow: '0 2px 6px rgba(245, 158, 11, 0.25)',
+                          }}
+                        >
+                          <span>⭐</span>
+                          <span>{locale === 'ar' ? 'تقييم السكن والمالك' : 'Review & Rate'}</span>
+                        </button>
+                      )
                     )}
 
                     {/* Booking Details Modal Trigger */}

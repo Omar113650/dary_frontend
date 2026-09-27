@@ -1,6 +1,8 @@
+import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
+import { ReviewService } from '../../services/reviewService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import {
   useOwnerPropertiesStatus,
@@ -91,6 +93,27 @@ export default function OwnerOverviewPage() {
     isLoading: loadingPersonalRentals,
   } = useTenantRentals();
   const personalRentals = Array.isArray(rawPersonalRentals) ? rawPersonalRentals : [];
+
+  // 6. Owner Reviews Query
+  const [ownerReviews, setOwnerReviews] = useState<any[]>([]);
+  const [loadingOwnerReviews, setLoadingOwnerReviews] = useState(false);
+
+  useEffect(() => {
+    if (user?.id) {
+      setLoadingOwnerReviews(true);
+      ReviewService.getOwnerReviews(user.id, { page: 1, limit: 5 })
+        .then((res) => {
+          const list = Array.isArray(res?.data) ? res.data : [];
+          setOwnerReviews(list);
+        })
+        .catch((err) => {
+          console.warn('[OwnerOverviewPage] getOwnerReviews error:', err);
+        })
+        .finally(() => {
+          setLoadingOwnerReviews(false);
+        });
+    }
+  }, [user?.id]);
 
   // Helper to safely parse status counts
   function extractStatusEntries(raw: any): Array<{ status: string; count: number }> {
@@ -684,6 +707,103 @@ export default function OwnerOverviewPage() {
                 {locale === 'ar' ? 'إجمالي الأسرّة المحجوزة' : 'Total occupied beds'}
               </span>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* 5. Recent Tenant Reviews Card */}
+      <div className="dary-section-card">
+        <div className="dary-section-header">
+          <div>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0B2A4A', margin: 0 }}>
+              ⭐ {locale === 'ar' ? 'أحدث تقييمات الطلاب والمستأجرين' : 'Recent Tenant Reviews'}
+            </h3>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: '#64748B' }}>
+              {locale === 'ar'
+                ? 'التقييمات والمراجعات المعتمدة التي كتبها الطلاب بعد إتمام إقامتهم في عقاراتك.'
+                : 'Approved reviews submitted by tenants upon completing their stay.'}
+            </p>
+          </div>
+        </div>
+
+        {loadingOwnerReviews ? (
+          <div style={{ padding: '2rem 0', textAlign: 'center', color: '#64748B' }}>
+            <p style={{ margin: 0, fontSize: '0.85rem' }}>{locale === 'ar' ? 'جاري تحميل التقييمات...' : 'Loading reviews...'}</p>
+          </div>
+        ) : ownerReviews.length === 0 ? (
+          <div className="dary-empty-state" style={{ padding: '2rem' }}>
+            <div className="dary-empty-icon" style={{ fontSize: '2.2rem' }}>⭐</div>
+            <h4 className="dary-empty-title">{locale === 'ar' ? 'لا توجد تقييمات حتى الآن' : 'No Reviews Yet'}</h4>
+            <p className="dary-empty-desc">
+              {locale === 'ar'
+                ? 'ستظهر هنا تقييمات الطلاب لعقاراتك بعد إتمام حجوزاتهم واعتماد المراجعات.'
+                : 'Student reviews will appear here once bookings are closed and moderated.'}
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {ownerReviews.map((rev) => {
+              const tenantName =
+                rev.tenant?.firstName
+                  ? `${rev.tenant.firstName} ${rev.tenant.lastName || ''}`.trim()
+                  : rev.tenant?.name || (locale === 'ar' ? 'طالب' : 'Tenant');
+              const propTitle = rev.property?.title || (locale === 'ar' ? 'سكن طلابي' : 'Property');
+
+              return (
+                <div
+                  key={rev.id}
+                  style={{
+                    padding: '1rem 1.25rem',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '10px',
+                    backgroundColor: '#F8FAFC',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '50%',
+                          backgroundColor: '#0B2A4A',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 700,
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        {tenantName[0] || 'T'}
+                      </div>
+                      <div>
+                        <strong style={{ fontSize: '0.9rem', color: '#0B2A4A', display: 'block' }}>{tenantName}</strong>
+                        <span style={{ fontSize: '0.78rem', color: '#64748B' }}>🏢 {propTitle}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: '#FEF3C7', color: '#B45309', fontWeight: 700 }}>
+                        🏠 {locale === 'ar' ? 'السكن' : 'Property'}: {rev.propertyRating}/5 ★
+                      </span>
+                      <span style={{ fontSize: '0.75rem', padding: '0.2rem 0.5rem', borderRadius: '6px', backgroundColor: '#DCFCE7', color: '#15803D', fontWeight: 700 }}>
+                        👤 {locale === 'ar' ? 'المالك' : 'Owner'}: {rev.ownerRating}/5 ★
+                      </span>
+                    </div>
+                  </div>
+
+                  {rev.comment && (
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: '#475569', lineHeight: 1.5 }}>
+                      "{rev.comment}"
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

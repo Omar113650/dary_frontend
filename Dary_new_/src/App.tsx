@@ -42,6 +42,8 @@ import AdminAnalyticsPage from './pages/adminDashboard/AdminAnalyticsPage';
 import AdminCalendarPage from './pages/adminDashboard/AdminCalendarPage';
 import AdminReviewsPage from './pages/adminDashboard/AdminReviewsPage';
 import AdminProfilePage from './pages/adminDashboard/AdminProfilePage';
+import AdminRolesPermissionsPage from './pages/adminDashboard/AdminRolesPermissionsPage';
+import SuperAdminGuard from './components/auth/SuperAdminGuard';
 import DevAdminDashboardPreview from './components/adminDashboard/DevAdminDashboardPreview';
 import Layout from './components/Layout/Layout';
 import HomePage from './pages/HomePage';
@@ -165,6 +167,8 @@ export default function App() {
             >
               <Route index element={<AdminOverviewPage />} />
               <Route path="users" element={<AdminModuleGuard module="users"><AdminUsersPage /></AdminModuleGuard>} />
+              <Route path="roles" element={<SuperAdminGuard><AdminRolesPermissionsPage /></SuperAdminGuard>} />
+              <Route path="roles-permissions" element={<SuperAdminGuard><AdminRolesPermissionsPage /></SuperAdminGuard>} />
               <Route path="properties" element={<AdminModuleGuard module="properties"><AdminPropertiesPage /></AdminModuleGuard>} />
               <Route path="bookings" element={<AdminModuleGuard module="bookings"><AdminBookingsPage /></AdminModuleGuard>} />
               <Route path="reports" element={<AdminModuleGuard module="reports"><AdminReportsPage /></AdminModuleGuard>} />
@@ -182,6 +186,8 @@ export default function App() {
               <Route path="/admin-preview" element={<DevAdminDashboardPreview />}>
                 <Route index element={<AdminOverviewPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
+                <Route path="roles" element={<AdminRolesPermissionsPage />} />
+                <Route path="roles-permissions" element={<AdminRolesPermissionsPage />} />
                 <Route path="properties" element={<AdminPropertiesPage />} />
                 <Route path="bookings" element={<AdminBookingsPage />} />
                 <Route path="reports" element={<AdminReportsPage />} />

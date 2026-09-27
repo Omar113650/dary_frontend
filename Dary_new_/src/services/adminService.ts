@@ -190,41 +190,93 @@ export interface AdminBookingsQueryParams {
 
 export class AdminService {
   /**
-   * GET /dashboard/reports/status
+   * GET /dashboard/reports/status or /report/status
    */
   static async getReportsStatus(): Promise<any> {
-    const res = await ApiClient.get<any>('/dashboard/reports/status');
-    return res?.data?.status ?? res?.data?.data?.status ?? res?.data ?? res;
+    try {
+      const res = await ApiClient.get<any>('/dashboard/reports/status');
+      return res?.data?.status ?? res?.data?.data?.status ?? res?.data ?? res;
+    } catch {
+      try {
+        const res = await ApiClient.get<any>('/report/status');
+        return res?.data?.status ?? res?.data?.data?.status ?? res?.data ?? res;
+      } catch {
+        return [];
+      }
+    }
   }
 
   /**
-   * GET /dashboard/reports
+   * GET /report or /reports or /dashboard/reports
    */
-  static async getReports(params?: { page?: number; limit?: number }): Promise<any> {
+  static async getReports(params?: {
+    page?: number;
+    limit?: number;
+    status?: string;
+    reportedType?: string;
+    priority?: string;
+  }): Promise<any> {
     const query = new URLSearchParams();
     if (params?.page) query.append('page', params.page.toString());
     if (params?.limit) query.append('limit', params.limit.toString());
+    if (params?.status) query.append('status', params.status);
+    if (params?.reportedType) query.append('reportedType', params.reportedType);
+    if (params?.priority) query.append('priority', params.priority);
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/dashboard/reports${queryStr}`);
-    return res?.data?.data ?? res?.data ?? res;
+
+    const candidates = [
+      `/report${queryStr}`,
+      `/reports${queryStr}`,
+      `/dashboard/reports${queryStr}`,
+    ];
+
+    for (const url of candidates) {
+      try {
+        const res = await ApiClient.get<any>(url);
+        if (res) {
+          return res?.data || res;
+        }
+      } catch (err: any) {
+        if (err?.status === 404 || err?.status === 400) continue;
+        throw err;
+      }
+    }
+
+    return { data: [], meta: { total: 0, page: 1, limit: 10, totalPages: 1 } };
   }
 
   /**
    * PATCH /report/:id/priority
    */
-  static async updateReportPriority(id: string, priority: 'low' | 'medium' | 'high' | 'urgent' | 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | string): Promise<any> {
+  static async updateReportPriority(
+    id: string,
+    priority: 'low' | 'medium' | 'high' | 'urgent' | 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT' | string
+  ): Promise<any> {
     const norm = priority.toLowerCase() === 'urgent' ? 'high' : priority.toLowerCase();
-    const res = await ApiClient.patch<any>(`/report/${id}/priority`, { priority: norm });
-    return res?.data || res;
+    try {
+      const res = await ApiClient.patch<any>(`/report/${id}/priority`, { priority: norm });
+      return res?.data || res;
+    } catch {
+      const res = await ApiClient.patch<any>(`/reports/${id}/priority`, { priority: norm });
+      return res?.data || res;
+    }
   }
 
   /**
    * PATCH /report/:id/resolve
    */
   static async resolveReport(id: string, resolutionNotes?: string): Promise<any> {
-    const notes = resolutionNotes && resolutionNotes.trim().length > 0 ? resolutionNotes.trim() : 'تمت المراجعة والتسوية بنجاح';
-    const res = await ApiClient.patch<any>(`/report/${id}/resolve`, { resolutionNotes: notes });
-    return res?.data || res;
+    const notes =
+      resolutionNotes && resolutionNotes.trim().length > 0
+        ? resolutionNotes.trim()
+        : 'تمت المراجعة والتسوية بنجاح';
+    try {
+      const res = await ApiClient.patch<any>(`/report/${id}/resolve`, { resolutionNotes: notes });
+      return res?.data || res;
+    } catch {
+      const res = await ApiClient.patch<any>(`/reports/${id}/resolve`, { resolutionNotes: notes });
+      return res?.data || res;
+    }
   }
 
   /**

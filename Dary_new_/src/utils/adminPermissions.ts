@@ -8,6 +8,7 @@ export type AdminModule =
   | 'reports'
   | 'reviews'
   | 'users'
+  | 'roles'
   | 'analytics'
   | 'calendar'
   | 'notifications'

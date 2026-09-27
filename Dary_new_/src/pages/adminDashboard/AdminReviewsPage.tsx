@@ -105,15 +105,60 @@ export default function AdminReviewsPage() {
       await ReviewService.rejectReview(id);
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? 'تم رفض التقييم وإخفاؤه.' : 'Review rejected successfully.',
+        text: locale === 'ar' ? 'تم رفض التقييم وإخفاؤه بنجاح.' : 'Review rejected successfully.',
       });
       queryClient.invalidateQueries({ queryKey: ['admin', 'reviews'] });
       queryClient.invalidateQueries({ queryKey: ['reviews'] });
       await fetchReviews();
     } catch (err: any) {
+      let errMsg = err?.message || (locale === 'ar' ? 'فشل رفض التقييم.' : 'Failed to reject review.');
+      if (err?.message?.includes('alreadyModerated')) {
+        errMsg =
+          locale === 'ar'
+            ? 'خطأ من الخادم (alreadyModerated): يرجى إزالة شرط if (review.status !== "PENDING") من دالة moderateReviewService في الباك إند للسماح بتعديل التقييم بعد اعتماده.'
+            : 'Backend error (alreadyModerated): Please remove the check if (review.status !== "PENDING") in moderateReviewService.';
+      }
       setActionMessage({
         type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل رفض التقييم.' : 'Failed to reject review.'),
+        text: errMsg,
+      });
+    } finally {
+      setActionLoadingId(null);
+    }
+  };
+
+  // Handle Revoke Approval (Return to Pending)
+  const handleUnapprove = async (id: string) => {
+    setActionLoadingId(id);
+    setActionMessage(null);
+    try {
+      await ReviewService.unapproveReview(id);
+      setActionMessage({
+        type: 'success',
+        text:
+          locale === 'ar'
+            ? 'تم إلغاء اعتماد التقييم بنجاح وإعادته لقائمة المراجعات المعلقة.'
+            : 'Review approval revoked and returned to pending moderation.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'reviews'] });
+      queryClient.invalidateQueries({ queryKey: ['reviews'] });
+      await fetchReviews();
+    } catch (err: any) {
+      let errMsg = err?.message || (locale === 'ar' ? 'فشل إلغاء اعتماد التقييم.' : 'Failed to revoke review approval.');
+      if (err?.message?.includes('status must be') || err?.message?.includes('invalidModerationStatus')) {
+        errMsg =
+          locale === 'ar'
+            ? 'الباك إند لا يقبل PENDING حالياً: يرجى إضافة "PENDING" إلى moderationStatusEnum في reviewValidation.js وفي moderateReviewService.'
+            : 'Backend does not accept PENDING yet. Please add "PENDING" to moderationStatusEnum in reviewValidation.js.';
+      } else if (err?.message?.includes('alreadyModerated')) {
+        errMsg =
+          locale === 'ar'
+            ? 'خطأ من الخادم (alreadyModerated): يرجى إزالة شرط if (review.status !== "PENDING") من دالة moderateReviewService في الباك إند للسماح بإلغاء الاعتماد.'
+            : 'Backend error (alreadyModerated): Please remove the check if (review.status !== "PENDING") in moderateReviewService.';
+      }
+      setActionMessage({
+        type: 'error',
+        text: errMsg,
       });
     } finally {
       setActionLoadingId(null);
@@ -263,10 +308,22 @@ export default function AdminReviewsPage() {
             </p>
           </div>
         ) : error ? (
-          <div className="dary-error-state">
-            <p className="dary-error-title">{locale === 'ar' ? 'خطأ في جلب التقييمات' : 'API Error'}</p>
-            <p className="dary-error-desc">{error}</p>
-            <button type="button" className="dary-retry-btn" onClick={fetchReviews}>
+          <div className="dary-error-state" style={{ maxWidth: '650px', margin: '2rem auto', padding: '2rem' }}>
+            <p className="dary-error-title" style={{ fontSize: '1.15rem' }}>{locale === 'ar' ? 'خطأ في جلب التقييمات من الخادم' : 'Error Fetching Reviews'}</p>
+            <p className="dary-error-desc" style={{ direction: 'ltr', fontFamily: 'monospace', backgroundColor: '#FEF2F2', padding: '0.6rem 1rem', borderRadius: '6px', border: '1px solid #FCA5A5' }}>
+              {error}
+            </p>
+            {error.includes('Cannot set property query') && (
+              <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', textAlign: locale === 'ar' ? 'right' : 'left', fontSize: '0.88rem', color: '#1E40AF', lineHeight: '1.6' }}>
+                <strong>💡 {locale === 'ar' ? 'حل المشكلة في الباك إند (Backend):' : 'Fix in Backend:'}</strong>
+                <p style={{ margin: '0.5rem 0' }}>
+                  {locale === 'ar'
+                    ? 'في ملف ValidateMiddleware.js استبدل req[source] = data بسطر Object.defineProperty للسماح بتعيين query في Express.'
+                    : 'In ValidateMiddleware.js, replace req[source] = data with Object.defineProperty to allow setting query in Express.'}
+                </p>
+              </div>
+            )}
+            <button type="button" className="dary-retry-btn" style={{ marginTop: '1.25rem' }} onClick={fetchReviews}>
               {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </button>
           </div>
@@ -306,7 +363,10 @@ export default function AdminReviewsPage() {
                   ? `${rev.owner.firstName} ${rev.owner.lastName || ''}`.trim()
                   : rev.owner?.name || (locale === 'ar' ? 'مالك العقار' : 'Property Owner');
 
-              const isPending = (rev.status || '').toUpperCase() === 'PENDING';
+              const statusUpper = (rev.status || '').toUpperCase();
+              const isPending = statusUpper === 'PENDING';
+              const isApproved = statusUpper === 'APPROVED';
+              const isRejected = statusUpper === 'REJECTED';
 
               return (
                 <div
@@ -398,54 +458,155 @@ export default function AdminReviewsPage() {
                   )}
 
                   {/* Moderation Actions */}
-                  {isPending && (
-                    <div
-                      style={{
-                        display: 'flex',
-                        gap: '0.75rem',
-                        justifyContent: 'flex-end',
-                        paddingTop: '0.75rem',
-                        borderTop: '1px solid var(--dary-border)',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        disabled={actionLoadingId === rev.id}
-                        onClick={() => handleReject(rev.id)}
-                        style={{
-                          padding: '0.5rem 1.15rem',
-                          borderRadius: '8px',
-                          border: 'none',
-                          backgroundColor: '#FEE2E2',
-                          color: '#DC2626',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        ✕ {locale === 'ar' ? 'رفض التقييم' : 'Reject'}
-                      </button>
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '0.75rem',
+                      justifyContent: 'flex-end',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      paddingTop: '0.75rem',
+                      borderTop: '1px solid var(--dary-border)',
+                    }}
+                  >
 
-                      <button
-                        type="button"
-                        disabled={actionLoadingId === rev.id}
-                        onClick={() => handleApprove(rev.id)}
-                        style={{
-                          padding: '0.5rem 1.25rem',
-                          borderRadius: '8px',
-                          border: 'none',
-                          backgroundColor: '#16A34A',
-                          color: '#FFFFFF',
-                          fontWeight: 700,
-                          fontSize: '0.85rem',
-                          cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
-                          boxShadow: '0 2px 8px rgba(22, 163, 74, 0.25)',
-                        }}
-                      >
-                        ✓ {locale === 'ar' ? 'اعتماد ونشر' : 'Approve & Publish'}
-                      </button>
-                    </div>
-                  )}
+                    {/* Actions for PENDING review */}
+                    {isPending && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleReject(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.15rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            backgroundColor: '#FEE2E2',
+                            color: '#DC2626',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          ✕ {locale === 'ar' ? 'رفض التقييم' : 'Reject'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleApprove(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.25rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            backgroundColor: '#16A34A',
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                            boxShadow: '0 2px 8px rgba(22, 163, 74, 0.25)',
+                          }}
+                        >
+                          ✓ {locale === 'ar' ? 'اعتماد ونشر' : 'Approve & Publish'}
+                        </button>
+                      </>
+                    )}
+
+                    {/* Actions for APPROVED review (allows revoking/removing approval) */}
+                    {isApproved && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleReject(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.15rem',
+                            borderRadius: '8px',
+                            border: '1px solid #FECACA',
+                            backgroundColor: '#FEF2F2',
+                            color: '#DC2626',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                          }}
+                          title={locale === 'ar' ? 'حجب هذا التقييم وإلغاء ظهوره للعامة' : 'Reject and hide review'}
+                        >
+                          ✕ {locale === 'ar' ? 'حجب / رفض التقييم' : 'Reject / Hide'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleUnapprove(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.25rem',
+                            borderRadius: '8px',
+                            border: '1px solid #F59E0B',
+                            backgroundColor: '#FFFBEB',
+                            color: '#B45309',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            boxShadow: '0 1px 3px rgba(245, 158, 11, 0.15)',
+                          }}
+                          title={locale === 'ar' ? 'إلغاء الاعتماد وإعادة التقييم إلى قائمة الانتظار' : 'Revoke approval and return to pending'}
+                        >
+                          ↩️ {locale === 'ar' ? 'إلغاء الاعتماد (إعادة للانتظار)' : 'Revoke Approval (Pending)'}
+                        </button>
+                      </>
+                    )}
+
+                    {/* Actions for REJECTED review */}
+                    {isRejected && (
+                      <>
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleUnapprove(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.15rem',
+                            borderRadius: '8px',
+                            border: '1px solid #E2E8F0',
+                            backgroundColor: '#F8FAFC',
+                            color: '#475569',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                          }}
+                        >
+                          ↩️ {locale === 'ar' ? 'إعادة للمراجعة المعلقة' : 'Return to Pending'}
+                        </button>
+
+                        <button
+                          type="button"
+                          disabled={actionLoadingId === rev.id}
+                          onClick={() => handleApprove(rev.id)}
+                          style={{
+                            padding: '0.5rem 1.25rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            backgroundColor: '#16A34A',
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId === rev.id ? 'not-allowed' : 'pointer',
+                            boxShadow: '0 2px 8px rgba(22, 163, 74, 0.25)',
+                          }}
+                        >
+                          ✓ {locale === 'ar' ? 'اعتماد ونشر' : 'Approve & Publish'}
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
               );
             })}

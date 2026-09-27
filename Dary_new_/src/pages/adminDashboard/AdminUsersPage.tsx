@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
 import { AuthService } from '../../services/authService';
@@ -694,24 +695,49 @@ export default function AdminUsersPage() {
         </div>
 
         {isSuperAdmin && (
-          <button
-            type="button"
-            onClick={() => setCreateAdminModalOpen(true)}
-            className="dary-primary-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: '#0B2A4A',
-              padding: '0.75rem 1.4rem',
-              fontSize: '0.92rem',
-              fontWeight: 700,
-              boxShadow: '0 4px 12px rgba(11, 42, 74, 0.2)',
-            }}
-          >
-            <span>➕</span>
-            <span>{locale === 'ar' ? 'إضافة مسؤول وتحديد صلاحياته' : 'Add Admin with Permissions'}</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {/* RBAC Matrix Link disabled from UI for now - preserved in code
+            <Link
+              to="/admin/roles"
+              className="dary-secondary-btn"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: '#FFFFFF',
+                color: '#0B2A4A',
+                border: '1px solid #B69F77',
+                padding: '0.7rem 1.25rem',
+                fontSize: '0.9rem',
+                fontWeight: 700,
+                borderRadius: '8px',
+                textDecoration: 'none',
+              }}
+            >
+              <span>🛡️</span>
+              <span>{locale === 'ar' ? 'مصفوفة الأدوار والصلاحيات (RBAC)' : 'Roles & Permissions Matrix'}</span>
+            </Link>
+            */}
+
+            <button
+              type="button"
+              onClick={() => setCreateAdminModalOpen(true)}
+              className="dary-primary-btn"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: '#0B2A4A',
+                padding: '0.75rem 1.4rem',
+                fontSize: '0.92rem',
+                fontWeight: 700,
+                boxShadow: '0 4px 12px rgba(11, 42, 74, 0.2)',
+              }}
+            >
+              <span>➕</span>
+              <span>{locale === 'ar' ? 'إضافة مسؤول وتحديد صلاحياته' : 'Add Admin with Permissions'}</span>
+            </button>
+          </div>
         )}
       </div>
 

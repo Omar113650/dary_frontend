@@ -31,17 +31,26 @@ export default function AdminReportsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [hasNextPage, setHasNextPage] = useState(false);
   const [hasPrevPage, setHasPrevPage] = useState(false);
-  const [priorityFilter, setPriorityFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PENDING' | 'RESOLVED'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<string>('');
+  const [priorityFilter, setPriorityFilter] = useState<string>('');
 
-  // Active Resolving Modal
+  // Active Resolving & Details Modals
   const [resolvingReport, setResolvingReport] = useState<AdminReportItem | null>(null);
+  const [detailsReport, setDetailsReport] = useState<AdminReportItem | null>(null);
   const [resolutionNotes, setResolutionNotes] = useState('');
   const [isSubmittingResolve, setIsSubmittingResolve] = useState(false);
   const [updatingPriorityId, setUpdatingPriorityId] = useState<string | null>(null);
 
   // 2. Fetch Reports List
   const fetchReports = useCallback(async () => {
-    const cacheKey = ['admin', 'reports', { page, limit }];
+    const params: any = { page, limit };
+    if (statusFilter !== 'ALL') params.status = statusFilter;
+    if (typeFilter) params.reportedType = typeFilter;
+    if (priorityFilter) {
+      params.priority = priorityFilter.toLowerCase() === 'urgent' ? 'high' : priorityFilter.toLowerCase();
+    }
+    const cacheKey = ['admin', 'reports', params];
     const cached = queryClient.getQueryData<any>(cacheKey);
     if (cached) {
       const list = cached?.reports || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
@@ -59,20 +68,20 @@ export default function AdminReportsPage() {
     try {
       const data = await queryClient.fetchQuery({
         queryKey: cacheKey,
-        queryFn: () => AdminService.getReports({ page, limit }),
+        queryFn: () => AdminService.getReports(params),
         staleTime: STALE_TIMES.LISTS,
       });
       const list = data?.reports || data?.items || data?.data || (Array.isArray(data) ? data : []);
       setReports(Array.isArray(list) ? list : []);
 
       const total = data?.meta?.total ?? data?.totalCount ?? data?.total ?? (Array.isArray(list) ? list.length : 0);
-      setTotalCount(total);
+      setTotalPages(Math.max(1, Math.ceil(total / limit)));
       const pages = data?.meta?.totalPages ?? data?.totalPages ?? Math.max(1, Math.ceil(total / limit));
       setTotalPages(pages);
       setHasNextPage(Boolean(data?.meta?.hasNextPage ?? data?.hasNextPage ?? page < pages));
       setHasPrevPage(Boolean(data?.meta?.hasPrevPage ?? data?.hasPrevPage ?? page > 1));
     } catch (err: any) {
-      console.error('[AdminReportsPage] GET /dashboard/reports failed:', err);
+      console.error('[AdminReportsPage] GET reports failed:', err);
       setError(
         err?.message ||
           (locale === 'ar'
@@ -82,7 +91,7 @@ export default function AdminReportsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, locale, queryClient]);
+  }, [page, limit, statusFilter, typeFilter, priorityFilter, locale, queryClient]);
 
   useEffect(() => {
     fetchReports();
@@ -238,32 +247,102 @@ export default function AdminReportsPage() {
         ))}
       </div>
 
-      {/* Priority Filters */}
-      <div className="dary-card" style={{ marginBottom: '1.5rem', padding: '0.75rem 1.25rem' }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
-          <span style={{ fontWeight: 600, color: '#0B2A4A', fontSize: '0.9rem' }}>
-            {locale === 'ar' ? 'تصفية الأولوية:' : 'Filter Priority:'}
-          </span>
-          {['', 'URGENT', 'HIGH', 'MEDIUM', 'LOW'].map((pr) => (
-            <button
-              key={pr}
-              type="button"
-              onClick={() => setPriorityFilter(pr)}
+      {/* Status & Priority Filters Bar */}
+      <div className="dary-card" style={{ marginBottom: '1.5rem', padding: '1rem 1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {/* Status Tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderBottom: '1px solid #F1F5F9', paddingBottom: '0.75rem' }}>
+          {[
+            { id: 'ALL', labelAr: 'كافة البلاغات', labelEn: 'All Reports' },
+            { id: 'PENDING', labelAr: '⏳ قيد الانتظار والمراجعة', labelEn: 'Pending' },
+            { id: 'RESOLVED', labelAr: '✓ تمت التسوية والحل', labelEn: 'Resolved' },
+          ].map((tab) => {
+            const isActive = statusFilter === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setStatusFilter(tab.id as any);
+                  setPage(1);
+                }}
+                style={{
+                  padding: '0.45rem 1rem',
+                  borderRadius: '8px',
+                  border: '1px solid',
+                  borderColor: isActive ? '#0B2A4A' : '#CBD5E1',
+                  backgroundColor: isActive ? '#0B2A4A' : '#FFFFFF',
+                  color: isActive ? '#FFFFFF' : '#475569',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                {locale === 'ar' ? tab.labelAr : tab.labelEn}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Priority & Type Row */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+            <span style={{ fontWeight: 700, color: '#0B2A4A', fontSize: '0.85rem' }}>
+              {locale === 'ar' ? 'الأولوية:' : 'Priority:'}
+            </span>
+            {['', 'URGENT', 'HIGH', 'MEDIUM', 'LOW'].map((pr) => (
+              <button
+                key={pr}
+                type="button"
+                onClick={() => {
+                  setPriorityFilter(pr);
+                  setPage(1);
+                }}
+                style={{
+                  padding: '0.35rem 0.75rem',
+                  borderRadius: '6px',
+                  border: '1px solid',
+                  borderColor: priorityFilter === pr ? '#0B2A4A' : '#E2E8F0',
+                  backgroundColor: priorityFilter === pr ? '#0B2A4A' : '#FFFFFF',
+                  color: priorityFilter === pr ? '#FFFFFF' : '#475569',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {pr === '' ? (locale === 'ar' ? 'الكل' : 'All') : pr}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ fontWeight: 700, color: '#0B2A4A', fontSize: '0.85rem' }}>
+              {locale === 'ar' ? 'نوع البلاغ:' : 'Target Type:'}
+            </span>
+            <select
+              value={typeFilter}
+              onChange={(e) => {
+                setTypeFilter(e.target.value);
+                setPage(1);
+              }}
               style={{
-                padding: '0.4rem 0.85rem',
+                padding: '0.35rem 0.75rem',
                 borderRadius: '6px',
-                border: '1px solid',
-                borderColor: priorityFilter === pr ? '#0B2A4A' : '#CBD5E1',
-                backgroundColor: priorityFilter === pr ? '#0B2A4A' : '#FFFFFF',
-                color: priorityFilter === pr ? '#FFFFFF' : '#475569',
+                border: '1px solid #CBD5E1',
                 fontSize: '0.82rem',
+                backgroundColor: '#FFFFFF',
+                color: '#0B2A4A',
                 fontWeight: 600,
-                cursor: 'pointer',
+                outline: 'none',
               }}
             >
-              {pr === '' ? (locale === 'ar' ? 'الكل' : 'All') : pr}
-            </button>
-          ))}
+              <option value="">{locale === 'ar' ? 'جميع الأنواع' : 'All Types'}</option>
+              <option value="property">{locale === 'ar' ? 'عقار (Property)' : 'Property'}</option>
+              <option value="user">{locale === 'ar' ? 'مستخدم (User)' : 'User'}</option>
+              <option value="fraud">{locale === 'ar' ? 'احتيال (Fraud)' : 'Fraud'}</option>
+              <option value="spam">{locale === 'ar' ? 'محتوى مزعج (Spam)' : 'Spam'}</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -418,31 +497,50 @@ export default function AdminReportsPage() {
                         </td>
 
                         <td style={{ padding: '0.85rem 1rem' }}>
-                          {!isResolved ? (
+                          <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
                             <button
                               type="button"
-                              onClick={() => {
-                                setResolvingReport(r);
-                                setResolutionNotes('');
-                              }}
+                              onClick={() => setDetailsReport(r)}
                               style={{
-                                padding: '0.35rem 0.85rem',
+                                padding: '0.35rem 0.65rem',
                                 borderRadius: '6px',
-                                backgroundColor: '#16A34A',
-                                color: '#FFFFFF',
-                                border: 'none',
+                                backgroundColor: '#F1F5F9',
+                                color: '#0B2A4A',
+                                border: '1px solid #CBD5E1',
                                 fontSize: '0.8rem',
                                 fontWeight: 600,
                                 cursor: 'pointer',
                               }}
                             >
-                              {locale === 'ar' ? 'حل البلاغ' : 'Resolve'}
+                              {locale === 'ar' ? 'عرض' : 'View'}
                             </button>
-                          ) : (
-                            <span style={{ fontSize: '0.8rem', color: '#16A34A', fontWeight: 600 }}>
-                              ✓ {locale === 'ar' ? 'تم الحل' : 'Resolved'}
-                            </span>
-                          )}
+
+                            {!isResolved ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setResolvingReport(r);
+                                  setResolutionNotes('');
+                                }}
+                                style={{
+                                  padding: '0.35rem 0.85rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: '#16A34A',
+                                  color: '#FFFFFF',
+                                  border: 'none',
+                                  fontSize: '0.8rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {locale === 'ar' ? 'حل البلاغ' : 'Resolve'}
+                              </button>
+                            ) : (
+                              <span style={{ fontSize: '0.8rem', color: '#16A34A', fontWeight: 600, paddingInlineStart: '0.25rem' }}>
+                                ✓ {locale === 'ar' ? 'تم الحل' : 'Resolved'}
+                              </span>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -561,6 +659,117 @@ export default function AdminReportsPage() {
                 {isSubmittingResolve
                   ? (locale === 'ar' ? 'جاري المعالجة...' : 'Processing...')
                   : (locale === 'ar' ? 'تأكيد التسوية' : 'Confirm Resolution')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Details View Modal */}
+      {detailsReport && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(11, 42, 74, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+          onClick={() => setDetailsReport(null)}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              maxWidth: '560px',
+              width: '100%',
+              padding: '2rem',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ color: '#0B2A4A', fontSize: '1.25rem', margin: 0, fontWeight: 800 }}>
+                ⚠️ {locale === 'ar' ? 'تفاصيل البلاغ الكاملة' : 'Report Details'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setDetailsReport(null)}
+                style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#94A3B8' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', fontSize: '0.9rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: '#F8FAFC', borderRadius: '8px' }}>
+                <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'نوع البلاغ:' : 'Report Type:'}</span>
+                <strong style={{ color: '#0B2A4A', textTransform: 'uppercase' }}>{detailsReport.reportedType}</strong>
+              </div>
+
+              {detailsReport.reportedProperty && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: '#F8FAFC', borderRadius: '8px' }}>
+                  <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'العقار المعني:' : 'Reported Property:'}</span>
+                  <strong style={{ color: '#0B2A4A' }}>{detailsReport.reportedProperty.title}</strong>
+                </div>
+              )}
+
+              {detailsReport.reportedUser && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: '#F8FAFC', borderRadius: '8px' }}>
+                  <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'المستخدم المعني:' : 'Reported User:'}</span>
+                  <strong style={{ color: '#0B2A4A' }}>
+                    {`${detailsReport.reportedUser.firstName || ''} ${detailsReport.reportedUser.lastName || ''}`.trim() || detailsReport.reportedUser.email}
+                  </strong>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.75rem', backgroundColor: '#F8FAFC', borderRadius: '8px' }}>
+                <span style={{ color: '#64748B' }}>{locale === 'ar' ? 'مقدم البلاغ:' : 'Reporter:'}</span>
+                <strong style={{ color: '#0B2A4A' }}>
+                  {detailsReport.reporter?.firstName ? `${detailsReport.reporter.firstName} ${detailsReport.reporter.lastName || ''}`.trim() : detailsReport.reporter?.email || '—'}
+                </strong>
+              </div>
+
+              <div>
+                <span style={{ display: 'block', color: '#64748B', fontWeight: 600, marginBottom: '0.35rem' }}>
+                  {locale === 'ar' ? 'نص الشكوى والتفاصيل:' : 'Complaint Description:'}
+                </span>
+                <div style={{ padding: '0.85rem', backgroundColor: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: '8px', color: '#78350F', lineHeight: 1.5 }}>
+                  {detailsReport.description || (locale === 'ar' ? 'لا يوجد وصف مرفق' : 'No description provided')}
+                </div>
+              </div>
+
+              {detailsReport.resolutionNotes && (
+                <div>
+                  <span style={{ display: 'block', color: '#166534', fontWeight: 600, marginBottom: '0.35rem' }}>
+                    ✓ {locale === 'ar' ? 'ملاحظات تسوية الإدارة:' : 'Admin Resolution Notes:'}
+                  </span>
+                  <div style={{ padding: '0.85rem', backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', color: '#166534', lineHeight: 1.5 }}>
+                    {detailsReport.resolutionNotes}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.5rem', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => setDetailsReport(null)}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: '8px',
+                  backgroundColor: '#0B2A4A',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontWeight: 600,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {locale === 'ar' ? 'إغلاق' : 'Close'}
               </button>
             </div>
           </div>
