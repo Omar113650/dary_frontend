@@ -179,6 +179,8 @@ export interface RoomOccupancyDetails {
   isFullyBooked: boolean;
   isPartiallyBooked: boolean;
   isAvailable: boolean;
+  availableBeds?: number;
+  totalBeds?: number;
   occupiedUntil?: string;
   availableFrom?: string;
   startDate?: string;
@@ -275,9 +277,10 @@ export function getRoomOccupancyInfo(
 
   // 4. Fallback to parsing description if dates are mentioned in text (e.g. "فترة الإتاحة: من 08/2026 إلى 06/2027")
   if (!untilDate && property?.description) {
-    const descText = typeof property.description === 'object'
-      ? (property.description.ar || property.description.en || '')
-      : String(property.description || '');
+    const desc = property.description as any;
+    const descText = typeof desc === 'object' && desc !== null
+      ? (desc.ar || desc.en || '')
+      : String(desc || '');
     const textDates = extractDatesFromText(descText);
     if (textDates.until) {
       untilDate = textDates.until;
@@ -596,18 +599,19 @@ export default function PropertyDetailsPage() {
 
   useEffect(() => {
     if (!id) return;
+    const propertyId = id;
     let isCancelled = false;
 
     async function fetchPropertyLiveBookings() {
       // Candidate endpoints to fetch live bookings for this specific property
       const candidates = [
-        () => BookingService.getOwnerBookings(id),
-        () => ApiClient.get<any>(`/properties/${id}/bookings`),
-        () => ApiClient.get<any>(`/property/${id}/bookings`),
-        () => ApiClient.get<any>(`/booking/property/${id}`),
-        () => ApiClient.get<any>(`/bookings/property/${id}`),
-        () => ApiClient.get<any>(`/booking?propertyId=${id}&limit=100`),
-        () => ApiClient.get<any>(`/dashboard/booking/calendar?propertyId=${id}&limit=100`),
+        () => BookingService.getOwnerBookings(propertyId),
+        () => ApiClient.get<any>(`/properties/${propertyId}/bookings`),
+        () => ApiClient.get<any>(`/property/${propertyId}/bookings`),
+        () => ApiClient.get<any>(`/booking/property/${propertyId}`),
+        () => ApiClient.get<any>(`/bookings/property/${propertyId}`),
+        () => ApiClient.get<any>(`/booking?propertyId=${propertyId}&limit=100`),
+        () => ApiClient.get<any>(`/dashboard/booking/calendar?propertyId=${propertyId}&limit=100`),
       ];
 
       for (const call of candidates) {
@@ -687,9 +691,10 @@ export default function PropertyDetailsPage() {
     }
     // Fallback: extract from description
     if (property.description) {
-      const descText = typeof property.description === 'object'
-        ? (property.description.ar || property.description.en || '')
-        : String(property.description || '');
+      const desc = property.description as any;
+      const descText = typeof desc === 'object' && desc !== null
+        ? (desc.ar || desc.en || '')
+        : String(desc || '');
       const dates = extractDatesFromText(descText);
       if (dates.until) return dates.until;
     }

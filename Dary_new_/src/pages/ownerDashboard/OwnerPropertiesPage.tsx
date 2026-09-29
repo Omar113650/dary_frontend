@@ -147,7 +147,7 @@ export default function OwnerPropertiesPage() {
         } else if (availBeds < totalBeds) {
           isPartial = true;
         }
-      } else if (propItem?.isAvailable === false || s === 'RENTED' || s === 'OCCUPIED' || s === 'BOOKED') {
+      } else if (propItem?.isAvailable === false || propItem?.status === 'RENTED' || propItem?.status === 'OCCUPIED' || propItem?.status === 'BOOKED') {
         isFull = true;
       }
 

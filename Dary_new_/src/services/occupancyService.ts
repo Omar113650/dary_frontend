@@ -1,6 +1,6 @@
 import { ApiClient } from './apiClient';
 import { BookingService } from './bookingService';
-import type { Property, PropertyRoomItem } from '../types/property';
+import type { Property } from '../types/property';
 
 // ── In-Memory & Session Storage Booking Cache ───────────────────────────────
 const propertyBookingsCache = new Map<string, any[]>();
@@ -308,10 +308,11 @@ export function getRoomOccupancySchedule(
 
   // Fallback: extract from description
   if (!untilDate && property?.description) {
+    const desc = property.description as any;
     const descText =
-      typeof property.description === 'object'
-        ? property.description.ar || property.description.en || ''
-        : String(property.description || '');
+      typeof desc === 'object' && desc !== null
+        ? desc.ar || desc.en || ''
+        : String(desc || '');
     const textDates = extractDatesFromText(descText);
     if (textDates.until) untilDate = textDates.until;
     if (!fromDate && textDates.from) fromDate = textDates.from;
@@ -507,7 +508,6 @@ export function getPropertyOccupancySummary(
       : false);
 
   const isPartiallyBooked = !isFullyBooked && availableBeds > 0 && availableBeds < totalBeds;
-  const isAvailable = !isFullyBooked && availableBeds > 0;
 
   // Check all room schedules to aggregate earliest vacancy and active booking period
   let earliestUntil: number | undefined;
@@ -552,10 +552,11 @@ export function getPropertyOccupancySummary(
 
   // Fallback: description extraction
   if (!matchingEnd && property.description) {
+    const desc = property.description as any;
     const descText =
-      typeof property.description === 'object'
-        ? property.description.ar || property.description.en || ''
-        : String(property.description || '');
+      typeof desc === 'object' && desc !== null
+        ? desc.ar || desc.en || ''
+        : String(desc || '');
     const textDates = extractDatesFromText(descText);
     if (textDates.until) {
       matchingEnd = textDates.until;

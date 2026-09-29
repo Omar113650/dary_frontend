@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
-import { NotificationService } from '../../services/notificationService';
 import type { NotificationItem } from '../../services/notificationService';
 import {
   useNotifications,
