@@ -65,10 +65,35 @@ a {
   text-decoration: none;
 }
 
-button {
+/* Instantaneous click response and double-tap prevention across all buttons */
+button,
+[role="button"],
+input[type="submit"],
+input[type="button"],
+input[type="reset"],
+select,
+.clickable,
+.dary-btn,
+.dary-icon-btn {
   font-family: inherit;
   border: none;
   background: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* Immediately disable pointer events on disabled buttons to prevent double-clicks */
+button:disabled,
+button[disabled],
+input:disabled,
+[aria-disabled="true"],
+.disabled,
+.is-submitting {
+  pointer-events: none !important;
+  cursor: not-allowed !important;
+  opacity: 0.65;
 }
 
 img {

@@ -82,7 +82,8 @@ export class NotificationService {
   }): Promise<GetNotificationsResponse> {
     const query = new URLSearchParams();
     if (params?.page) query.append('page', params.page.toString());
-    if (params?.limit) query.append('limit', params.limit.toString());
+    const safeLimit = Math.min(params?.limit || 20, 50);
+    query.append('limit', safeLimit.toString());
     if (params?.isRead !== undefined && params?.isRead !== null) {
       query.append('isRead', String(params.isRead));
     }

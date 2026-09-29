@@ -121,6 +121,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      // 1. Proactive Auth Bootstrap: check if access token is expired (or < 30s left)
+      if (ApiClient.isAccessTokenExpired(token, 30)) {
+        const refreshed = await ApiClient.refreshAuth();
+        if (!refreshed) {
+          setUser(null);
+          setRole(null);
+          saveUserLocally(null);
+          ApiClient.clearTokens();
+          setIsLoading(false);
+          return;
+        }
+      }
+
       const userData = await AuthService.getMe();
       if (userData && userData.id) {
         setUser(userData);

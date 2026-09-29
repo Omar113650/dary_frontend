@@ -272,11 +272,46 @@
   position: absolute;
   top: 7px;
   right: 7px;
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   background-color: #EF4444;
   border: 2px solid #FFFFFF;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.25);
+  animation: dary-pulse-glow 2s infinite ease-in-out;
+}
+
+.dary-notif-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-radius: 9999px;
+  background-color: #EF4444;
+  color: #FFFFFF;
+  font-size: 0.65rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #FFFFFF;
+  box-shadow: 0 2px 5px rgba(239, 68, 68, 0.4);
+  animation: dary-pulse-glow 2.5s infinite ease-in-out;
+  line-height: 1;
+}
+
+@keyframes dary-pulse-glow {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }
 
 .dary-lang-toggle-btn {

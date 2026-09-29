@@ -8,11 +8,146 @@ import Pagination from '../../components/common/Pagination';
 import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
+export interface PropertyOccupancyInfo {
+  isFullyBooked: boolean;
+  isPartiallyBooked: boolean;
+  isAvailable: boolean;
+  bookedUntil?: string | null;
+  detailsText: string;
+  activeBookingsCount: number;
+}
+
+export function getPropertyOccupancyStatus(
+  property: AdminPropertyItem,
+  allBookings: any[] = [],
+  locale: 'ar' | 'en' = 'ar'
+): PropertyOccupancyInfo {
+  const pStatus = String(property?.status || '').toUpperCase();
+  const isDirectBooked = pStatus === 'RENTED' || pStatus === 'OCCUPIED' || pStatus === 'BOOKED';
+
+  // 1. Find active bookings for this property
+  const propBookings = allBookings.filter((b) => {
+    const bPropId = String(b.propertyId || b.property?.id || b.property_id || '');
+    if (!bPropId || bPropId !== String(property.id)) return false;
+    const st = String(b.status || '').toUpperCase();
+    if (st === 'CANCELLED' || st === 'REJECTED') return false;
+    if (b.endDate) {
+      const end = new Date(b.endDate).getTime();
+      if (!isNaN(end) && end < Date.now()) return false;
+    }
+    return true;
+  });
+
+  // 2. Collect occupied/end dates
+  const occupiedTimestamps: number[] = [];
+  if (property.occupiedUntil) {
+    const t = new Date(property.occupiedUntil).getTime();
+    if (!isNaN(t) && t > Date.now()) occupiedTimestamps.push(t);
+  }
+  for (const b of propBookings) {
+    if (b.endDate) {
+      const t = new Date(b.endDate).getTime();
+      if (!isNaN(t) && t > Date.now()) occupiedTimestamps.push(t);
+    }
+  }
+
+  // 3. Examine rooms
+  const rawRooms =
+    (Array.isArray(property.rooms_) && property.rooms_.length > 0 ? property.rooms_ : null) ||
+    (Array.isArray((property as any).propertyRooms) && (property as any).propertyRooms.length > 0 ? (property as any).propertyRooms : null) ||
+    (Array.isArray(property.rooms) && property.rooms.length > 0 ? property.rooms : []);
+
+  let totalBeds = 0;
+  let availableBeds = 0;
+  const hasRooms = rawRooms.length > 0;
+  let allRoomsFull = hasRooms;
+
+  if (hasRooms) {
+    for (const r of rawRooms) {
+      const rTotal = Number(r.totalBeds || r.total_beds || 1);
+      const rAvail = Number(
+        r.availableBeds !== undefined
+          ? r.availableBeds
+          : r.remainingBeds !== undefined
+          ? r.remainingBeds
+          : rTotal
+      );
+      totalBeds += rTotal;
+      availableBeds += Math.max(0, rAvail);
+      if (rAvail > 0 && r.status !== 'FULL') {
+        allRoomsFull = false;
+      }
+      const occ = r.occupiedUntil || r.occupied_until || r.endDate || r.end_date;
+      if (occ) {
+        const t = new Date(occ).getTime();
+        if (!isNaN(t) && t > Date.now()) occupiedTimestamps.push(t);
+      }
+    }
+  }
+
+  if (occupiedTimestamps.length > 0) {
+    occupiedTimestamps.sort((a, b) => a - b);
+  }
+  const bookedUntilFormatted =
+    occupiedTimestamps.length > 0
+      ? new Date(occupiedTimestamps[0]).toLocaleDateString(locale === 'ar' ? 'ar-EG' : 'en-US', {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        })
+      : null;
+
+  // Determine availability
+  const isSuspendedOrRejected = pStatus === 'SUSPENDED' || pStatus === 'REJECTED';
+  const isFullyBooked =
+    !isSuspendedOrRejected &&
+    (isDirectBooked ||
+      (hasRooms && (allRoomsFull || availableBeds <= 0)) ||
+      (!hasRooms && propBookings.length > 0) ||
+      property.isAvailable === false);
+
+  const isPartiallyBooked =
+    !isSuspendedOrRejected &&
+    !isFullyBooked &&
+    hasRooms &&
+    (availableBeds < totalBeds || propBookings.length > 0);
+
+  const isAvailable = !isSuspendedOrRejected && !isFullyBooked;
+
+  let detailsText = '';
+  if (isFullyBooked) {
+    detailsText = bookedUntilFormatted
+      ? (locale === 'ar' ? `محجوز حتى ${bookedUntilFormatted}` : `Booked until ${bookedUntilFormatted}`)
+      : (locale === 'ar' ? 'محجوز بالكامل' : 'Fully Booked');
+  } else if (isPartiallyBooked) {
+    detailsText =
+      locale === 'ar'
+        ? `متاح ${availableBeds} من ${totalBeds} أسرّة`
+        : `${availableBeds} of ${totalBeds} beds available`;
+  } else if (isSuspendedOrRejected) {
+    detailsText = locale === 'ar' ? 'غير متاح حالياً' : 'Currently Unavailable';
+  } else {
+    detailsText = hasRooms
+      ? (locale === 'ar' ? `متاح بالكامل (${availableBeds} أسرّة)` : `Available (${availableBeds} beds)`)
+      : (locale === 'ar' ? 'متاح للحجز' : 'Available');
+  }
+
+  return {
+    isFullyBooked,
+    isPartiallyBooked,
+    isAvailable,
+    bookedUntil: bookedUntilFormatted,
+    detailsText,
+    activeBookingsCount: propBookings.length,
+  };
+}
+
 export default function AdminPropertiesPage() {
   const { locale } = useLocale();
   const queryClient = useQueryClient();
 
   const [properties, setProperties] = useState<AdminPropertyItem[]>([]);
+  const [bookingsList, setBookingsList] = useState<any[]>([]);
   
   // Cached: 5m staleTime
   const {
@@ -139,6 +274,7 @@ export default function AdminPropertiesPage() {
 
   // Handle Approve
   const handleApprove = async (id: string) => {
+    if (actionLoadingId) return;
     setActionLoadingId(id);
     setActionMessage(null);
     try {
@@ -162,6 +298,7 @@ export default function AdminPropertiesPage() {
 
   // Handle Reject
   const handleReject = async (id: string) => {
+    if (actionLoadingId) return;
     if (!rejectionReason.trim()) {
       setActionMessage({
         type: 'error',
@@ -194,7 +331,7 @@ export default function AdminPropertiesPage() {
 
   // Handle Suspend
   const handleConfirmSuspend = async () => {
-    if (!suspendModalId) return;
+    if (actionLoadingId || !suspendModalId) return;
     setActionLoadingId(suspendModalId);
     setActionMessage(null);
     try {
@@ -219,6 +356,7 @@ export default function AdminPropertiesPage() {
 
   // Handle Toggle Availability
   const handleToggleAvailability = async (id: string) => {
+    if (actionLoadingId) return;
     setActionLoadingId(id);
     setActionMessage(null);
     try {
@@ -242,7 +380,7 @@ export default function AdminPropertiesPage() {
 
   // Handle Delete Property
   const handleConfirmDelete = async () => {
-    if (!deleteModalId) return;
+    if (actionLoadingId || !deleteModalId) return;
     setActionLoadingId(deleteModalId);
     setActionMessage(null);
     try {
@@ -265,9 +403,25 @@ export default function AdminPropertiesPage() {
     }
   };
 
+  const fetchBookingsList = useCallback(async () => {
+    try {
+      const res = await AdminService.getBookings({ limit: 100 });
+      const list =
+        res?.bookings ||
+        res?.data?.bookings ||
+        res?.items ||
+        res?.data ||
+        (Array.isArray(res) ? res : []);
+      setBookingsList(Array.isArray(list) ? list : []);
+    } catch (err) {
+      console.warn('[AdminPropertiesPage] Failed to fetch bookings for occupancy sync:', err);
+    }
+  }, []);
+
   useEffect(() => {
     fetchProperties();
-  }, [fetchProperties]);
+    fetchBookingsList();
+  }, [fetchProperties, fetchBookingsList]);
 
   const normalizeStatusList = (raw: any): AdminStatusCount[] => {
     if (!raw) return [];
@@ -303,12 +457,19 @@ export default function AdminPropertiesPage() {
 
   const statusMetrics = normalizeStatusList(propertiesStatus);
 
-  // The server handles filtering by status, search, and sort.
-  // Fallback to client filtering only if server returned mixed statuses when statusFilter was applied.
-  const filteredProperties =
-    statusFilter && properties.some((p) => p.status && p.status !== statusFilter)
-      ? properties.filter((p) => p.status === statusFilter)
-      : properties;
+  // Client filtering supporting custom tabs (BOOKED, AVAILABLE, etc.) alongside server status
+  const filteredProperties = properties.filter((p) => {
+    if (!statusFilter) return true;
+    if (statusFilter === 'BOOKED') {
+      const occ = getPropertyOccupancyStatus(p, bookingsList, locale);
+      return occ.isFullyBooked;
+    }
+    if (statusFilter === 'AVAILABLE') {
+      const occ = getPropertyOccupancyStatus(p, bookingsList, locale);
+      return occ.isAvailable && p.status === 'APPROVED';
+    }
+    return p.status === statusFilter;
+  });
 
   return (
     <div className="dary-page-container">
@@ -461,13 +622,29 @@ export default function AdminPropertiesPage() {
             </span>
             {[
               { key: '', labelAr: 'الكل', labelEn: 'All' },
-              { key: 'APPROVED', labelAr: 'معتمد ومتاح', labelEn: 'Approved' },
+              { key: 'APPROVED', labelAr: 'معتمد', labelEn: 'Approved' },
+              { key: 'AVAILABLE', labelAr: 'متاح للحجز', labelEn: 'Available' },
+              { key: 'BOOKED', labelAr: 'محجوز بالكامل', labelEn: 'Fully Booked' },
               { key: 'PENDING', labelAr: 'بانتظار الموافقة', labelEn: 'Pending Review' },
               { key: 'SUSPENDED', labelAr: 'معلق', labelEn: 'Suspended' },
               { key: 'REJECTED', labelAr: 'مرفوض', labelEn: 'Rejected' },
             ].map((tab) => {
               const isActive = statusFilter === tab.key;
-              const countItem = tab.key ? statusMetrics.find((m) => m.status === tab.key) : null;
+              const countItem = (() => {
+                if (!tab.key) return null;
+                if (tab.key === 'BOOKED') {
+                  const cnt = properties.filter((p) => getPropertyOccupancyStatus(p, bookingsList, locale).isFullyBooked).length;
+                  return { count: cnt };
+                }
+                if (tab.key === 'AVAILABLE') {
+                  const cnt = properties.filter((p) => {
+                    const occ = getPropertyOccupancyStatus(p, bookingsList, locale);
+                    return occ.isAvailable && p.status === 'APPROVED';
+                  }).length;
+                  return { count: cnt };
+                }
+                return statusMetrics.find((m) => m.status === tab.key);
+              })();
               return (
                 <button
                   key={tab.key}
@@ -635,16 +812,52 @@ export default function AdminPropertiesPage() {
                       ROOM: locale === 'ar' ? 'غرفة مستقلة' : 'Room',
                       STUDIO: locale === 'ar' ? 'استوديو' : 'Studio',
                       APARTMENT: locale === 'ar' ? 'شقة كاملة' : 'Apartment',
+                      ENTIRE_APARTMENT: locale === 'ar' ? 'شقة كاملة' : 'Entire Apartment',
+                      SHARED_APARTMENT: locale === 'ar' ? 'شقة مشتركة' : 'Shared Apartment',
                       BED: locale === 'ar' ? 'سرير في غرفة' : 'Bed',
+                      SHARED_ROOM: locale === 'ar' ? 'غرفة مشتركة' : 'Shared Room',
+                      PRIVATE_ROOM: locale === 'ar' ? 'غرفة خاصة' : 'Private Room',
+                      DORMITORY: locale === 'ar' ? 'سكن طلابي' : 'Dormitory',
                       VILLA: locale === 'ar' ? 'فيلا' : 'Villa',
                     };
+                    const rawTypeKey = String(p.propertyType || (p as any).type || '').toUpperCase();
                     const typeDisplay =
-                      (p.propertyType && propertyTypeLabels[p.propertyType.toUpperCase()]) ||
+                      propertyTypeLabels[rawTypeKey] ||
                       p.propertyType ||
                       p.propertyClass ||
                       (locale === 'ar' ? 'سكن طلاب' : 'Student Housing');
 
-                    const isAvailable = p.isAvailable !== false;
+                    const occ = getPropertyOccupancyStatus(p, bookingsList, locale);
+                    const isAvailable = (p as any).isAvailable !== false;
+
+                    let statusLabel = statusInfo.label;
+                    let statusBg = statusInfo.bg;
+                    let statusColor = statusInfo.color;
+                    let statusBorder = statusInfo.border;
+
+                    if (curStatus === 'APPROVED') {
+                      if (occ.isFullyBooked) {
+                        statusLabel = locale === 'ar' ? 'معتمد (محجوز بالكامل)' : 'Approved (Booked)';
+                        statusBg = '#FEE2E2';
+                        statusColor = '#991B1B';
+                        statusBorder = '#FECACA';
+                      } else if (occ.isPartiallyBooked) {
+                        statusLabel = locale === 'ar' ? 'معتمد (محجوز جزئياً)' : 'Approved (Partial)';
+                        statusBg = '#FEF3C7';
+                        statusColor = '#92400E';
+                        statusBorder = '#FDE68A';
+                      } else {
+                        statusLabel = locale === 'ar' ? 'معتمد ومتاح' : 'Approved & Available';
+                        statusBg = '#DCFCE7';
+                        statusColor = '#15803D';
+                        statusBorder = '#BBF7D0';
+                      }
+                    } else if (curStatus === 'BOOKED' || curStatus === 'RENTED' || curStatus === 'OCCUPIED') {
+                      statusLabel = locale === 'ar' ? 'محجوز' : 'Booked';
+                      statusBg = '#FEE2E2';
+                      statusColor = '#991B1B';
+                      statusBorder = '#FECACA';
+                    }
 
                     return (
                       <tr key={p.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
@@ -682,36 +895,95 @@ export default function AdminPropertiesPage() {
                             )}
                             <div>
                               <div style={{ fontWeight: 600, color: '#0B2A4A', fontSize: '0.9rem' }}>{p.title}</div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.2rem', flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: '0.75rem', color: '#64748B' }}>
-                                  {typeDisplay}
-                                </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginTop: '0.25rem', flexWrap: 'wrap' }}>
                                 <span
                                   style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.25rem',
-                                    fontSize: '0.7rem',
+                                    fontSize: '0.72rem',
                                     fontWeight: 600,
-                                    padding: '0.1rem 0.4rem',
+                                    color: '#475569',
+                                    backgroundColor: '#F1F5F9',
+                                    padding: '0.12rem 0.45rem',
                                     borderRadius: '4px',
-                                    backgroundColor: isAvailable ? '#F0FDF4' : '#F8FAFC',
-                                    color: isAvailable ? '#166534' : '#64748B',
-                                    border: `1px solid ${isAvailable ? '#BBF7D0' : '#CBD5E1'}`,
+                                    border: '1px solid #E2E8F0',
                                   }}
                                 >
+                                  {typeDisplay}
+                                </span>
+
+                                {occ.isFullyBooked ? (
                                   <span
                                     style={{
-                                      width: '5px',
-                                      height: '5px',
-                                      borderRadius: '50%',
-                                      backgroundColor: isAvailable ? '#22C55E' : '#94A3B8',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 700,
+                                      padding: '0.12rem 0.5rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#FEE2E2',
+                                      color: '#991B1B',
+                                      border: '1px solid #FECACA',
                                     }}
-                                  />
-                                  {isAvailable
-                                    ? (locale === 'ar' ? 'متاح للحجز' : 'Available')
-                                    : (locale === 'ar' ? 'غير متاح' : 'Unavailable')}
-                                </span>
+                                    title={occ.bookedUntil ? (locale === 'ar' ? `محجوز حتى ${occ.bookedUntil}` : `Booked until ${occ.bookedUntil}`) : undefined}
+                                  >
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#DC2626' }} />
+                                    <span>🔒 {occ.detailsText}</span>
+                                  </span>
+                                ) : occ.isPartiallyBooked ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 700,
+                                      padding: '0.12rem 0.5rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#FEF3C7',
+                                      color: '#92400E',
+                                      border: '1px solid #FDE68A',
+                                    }}
+                                  >
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#D97706' }} />
+                                    <span>⚠️ {occ.detailsText}</span>
+                                  </span>
+                                ) : p.status === 'SUSPENDED' || p.status === 'REJECTED' ? (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 600,
+                                      padding: '0.12rem 0.45rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#F8FAFC',
+                                      color: '#64748B',
+                                      border: '1px solid #CBD5E1',
+                                    }}
+                                  >
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#94A3B8' }} />
+                                    <span>{locale === 'ar' ? 'غير متاح' : 'Unavailable'}</span>
+                                  </span>
+                                ) : (
+                                  <span
+                                    style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem',
+                                      fontSize: '0.7rem',
+                                      fontWeight: 700,
+                                      padding: '0.12rem 0.5rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#F0FDF4',
+                                      color: '#166534',
+                                      border: '1px solid #BBF7D0',
+                                    }}
+                                  >
+                                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#22C55E' }} />
+                                    <span>✓ {locale === 'ar' ? 'متاح للحجز' : 'Available'}</span>
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -733,7 +1005,7 @@ export default function AdminPropertiesPage() {
                                   locale === 'ar'
                                     ? `مرحباً ${ownerFullName}، معك إدارة منصة داري بخصوص مراجعة عقارك المسجل (${p.title}).`
                                     : `Hello ${ownerFullName}, this is Dary Admin regarding your property listing (${p.title}).`
-                                )}`}
+                                  )}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={locale === 'ar' ? 'مراسلة المالك عبر واتساب' : 'WhatsApp Owner'}
@@ -788,12 +1060,12 @@ export default function AdminPropertiesPage() {
                               borderRadius: '6px',
                               fontSize: '0.78rem',
                               fontWeight: 700,
-                              backgroundColor: statusInfo.bg,
-                              color: statusInfo.color,
-                              border: `1px solid ${statusInfo.border}`,
+                              backgroundColor: statusBg,
+                              color: statusColor,
+                              border: `1px solid ${statusBorder}`,
                             }}
                           >
-                            {statusInfo.label}
+                            {statusLabel}
                           </span>
                         </td>
 

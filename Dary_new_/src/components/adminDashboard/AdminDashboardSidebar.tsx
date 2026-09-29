@@ -9,12 +9,14 @@ interface AdminDashboardSidebarProps {
   basePath?: string;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  unreadCount?: number;
 }
 
 export default function AdminDashboardSidebar({
   basePath = '/admin',
   mobileOpen,
   onCloseMobile,
+  unreadCount = 0,
 }: AdminDashboardSidebarProps) {
   const navigate = useNavigate();
   const { user, logout, role, isSuperAdmin } = useAuth();
@@ -25,6 +27,7 @@ export default function AdminDashboardSidebar({
     end?: boolean;
     label: string;
     module: AdminModule;
+    badge?: number;
     icon: React.ReactNode;
   }> = [
     {
@@ -155,6 +158,7 @@ export default function AdminDashboardSidebar({
       to: `${basePath}/notifications`,
       label: locale === 'ar' ? 'الإشعارات' : 'Notifications',
       module: 'notifications',
+      badge: unreadCount > 0 ? unreadCount : undefined,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -238,6 +242,7 @@ export default function AdminDashboardSidebar({
           >
             <span className="dary-nav-icon">{item.icon}</span>
             <span className="dary-nav-label">{item.label}</span>
+            {item.badge !== undefined && <span className="dary-nav-badge">{item.badge}</span>}
           </NavLink>
         ))}
       </nav>

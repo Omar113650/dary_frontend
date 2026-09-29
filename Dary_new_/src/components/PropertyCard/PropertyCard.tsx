@@ -1,14 +1,21 @@
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import type { Property } from '../../types/property';
+import { getPropertyOccupancySummary } from '../../services/occupancyService';
 import './PropertyCard.css';
 
 interface PropertyCardProps {
   property: Property;
+  customBookings?: any[];
 }
 
-export default function PropertyCard({ property }: PropertyCardProps) {
+export default function PropertyCard({ property, customBookings }: PropertyCardProps) {
   const { t, locale } = useLocale();
+
+  const occ = useMemo(() => {
+    return getPropertyOccupancySummary(property, customBookings, locale);
+  }, [property, customBookings, locale]);
 
   return (
     <article className="property-card">
@@ -18,7 +25,7 @@ export default function PropertyCard({ property }: PropertyCardProps) {
         className="property-card-link-wrapper"
       >
         {/* Media */}
-        <div className="property-card-media">
+        <div className="property-card-media" style={{ position: 'relative' }}>
           <img
             src={property.image}
             alt={property.title[locale]}
@@ -30,6 +37,53 @@ export default function PropertyCard({ property }: PropertyCardProps) {
             }}
           />
           <span className="property-card-badge">{property.type[locale]}</span>
+
+          {/* Occupancy Status Badge on Media */}
+          {occ.badgeType === 'occupied' && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '10px',
+                insetInlineEnd: '10px',
+                backgroundColor: 'rgba(220, 38, 38, 0.95)',
+                color: '#FFFFFF',
+                padding: '0.25rem 0.6rem',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                backdropFilter: 'blur(4px)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                zIndex: 2,
+              }}
+            >
+              {occ.vacatingDate
+                ? (locale === 'ar' ? `🔒 محجوز حتى ${occ.vacatingDate}` : `🔒 Booked until ${occ.vacatingDate}`)
+                : (locale === 'ar' ? '🔒 محجوز بالكامل' : '🔒 Fully Booked')}
+            </span>
+          )}
+
+          {occ.badgeType === 'partial' && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '10px',
+                insetInlineEnd: '10px',
+                backgroundColor: 'rgba(217, 119, 6, 0.95)',
+                color: '#FFFFFF',
+                padding: '0.25rem 0.6rem',
+                borderRadius: '6px',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                backdropFilter: 'blur(4px)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                zIndex: 2,
+              }}
+            >
+              {locale === 'ar'
+                ? `⚠️ متاح ${occ.availableBeds} من ${occ.totalBeds} أسرّة`
+                : `⚠️ ${occ.availableBeds} of ${occ.totalBeds} beds`}
+            </span>
+          )}
         </div>
 
         {/* Details */}
@@ -69,6 +123,97 @@ export default function PropertyCard({ property }: PropertyCardProps) {
                 {property.bathrooms} {t.bathrooms_label}
               </span>
             </div>
+          </div>
+
+          {/* Booking & Vacancy Schedule Banner */}
+          <div
+            style={{
+              marginTop: '0.65rem',
+              marginBottom: '0.65rem',
+              padding: '0.5rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor:
+                occ.badgeType === 'occupied'
+                  ? '#FEF2F2'
+                  : occ.badgeType === 'partial'
+                  ? '#FFFBEB'
+                  : '#F0FDF4',
+              border:
+                '1px solid ' +
+                (occ.badgeType === 'occupied'
+                  ? '#FECACA'
+                  : occ.badgeType === 'partial'
+                  ? '#FDE68A'
+                  : '#BBF7D0'),
+              fontSize: '0.76rem',
+              lineHeight: 1.45,
+            }}
+          >
+            {/* Top Row: Status & Vacancy Date */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '4px',
+              }}
+            >
+              <span
+                style={{
+                  fontWeight: 800,
+                  color:
+                    occ.badgeType === 'occupied'
+                      ? '#991B1B'
+                      : occ.badgeType === 'partial'
+                      ? '#92400E'
+                      : '#166534',
+                }}
+              >
+                {occ.badgeType === 'occupied'
+                  ? (locale === 'ar' ? '🔒 محجوز بالكامل' : '🔒 Fully Booked')
+                  : occ.badgeType === 'partial'
+                  ? (locale === 'ar' ? `⚠️ متاح ${occ.availableBeds} من ${occ.totalBeds} أسرّة` : `⚠️ ${occ.availableBeds} of ${occ.totalBeds} beds available`)
+                  : (locale === 'ar' ? '✓ شاغر ومتاح للحجز الفوري' : '✓ Vacant & Available Now')}
+              </span>
+              {occ.vacatingDate && (
+                <span
+                  style={{
+                    fontWeight: 700,
+                    color: occ.badgeType === 'occupied' ? '#DC2626' : '#2563EB',
+                    fontSize: '0.73rem',
+                  }}
+                >
+                  {locale === 'ar' ? `يفضى: ${occ.vacatingDate}` : `Vacating: ${occ.vacatingDate}`}
+                </span>
+              )}
+            </div>
+
+            {/* Exact Booking Duration: e.g. ٢٧/٩/٢٠٢٦ ↓ ٢٧/١٢/٢٠٢٦ */}
+            {occ.rangeDisplay ? (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginTop: '0.3rem',
+                  paddingTop: '0.3rem',
+                  borderTop: '1px dashed rgba(0,0,0,0.08)',
+                  color: '#475569',
+                  fontWeight: 700,
+                  fontSize: '0.75rem',
+                }}
+              >
+                <span>📅 {locale === 'ar' ? 'فترة الحجز:' : 'Stay Period:'}</span>
+                <span style={{ color: '#0B2A4A', direction: 'ltr', unicodeBidi: 'embed' }}>
+                  {occ.startFormatted}
+                </span>
+                <span style={{ color: '#2563EB', fontWeight: 900, fontSize: '0.85rem' }}>↓</span>
+                <span style={{ color: '#0B2A4A', direction: 'ltr', unicodeBidi: 'embed' }}>
+                  {occ.endFormatted}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {/* Pricing & CTA */}

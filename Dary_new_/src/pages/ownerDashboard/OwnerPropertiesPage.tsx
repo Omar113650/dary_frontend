@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import type { OwnerPropertyItem } from '../../services/ownerService';
@@ -50,6 +50,11 @@ export default function OwnerPropertiesPage() {
     refetch: fetchProperties,
   } = useOwnerMyProperties();
 
+  // Always refetch properties on mount so newly added properties appear immediately
+  useEffect(() => {
+    fetchProperties();
+  }, [fetchProperties]);
+
   const properties: OwnerPropertyItem[] = Array.isArray(rawProperties) ? rawProperties : [];
   const error = queryError
     ? (queryError as any)?.message ||
@@ -60,13 +65,22 @@ export default function OwnerPropertiesPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Helper to reliably identify pending properties even if status is lowercase or undefined
+  const isPendingStatus = (st?: string) => {
+    const s = (st || '').toUpperCase();
+    if (s === 'APPROVED' || s === 'ACTIVE' || s === 'REJECTED' || s === 'SUSPENDED') {
+      return false;
+    }
+    return true; // Any other status (PENDING, PENDING_REVIEW, UNDER_REVIEW, null, undefined, empty) is treated as pending review
+  };
+
   const filteredProperties = useMemo(() => {
     let result = properties;
     if (statusFilter !== 'ALL') {
       result = result.filter((p) => {
         const st = (p.status || '').toUpperCase();
         if (statusFilter === 'APPROVED') return st === 'APPROVED' || st === 'ACTIVE';
-        if (statusFilter === 'PENDING') return st === 'PENDING';
+        if (statusFilter === 'PENDING') return isPendingStatus(p.status);
         if (statusFilter === 'REJECTED') return st === 'REJECTED';
         if (statusFilter === 'SUSPENDED') return st === 'SUSPENDED';
         return true;
@@ -96,8 +110,11 @@ export default function OwnerPropertiesPage() {
 
   const stats = useMemo(() => {
     const total = properties.length;
-    const approved = properties.filter((p) => (p.status || '').toUpperCase() === 'APPROVED' || (p.status || '').toUpperCase() === 'ACTIVE').length;
-    const pending = properties.filter((p) => (p.status || '').toUpperCase() === 'PENDING').length;
+    const approved = properties.filter((p) => {
+      const s = (p.status || '').toUpperCase();
+      return s === 'APPROVED' || s === 'ACTIVE';
+    }).length;
+    const pending = properties.filter((p) => isPendingStatus(p.status)).length;
     return { total, approved, pending };
   }, [properties]);
 
@@ -116,16 +133,45 @@ export default function OwnerPropertiesPage() {
     return map[key] ? (locale === 'ar' ? map[key].ar : map[key].en) : type;
   }
 
-  function getStatusBadge(status?: string) {
+  function getStatusBadge(status?: string, propItem?: any) {
     const s = (status || '').toUpperCase();
     if (s === 'APPROVED' || s === 'ACTIVE') {
+      const rooms = Array.isArray(propItem?.rooms_) ? propItem.rooms_ : [];
+      let isFull = false;
+      let isPartial = false;
+      if (rooms.length > 0) {
+        const totalBeds = rooms.reduce((acc: number, r: any) => acc + Number(r.totalBeds || 1), 0);
+        const availBeds = rooms.reduce((acc: number, r: any) => acc + Math.max(0, Number(r.availableBeds ?? r.totalBeds ?? 1)), 0);
+        if (availBeds <= 0 || rooms.every((r: any) => r.status === 'FULL' || Number(r.availableBeds) <= 0)) {
+          isFull = true;
+        } else if (availBeds < totalBeds) {
+          isPartial = true;
+        }
+      } else if (propItem?.isAvailable === false || s === 'RENTED' || s === 'OCCUPIED' || s === 'BOOKED') {
+        isFull = true;
+      }
+
+      if (isFull) {
+        return (
+          <span className="dary-badge dary-badge-cancelled" style={{ backgroundColor: '#FEE2E2', color: '#991B1B' }}>
+            🔒 {locale === 'ar' ? 'معتمد (محجوز بالكامل)' : 'Approved (Booked)'}
+          </span>
+        );
+      }
+      if (isPartial) {
+        return (
+          <span className="dary-badge dary-badge-pending" style={{ backgroundColor: '#FEF3C7', color: '#92400E' }}>
+            ⚠️ {locale === 'ar' ? 'معتمد (محجوز جزئياً)' : 'Approved (Partial)'}
+          </span>
+        );
+      }
       return (
         <span className="dary-badge dary-badge-closed" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
           ✓ {locale === 'ar' ? 'معتمد ومتاح' : 'Approved & Live'}
         </span>
       );
     }
-    if (s === 'PENDING') {
+    if (isPendingStatus(status)) {
       return (
         <span className="dary-badge dary-badge-pending" style={{ backgroundColor: '#FEF9C3', color: '#A16207' }}>
           ⏳ {locale === 'ar' ? 'قيد مراجعة الإدارة' : 'Pending Review'}
@@ -150,6 +196,7 @@ export default function OwnerPropertiesPage() {
   }
 
   const handleToggleAvailability = async (propertyId: string) => {
+    if (actionLoadingId) return;
     setActionLoadingId(propertyId);
     setPageMessage(null);
     try {
@@ -171,6 +218,7 @@ export default function OwnerPropertiesPage() {
   };
 
   const handleDeleteProperty = async (propertyId: string) => {
+    if (actionLoadingId) return;
     if (!window.confirm(locale === 'ar' ? 'هل أنت متأكد من رغبتك في حذف هذا العقار نهائياً؟ هذا الإجراء لا يمكن التراجع عنه.' : 'Are you sure you want to permanently delete this property? This cannot be undone.')) {
       return;
     }
@@ -205,11 +253,35 @@ export default function OwnerPropertiesPage() {
   const handleAddRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!manageRoomsProperty) return;
+
+    if (Number(newPricePerBed) <= 0) {
+      setRoomModalMessage({
+        type: 'error',
+        text: locale === 'ar' ? 'سعر السرير يجب أن يكون أكبر من 0.' : 'Price per bed must be greater than 0.',
+      });
+      return;
+    }
+
+    if (Number(newTotalBeds) <= 0) {
+      setRoomModalMessage({
+        type: 'error',
+        text: locale === 'ar' ? 'إجمالي الأسرّة يجب أن يكون 1 على الأقل.' : 'Total beds must be at least 1.',
+      });
+      return;
+    }
+
+    if (Number(newAvailableBeds) > Number(newTotalBeds)) {
+      setRoomModalMessage({
+        type: 'error',
+        text: locale === 'ar' ? 'عدد الأسرّة المتاحة لا يمكن أن يتجاوز إجمالي الأسرّة.' : 'Available beds cannot exceed total beds.',
+      });
+      return;
+    }
+
     setIsAddingRoom(true);
     setRoomModalMessage(null);
     try {
       // Always send as FormData so the backend receives the photo in the same request.
-      // The backend requires the photo to be present (roomPhotoRequired validation).
       const formData = new FormData();
       formData.append('roomType', newRoomType);
       formData.append('pricePerBed', String(Number(newPricePerBed)));
@@ -524,7 +596,9 @@ export default function OwnerPropertiesPage() {
                 (Array.isArray((property as any).roomsConfig) ? (property as any).roomsConfig.length : null) ||
                 1;
 
-              const isPending = (property.status || '').toUpperCase() === 'PENDING';
+              const isPending = isPendingStatus(property.status);
+              const isRejected = (property.status || '').toUpperCase() === 'REJECTED';
+              const rejectReasonText = property.rejectionReason || (property as any).rejection_reason;
 
               return (
                 <div
@@ -550,7 +624,7 @@ export default function OwnerPropertiesPage() {
                       }}
                     />
                     <div style={{ position: 'absolute', top: '10px', insetInlineStart: '10px' }}>
-                      {getStatusBadge(property.status)}
+                      {getStatusBadge(property.status, property)}
                     </div>
                   </div>
 
@@ -576,6 +650,28 @@ export default function OwnerPropertiesPage() {
                       <div style={{ backgroundColor: '#FEF9C3', border: '1px solid #FDE047', borderRadius: '8px', padding: '0.5rem 0.75rem', marginBottom: '0.85rem', fontSize: '0.775rem', color: '#854D0E', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                         <span>ℹ️</span>
                         <span>{locale === 'ar' ? 'قيد مراجعة واعتماد الإدارة ليظهر للطلاب' : 'Under admin review to go live'}</span>
+                      </div>
+                    )}
+
+                    {isRejected && (
+                      <div
+                        style={{
+                          backgroundColor: '#FEF2F2',
+                          border: '1px solid #FECACA',
+                          borderRadius: '8px',
+                          padding: '0.65rem 0.85rem',
+                          marginBottom: '0.85rem',
+                          fontSize: '0.8rem',
+                          color: '#991B1B',
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <span>🚫</span>
+                          <span>{locale === 'ar' ? 'سبب رفض النشر من الإدارة:' : 'Rejection Reason from Admin:'}</span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.825rem', color: '#B91C1C', lineHeight: 1.5, wordBreak: 'break-word' }}>
+                          {rejectReasonText || (locale === 'ar' ? 'لم يتم إرفاق سبب محدد. يرجى مراجعة تفاصيل العقار وتحديثها.' : 'No specific reason provided. Please review property details.')}
+                        </p>
                       </div>
                     )}
 

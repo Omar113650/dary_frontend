@@ -24,6 +24,7 @@ export default function ImageManagerModal({ propertyId, propertyTitle, onClose }
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadCategory, setUploadCategory] = useState<string>('general');
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [settingPrimaryId, setSettingPrimaryId] = useState<string | null>(null);
@@ -65,7 +66,7 @@ export default function ImageManagerModal({ propertyId, propertyTitle, onClose }
     setUploading(true);
     setActionMessage(null);
     try {
-      await propertyService.uploadPropertyImages(propertyId, uploadFiles);
+      await propertyService.uploadPropertyImages(propertyId, uploadFiles, uploadCategory);
       setActionMessage({ type: 'success', text: locale === 'ar' ? `تم رفع ${uploadFiles.length} صورة بنجاح.` : `${uploadFiles.length} image(s) uploaded successfully.` });
       setUploadFiles([]);
       fetchImages();
@@ -202,6 +203,26 @@ export default function ImageManagerModal({ propertyId, propertyTitle, onClose }
                 onChange={(e) => setUploadFiles(Array.from(e.target.files || []))}
                 style={{ flex: 1, fontSize: '0.85rem', minWidth: '200px' }}
               />
+              <select
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
+                style={{
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid #7DD3FC',
+                  backgroundColor: '#FFFFFF',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: '#0B2A4A',
+                  outline: 'none',
+                }}
+              >
+                <option value="general">{locale === 'ar' ? 'عام' : 'General'}</option>
+                <option value="kitchen">{locale === 'ar' ? 'مطبخ' : 'Kitchen'}</option>
+                <option value="bathroom">{locale === 'ar' ? 'حمام' : 'Bathroom'}</option>
+                <option value="living_room">{locale === 'ar' ? 'غرفة معيشة' : 'Living Room'}</option>
+                <option value="exterior">{locale === 'ar' ? 'خارجي' : 'Exterior'}</option>
+              </select>
               <button
                 type="button"
                 disabled={uploading || uploadFiles.length === 0}

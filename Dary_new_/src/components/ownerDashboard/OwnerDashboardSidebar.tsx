@@ -7,12 +7,14 @@ interface OwnerDashboardSidebarProps {
   basePath?: string;
   mobileOpen: boolean;
   onCloseMobile: () => void;
+  unreadCount?: number;
 }
 
 export default function OwnerDashboardSidebar({
   basePath = '/owner-dashboard',
   mobileOpen,
   onCloseMobile,
+  unreadCount = 0,
 }: OwnerDashboardSidebarProps) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -109,6 +111,7 @@ export default function OwnerDashboardSidebar({
     {
       to: `${basePath}/notifications`,
       label: locale === 'ar' ? 'الإشعارات' : 'Notifications',
+      badge: unreadCount > 0 ? unreadCount : undefined,
       icon: (
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -160,6 +163,7 @@ export default function OwnerDashboardSidebar({
           >
             {item.icon}
             <span>{item.label}</span>
+            {item.badge !== undefined && <span className="dary-nav-badge">{item.badge}</span>}
           </NavLink>
         ))}
 

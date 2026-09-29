@@ -217,7 +217,37 @@ export function normalizeProperty(raw: any): Property {
         : undefined;
     const availableBeds = rawAvail !== undefined ? Number(rawAvail) : totalBeds;
     const status = availableBeds <= 0 ? 'FULL' : (r.status || 'AVAILABLE');
+    const roomBookings =
+      Array.isArray(r.bookings) && r.bookings.length > 0
+        ? r.bookings
+        : Array.isArray(r.rentals) && r.rentals.length > 0
+        ? r.rentals
+        : Array.isArray(raw.bookings)
+        ? raw.bookings.filter((b: any) => String(b.roomId || b.room_id || '') === String(r.id || r._id || ''))
+        : Array.isArray(raw.rentals)
+        ? raw.rentals.filter((b: any) => String(b.roomId || b.room_id || '') === String(r.id || r._id || ''))
+        : [];
+
+    let occupiedUntil = r.occupiedUntil || r.occupied_until || r.endDate || r.end_date || undefined;
+    if (!occupiedUntil && roomBookings.length > 0) {
+      const activeBk = roomBookings.filter((b: any) => {
+        const end = b.endDate || b.end_date;
+        return end && new Date(end).getTime() > Date.now();
+      });
+      if (activeBk.length > 0) {
+        const sorted = [...activeBk].sort(
+          (a: any, b: any) => new Date(b.endDate || b.end_date).getTime() - new Date(a.endDate || a.end_date).getTime()
+        );
+        occupiedUntil = sorted[0].endDate || sorted[0].end_date;
+      }
+    }
+    if (!occupiedUntil && (raw.occupiedUntil || raw.occupied_until || raw.endDate || raw.end_date || raw.availableTo || raw.available_to)) {
+      occupiedUntil = raw.occupiedUntil || raw.occupied_until || raw.endDate || raw.end_date || raw.availableTo || raw.available_to;
+    }
+
+    const availableFrom = r.availableFrom || r.available_from || r.startDate || r.start_date || raw.availableFrom || raw.available_from || undefined;
     return {
+      ...r,
       id: String(r.id || r._id || `room-${idx + 1}`),
       roomType: r.roomType || r.room_type || 'SINGLE',
       pricePerBed: Number(r.pricePerBed || r.price_per_bed || raw.price || 0),
@@ -225,6 +255,11 @@ export function normalizeProperty(raw: any): Property {
       availableBeds: Math.max(0, availableBeds),
       photoUrl: r.photoUrl || r.photo_url || (Array.isArray(raw.roomPhotos) ? raw.roomPhotos[idx] : undefined),
       status,
+      occupiedUntil,
+      availableFrom,
+      startDate: r.startDate || r.start_date || availableFrom,
+      endDate: r.endDate || r.end_date || occupiedUntil,
+      bookings: roomBookings,
     };
   });
 
@@ -272,6 +307,18 @@ export function normalizeProperty(raw: any): Property {
     floor,
     area,
     rules,
+    bookings: Array.isArray(raw.bookings)
+      ? raw.bookings
+      : Array.isArray(raw.rentals)
+      ? raw.rentals
+      : Array.isArray(raw.propertyBookings)
+      ? raw.propertyBookings
+      : [],
+    occupiedUntil: raw.occupiedUntil || raw.occupied_until || raw.endDate || raw.end_date || undefined,
+    availableFrom: raw.availableFrom || raw.available_from || raw.startDate || raw.start_date || undefined,
+    startDate: raw.startDate || raw.start_date || raw.availableFrom || undefined,
+    endDate: raw.endDate || raw.end_date || raw.occupiedUntil || undefined,
+    rejectionReason: raw.rejectionReason || raw.rejection_reason || undefined,
     ownerId: raw.ownerId || raw.userId || (typeof raw.owner === 'string' ? raw.owner : null) || (typeof raw.owner === 'object' ? raw.owner?.id : undefined),
     owner:
       typeof raw.owner === 'object' && raw.owner !== null
@@ -502,9 +549,12 @@ export const propertyService = {
    * 12. POST /properties/:propertyId/images
    * Upload Property Images (multipart/form-data)
    */
-  async uploadPropertyImages(propertyId: string, files: File[]): Promise<any> {
+  async uploadPropertyImages(propertyId: string, files: File[], category?: string): Promise<any> {
     const formData = new FormData();
     files.forEach((file) => formData.append('images', file));
+    if (category) {
+      formData.append('category', category);
+    }
     const res = await ApiClient.post<any>(`/properties/${propertyId}/images`, formData);
     return res?.data || res;
   },
@@ -542,7 +592,11 @@ export const propertyService = {
    * Reorder Property Images
    */
   async reorderPropertyImages(propertyId: string, imageIds: string[]): Promise<any> {
-    const res = await ApiClient.patch<any>(`/properties/${propertyId}/images/reorder`, { imageIds });
+    // Send both 'order' (expected by backend reorderImagesSchema) and 'imageIds' for backwards compatibility
+    const res = await ApiClient.patch<any>(`/properties/${propertyId}/images/reorder`, {
+      order: imageIds,
+      imageIds,
+    });
     return res?.data || res;
   },
 

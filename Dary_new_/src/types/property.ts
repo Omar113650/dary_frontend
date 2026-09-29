@@ -6,6 +6,12 @@ export interface PropertyRoomItem {
   availableBeds: number;
   photoUrl?: string;
   status?: string;
+  occupiedUntil?: string;
+  availableFrom?: string;
+  startDate?: string;
+  endDate?: string;
+  bookings?: any[];
+  [key: string]: any;
 }
 
 export interface Property {
@@ -49,6 +55,12 @@ export interface Property {
   area?: number;
   rules?: string[] | string;
   status?: string;
+  rejectionReason?: string;
+  occupiedUntil?: string;
+  availableFrom?: string;
+  startDate?: string;
+  endDate?: string;
+  bookings?: any[];
   owner?: {
     id?: string;
     firstName?: string;

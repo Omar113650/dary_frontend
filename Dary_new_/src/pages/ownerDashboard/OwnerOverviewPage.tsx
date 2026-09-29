@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
@@ -32,6 +32,7 @@ export default function OwnerOverviewPage() {
     data: propertiesStatus,
     isLoading: loadingProps,
     error: propsErrorObj,
+    refetch: fetchPropStatus,
   } = useOwnerPropertiesStatus();
   const propsError = propsErrorObj
     ? (propsErrorObj as any)?.message ||
@@ -44,8 +45,15 @@ export default function OwnerOverviewPage() {
   const {
     data: rawMyProperties,
     isLoading: loadingMyProps,
+    refetch: fetchMyProperties,
   } = useOwnerMyProperties();
   const myPropertiesList = Array.isArray(rawMyProperties) ? rawMyProperties : [];
+
+  // Always refetch property data on mount so newly added properties reflect immediately
+  useEffect(() => {
+    fetchPropStatus();
+    fetchMyProperties();
+  }, [fetchPropStatus, fetchMyProperties]);
 
   // 2. Booking Status Query (staleTime: 30s)
   const {
@@ -165,9 +173,28 @@ export default function OwnerOverviewPage() {
     return list.reduce((acc, curr) => acc + curr.count, 0);
   };
 
-  const propStatusList = extractStatusEntries(propertiesStatus);
+  const rawPropStatusList = extractStatusEntries(propertiesStatus);
+  const propStatusList = useMemo(() => {
+    if (rawPropStatusList.length > 0) return rawPropStatusList;
+    if (myPropertiesList.length === 0) return [];
+    const counts: Record<string, number> = {};
+    for (const p of myPropertiesList) {
+      const s = (p.status || 'PENDING').toUpperCase();
+      const normalizedStatus =
+        s === 'APPROVED' || s === 'ACTIVE'
+          ? 'APPROVED'
+          : s === 'REJECTED'
+          ? 'REJECTED'
+          : s === 'SUSPENDED'
+          ? 'SUSPENDED'
+          : 'PENDING';
+      counts[normalizedStatus] = (counts[normalizedStatus] || 0) + 1;
+    }
+    return Object.entries(counts).map(([status, count]) => ({ status, count }));
+  }, [rawPropStatusList, myPropertiesList]);
+
   const bookingStatusList = extractStatusEntries(bookingsStatus);
-  const totalOwnerProps = extractOwnerTotal(propertiesStatus, propStatusList);
+  const totalOwnerProps = Math.max(extractOwnerTotal(propertiesStatus, rawPropStatusList), myPropertiesList.length);
   const totalOwnerBookings = extractOwnerTotal(bookingsStatus, bookingStatusList);
 
   // Parse revenue safely

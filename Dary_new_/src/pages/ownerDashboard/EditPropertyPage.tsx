@@ -35,7 +35,7 @@ export default function EditPropertyPage() {
   >('shared_apartment');
   const [propertyClass, setPropertyClass] = useState<'STANDARD' | 'LUXURY'>('STANDARD');
   const [targetTenantType, setTargetTenantType] = useState<'STUDENT' | 'GENERAL' | 'ANY'>('STUDENT');
-  const [genderAllowed, setGenderAllowed] = useState<'male_only' | 'female_only' | 'any'>('any');
+  const [genderAllowed, setGenderAllowed] = useState<'male_only' | 'female_only'>('male_only');
 
   // Location
   const [governorate, setGovernorate] = useState('');
@@ -58,6 +58,8 @@ export default function EditPropertyPage() {
   const [area, setArea] = useState<number | ''>('');
 
   // Submission state
+  const [propertyStatus, setPropertyStatus] = useState<string>('');
+  const [rejectionReason, setRejectionReason] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -75,6 +77,9 @@ export default function EditPropertyPage() {
       }
 
       // Pre-fill all fields
+      setPropertyStatus((prop.status || '').toUpperCase());
+      setRejectionReason(prop.rejectionReason || (prop as any).rejection_reason || '');
+
       const rawTitle = typeof prop.title === 'object' ? (prop.title as any).ar || (prop.title as any).en || '' : String(prop.title || '');
       setTitle(rawTitle);
       setDescription(String(prop.description || ''));
@@ -89,8 +94,8 @@ export default function EditPropertyPage() {
       const tType = (prop.targetTenantType || 'STUDENT').toUpperCase();
       setTargetTenantType(['STUDENT', 'GENERAL', 'ANY'].includes(tType) ? tType as any : 'STUDENT');
 
-      const gender = (prop.genderAllowed || 'any').toLowerCase();
-      setGenderAllowed(['male_only', 'female_only', 'any'].includes(gender) ? gender as any : 'any');
+      const gender = (prop.genderAllowed || 'male_only').toLowerCase();
+      setGenderAllowed(gender === 'female_only' ? 'female_only' : 'male_only');
 
       setGovernorate(prop.governorate || '');
       setCity(prop.city || '');
@@ -128,6 +133,7 @@ export default function EditPropertyPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setFormError(null);
 
     if (!title.trim()) {
@@ -291,6 +297,28 @@ export default function EditPropertyPage() {
         </div>
       </div>
 
+      {/* Rejection Alert Banner if Property was Rejected */}
+      {propertyStatus === 'REJECTED' && (
+        <div
+          style={{
+            padding: '1.1rem 1.25rem',
+            borderRadius: '12px',
+            backgroundColor: '#FEF2F2',
+            border: '1px solid #FCA5A5',
+            color: '#991B1B',
+            marginBottom: '1.5rem',
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span>🚫</span>
+            <span>{locale === 'ar' ? 'سبب رفض الإدارة لنشر هذا العقار:' : 'Admin Rejection Feedback:'}</span>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.875rem', color: '#B91C1C', lineHeight: 1.6, wordBreak: 'break-word' }}>
+            {rejectionReason || (locale === 'ar' ? 'تم رفض إدراج هذا العقار سابقاً. يرجى تصحيح الملاحظات والبيانات ثم حفظ التعديلات لإعادة إرساله للمراجعة.' : 'This listing was rejected. Please address the feedback and save changes to re-submit for review.')}
+          </p>
+        </div>
+      )}
+
       {/* Success Banner */}
       {successMessage && (
         <div
@@ -396,7 +424,6 @@ export default function EditPropertyPage() {
               <select value={genderAllowed} onChange={(e: any) => setGenderAllowed(e.target.value)} style={inputStyle}>
                 <option value="male_only">{locale === 'ar' ? 'ذكور فقط' : 'Males Only'}</option>
                 <option value="female_only">{locale === 'ar' ? 'إناث فقط' : 'Females Only'}</option>
-                <option value="any">{locale === 'ar' ? 'الجميع' : 'Any Gender'}</option>
               </select>
             </div>
           </div>

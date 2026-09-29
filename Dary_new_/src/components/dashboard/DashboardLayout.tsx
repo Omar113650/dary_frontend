@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import DashboardSidebar from './DashboardSidebar';
 import DashboardHeader from './DashboardHeader';
-import { TenantService } from '../../services/tenantService';
-import { defaultQueryClient, STALE_TIMES } from '../../lib/queryClient';
+import { useUnreadNotificationsCount } from '../../hooks/useDashboardQueries';
 import './Dashboard.css';
 
 interface DashboardLayoutProps {
@@ -16,30 +15,10 @@ export default function DashboardLayout({ basePath: customBasePath }: DashboardL
     customBasePath ||
     (location.pathname.startsWith('/dashboard-preview') ? '/dashboard-preview' : '/dashboard');
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [unreadCount, setUnreadCount] = useState(0);
 
-  useEffect(() => {
-    // Fetch notifications count with cached stale time
-    let isMounted = true;
-    defaultQueryClient
-      .fetchQuery({
-        queryKey: ['tenant', 'notifications', 1, 10],
-        queryFn: () => TenantService.getNotifications(1, 10),
-        staleTime: STALE_TIMES.LIVE,
-      })
-      .then((res) => {
-        if (!isMounted) return;
-        const unread = res?.items ? res.items.filter((n: any) => !n.isRead && !n.read).length : 0;
-        setUnreadCount(unread);
-      })
-      .catch((err) => {
-        console.warn('[DashboardLayout] Could not fetch notifications count:', err);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  // Real-time unread notifications count (polls every 15s)
+  const { data: liveUnreadCount } = useUnreadNotificationsCount();
+  const unreadCount = liveUnreadCount ?? 0;
 
   return (
     <div className="dary-dashboard-shell">
@@ -67,7 +46,7 @@ export default function DashboardLayout({ basePath: customBasePath }: DashboardL
         />
 
         <main className="dary-content-outlet">
-          <Outlet context={{ unreadCount, setUnreadCount }} />
+          <Outlet context={{ unreadCount }} />
         </main>
       </div>
     </div>

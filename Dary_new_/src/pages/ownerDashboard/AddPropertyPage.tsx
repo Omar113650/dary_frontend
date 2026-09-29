@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
+import { useQueryClient } from '../../lib/queryClient';
 
 interface RoomConfigItem {
   roomType: 'SINGLE' | 'DOUBLE' | 'TRIPLE' | 'QUAD';
@@ -30,6 +31,7 @@ const COMMON_AMENITIES = [
 export default function AddPropertyPage() {
   const { locale } = useLocale();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   // Basic Details
   const [title, setTitle] = useState('');
@@ -127,6 +129,7 @@ export default function AddPropertyPage() {
   // Form Submit
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setFormError(null);
     setSuccessMessage(null);
 
@@ -243,6 +246,14 @@ export default function AddPropertyPage() {
       livingRoomPhotos.forEach((file) => formData.append('livingRoomPhotos', file));
 
       await OwnerService.createProperty(formData);
+
+      // Invalidate all related caches so the newly added property appears immediately in owner dashboard
+      queryClient.invalidateQueries({ queryKey: ['owner', 'my-properties'] });
+      queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['owner'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+
       setSuccessMessage(
         locale === 'ar'
           ? 'تم تسجيل العقار بنجاح وإرساله للمراجعة من قبل الإدارة!'

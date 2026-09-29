@@ -194,15 +194,34 @@ export function useFeaturedProperties(limit = 6) {
 // 4. NOTIFICATIONS QUERIES & MUTATIONS
 // ==========================================
 
-/** Notifications: 10s cache (Live data) */
-export function useNotifications(page = 1, limit = 50) {
+/** Notifications list with 10s freshness and 15s auto-polling */
+export function useNotifications(page = 1, limit = 50, params?: { isRead?: boolean | string; event?: string }) {
   return useQuery({
-    queryKey: [...QUERY_KEYS.notifications(page, limit)],
+    queryKey: ['notifications', page, limit, params?.isRead, params?.event],
     queryFn: async () => {
-      const res = await NotificationService.getNotifications({ page, limit });
-      return Array.isArray(res) ? res : res?.items || [];
+      const res = await NotificationService.getNotifications({ page, limit, ...params });
+      const items = Array.isArray(res) ? res : res?.items || [];
+      // Attach meta and unreadCount as properties to the array for convenience
+      (items as any).meta = res?.meta;
+      (items as any).unreadCount = res?.unreadCount ?? 0;
+      (items as any).total = res?.total ?? items.length;
+      return items;
     },
-    staleTime: STALE_TIMES.LIVE,
+    staleTime: 10 * 1000,
+    refetchInterval: 15 * 1000, // 15-second background polling for live updates
+  });
+}
+
+/** Real-time Unread Notifications Count (polls every 15s across all roles) */
+export function useUnreadNotificationsCount() {
+  return useQuery<number>({
+    queryKey: ['notifications', 'unreadCount'],
+    queryFn: async () => {
+      const res = await NotificationService.getNotifications({ page: 1, limit: 10 });
+      return res?.unreadCount ?? 0;
+    },
+    staleTime: 10 * 1000,
+    refetchInterval: 15 * 1000, // 15-second background polling
   });
 }
 
@@ -211,6 +230,39 @@ export function useMarkNotificationRead() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => NotificationService.markAsRead(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+/** Mutation: Mark All Notifications Read with auto-invalidation */
+export function useMarkAllNotificationsRead() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => NotificationService.markAllAsRead(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+/** Mutation: Delete Single Notification by ID with auto-invalidation */
+export function useDeleteNotification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => NotificationService.deleteNotification(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+    },
+  });
+}
+
+/** Mutation: Delete All Read Notifications with auto-invalidation */
+export function useDeleteAllReadNotifications() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => NotificationService.deleteAllRead(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },

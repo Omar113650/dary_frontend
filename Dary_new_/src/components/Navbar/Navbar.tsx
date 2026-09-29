@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
+import { useUnreadNotificationsCount } from '../../hooks/useDashboardQueries';
 import logo from '../../assets/branding/FINAL-LOGO1.png';
 import './Navbar.css';
 
@@ -10,6 +11,10 @@ export default function Navbar() {
   const { isAuthenticated, isOwner, isAdmin, logout } = useAuth();
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Real-time unread notifications count
+  const { data: rawUnreadCount } = useUnreadNotificationsCount();
+  const unreadCount = isAuthenticated ? (rawUnreadCount ?? 0) : 0;
 
   // We set inline styles directly on the bar element to guarantee
   // that CSS specificity never overrides the scroll-driven values.
@@ -243,6 +248,58 @@ export default function Navbar() {
                   </svg>
                   <span>{t.nav_dashboard}</span>
                 </Link>
+
+                <Link
+                  to={`${dashboardPath}/notifications`}
+                  title={locale === 'ar' ? (unreadCount > 0 ? `لديك ${unreadCount} إشعار غير مقروء` : 'الإشعارات') : 'Notifications'}
+                  style={{
+                    position: 'relative',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    backgroundColor: unreadCount > 0 ? '#EFF6FF' : '#F1F5F9',
+                    border: `1px solid ${unreadCount > 0 ? '#BFDBFE' : '#E2E8F0'}`,
+                    color: unreadCount > 0 ? '#2563EB' : '#475569',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill={unreadCount > 0 ? 'rgba(37,99,235,0.15)' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                  </svg>
+                  {unreadCount > 0 && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        minWidth: '17px',
+                        height: '17px',
+                        padding: '0 3px',
+                        borderRadius: '9999px',
+                        backgroundColor: '#EF4444',
+                        color: '#FFFFFF',
+                        fontSize: '0.625rem',
+                        fontWeight: 800,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '2px solid #FFFFFF',
+                        boxShadow: '0 2px 4px rgba(239, 68, 68, 0.4)',
+                        animation: 'dary-pulse-glow 2.5s infinite ease-in-out',
+                        lineHeight: 1,
+                      }}
+                    >
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </Link>
+
                 <button
                   type="button"
                   onClick={async () => {
@@ -351,6 +408,43 @@ export default function Navbar() {
                   onClick={() => setMobileOpen(false)}
                 >
                   {t.nav_dashboard}
+                </Link>
+
+                <Link
+                  to={`${dashboardPath}/notifications`}
+                  onClick={() => setMobileOpen(false)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '12px',
+                    backgroundColor: unreadCount > 0 ? '#EFF6FF' : '#F8FAFC',
+                    color: unreadCount > 0 ? '#1D4ED8' : '#334155',
+                    border: `1px solid ${unreadCount > 0 ? '#BFDBFE' : '#E2E8F0'}`,
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    textDecoration: 'none',
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>🔔</span>
+                    <span>{locale === 'ar' ? 'الإشعارات والتنبيهات' : 'Notifications'}</span>
+                  </span>
+                  {unreadCount > 0 && (
+                    <span
+                      style={{
+                        backgroundColor: '#EF4444',
+                        color: '#FFFFFF',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        padding: '0.15rem 0.55rem',
+                        borderRadius: '9999px',
+                      }}
+                    >
+                      {unreadCount}
+                    </span>
+                  )}
                 </Link>
                 <button
                   type="button"

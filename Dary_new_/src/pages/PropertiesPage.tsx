@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
 import { propertyService } from '../services/propertyService';
+import { fetchGlobalActiveBookings } from '../services/occupancyService';
 import type { Property } from '../types/property';
 import PropertyCard from '../components/PropertyCard/PropertyCard';
 import AnimatedCounter from '../components/common/AnimatedCounter';
@@ -89,6 +90,11 @@ export default function PropertiesPage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Proactively fetch global active bookings so property cards reflect live vacancy schedules
+  useEffect(() => {
+    fetchGlobalActiveBookings().catch(() => {});
+  }, []);
 
   // Debounce search input (400ms)
   useEffect(() => {

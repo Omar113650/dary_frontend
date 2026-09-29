@@ -3,13 +3,474 @@ import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
 import { propertyService, getCachedProperty } from '../services/propertyService';
 import { TenantService } from '../services/tenantService';
+import type { RentalBooking } from '../services/tenantService';
 import { ReportService } from '../services/reportService';
 import { ReviewService } from '../services/reviewService';
 import type { ReviewItem } from '../services/reviewService';
 import { useAuth } from '../context/AuthContext';
+import { ApiClient } from '../services/apiClient';
+import { BookingService } from '../services/bookingService';
 import type { Property } from '../types/property';
 
 const recordedRecentlyViewedIds = new Set<string>();
+
+export function extractDatesFromText(text?: string): { from?: string; until?: string } {
+  if (!text || typeof text !== 'string') return {};
+  let from: string | undefined;
+  let until: string | undefined;
+
+  // Matches MM/YYYY, YYYY/MM, DD/MM/YYYY, YYYY-MM-DD, and YYYY
+  const dateToken = String.raw`(?:\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}|\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|\d{1,2}[-/.]\d{4}|\d{4}[-/.]\d{1,2}|\d{4})`;
+
+  // 1. Range pattern: "من [date] إلى/حتى/لغاية [date]" or "from [date] to/until [date]"
+  const rangeRegex = new RegExp(
+    String.raw`(?:فترة\s*الإتاحة\s*[:]?\s*)?(?:من|from)\s*[:]?\s*(${dateToken})\s*(?:إلى|الى|حتى|لغاية|to|until)\s*[:]?\s*(${dateToken})`,
+    'i'
+  );
+  const rangeMatch = text.match(rangeRegex);
+  if (rangeMatch) {
+    from = rangeMatch[1].trim();
+    until = rangeMatch[2].trim();
+  } else {
+    // 2. Until pattern: "حتى [date]" or "لغاية [date]" or "محجوز حتى [date]" or "ينتهي في [date]" or "until/to [date]"
+    const untilRegex = new RegExp(
+      String.raw`(?:حتى|لغاية|ينتهي\s*في|إلى\s*غاية|until|to)\s*[:]?\s*(${dateToken})`,
+      'i'
+    );
+    const untilMatch = text.match(untilRegex);
+    if (untilMatch) {
+      until = untilMatch[1].trim();
+    }
+    // 3. From pattern: "بدءاً من [date]" or "متاح من [date]" or "من [date]"
+    const fromRegex = new RegExp(
+      String.raw`(?:بدءاً\s*من|بدءا\s*من|متاح\s*من|من|from)\s*[:]?\s*(${dateToken})`,
+      'i'
+    );
+    const fromMatch = text.match(fromRegex);
+    if (fromMatch && !from) {
+      from = fromMatch[1].trim();
+    }
+  }
+
+  // Also check if text mentions Arabic month names like "يونيو 2027" or "شهر 6 / 2027"
+  if (!until) {
+    const arabicMonthRegex = /(?:حتى|إلى|الى|نهاية)\s*(?:شهر\s*)?(يناير|فبراير|مارس|أبريل|ابريل|مايو|يونيو|يوليو|أغسطس|اغسطس|سبتمبر|أكتوبر|اكتوبر|نوفمبر|ديسمبر)\s*(\d{4})?/i;
+    const mMatch = text.match(arabicMonthRegex);
+    if (mMatch) {
+      until = mMatch[0].trim();
+    }
+  }
+
+  return { from, until };
+}
+
+export function formatOccupancyDate(dateStr?: string | Date, loc: 'ar' | 'en' = 'ar'): string {
+  if (!dateStr) return '';
+  try {
+    const s = String(dateStr).trim();
+    
+    // Pattern: MM/YYYY or MM-YYYY (e.g. 06/2027)
+    const mmYyyy = s.match(/^(\d{1,2})[-/.](\d{4})$/);
+    if (mmYyyy) {
+      const month = parseInt(mmYyyy[1], 10);
+      const year = parseInt(mmYyyy[2], 10);
+      if (month >= 1 && month <= 12) {
+        const d = new Date(year, month - 1, 1);
+        return d.toLocaleDateString(loc === 'ar' ? 'ar-EG' : 'en-US', {
+          year: 'numeric',
+          month: 'long',
+        });
+      }
+    }
+
+    // Pattern: YYYY/MM or YYYY-MM (e.g. 2027-06)
+    const yyyyMm = s.match(/^(\d{4})[-/.](\d{1,2})$/);
+    if (yyyyMm) {
+      const year = parseInt(yyyyMm[1], 10);
+      const month = parseInt(yyyyMm[2], 10);
+      if (month >= 1 && month <= 12) {
+        const d = new Date(year, month - 1, 1);
+        return d.toLocaleDateString(loc === 'ar' ? 'ar-EG' : 'en-US', {
+          year: 'numeric',
+          month: 'long',
+        });
+      }
+    }
+
+    // Pattern: DD/MM/YYYY or DD-MM-YYYY
+    const ddMmYyyy = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (ddMmYyyy) {
+      const day = parseInt(ddMmYyyy[1], 10);
+      const month = parseInt(ddMmYyyy[2], 10);
+      const year = parseInt(ddMmYyyy[3], 10);
+      const d = new Date(year, month - 1, day);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString(loc === 'ar' ? 'ar-EG' : 'en-US', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+        });
+      }
+    }
+
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return String(dateStr);
+    return d.toLocaleDateString(loc === 'ar' ? 'ar-EG' : 'en-US', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+  } catch {
+    return String(dateStr);
+  }
+}
+
+export function getBookingStatusBadge(status?: string, loc: 'ar' | 'en' = 'ar') {
+  const s = String(status || '').toUpperCase();
+  if (s === 'CONFIRMED' || s === 'APPROVED' || s === 'ACTIVE') {
+    return {
+      text: loc === 'ar' ? 'مؤكد / ساري' : 'Confirmed / Active',
+      bg: '#DCFCE7',
+      color: '#15803D',
+      icon: '✅',
+    };
+  }
+  if (s === 'PENDING') {
+    return {
+      text: loc === 'ar' ? 'قيد المراجعة' : 'Pending Review',
+      bg: '#FEF3C7',
+      color: '#B45309',
+      icon: '⏳',
+    };
+  }
+  if (s === 'CONTACTED') {
+    return {
+      text: loc === 'ar' ? 'تم التواصل' : 'Contacted',
+      bg: '#DBEAFE',
+      color: '#1D4ED8',
+      icon: '💬',
+    };
+  }
+  if (s === 'CANCELLED' || s === 'REJECTED') {
+    return {
+      text: loc === 'ar' ? 'ملغي' : 'Cancelled',
+      bg: '#FEE2E2',
+      color: '#B91C1C',
+      icon: '✕',
+    };
+  }
+  if (s === 'CLOSED' || s === 'EXPIRED') {
+    return {
+      text: loc === 'ar' ? 'مكتمل / منتهي' : 'Completed / Expired',
+      bg: '#F1F5F9',
+      color: '#64748B',
+      icon: '📁',
+    };
+  }
+  return {
+    text: status || (loc === 'ar' ? 'مسجل' : 'Registered'),
+    bg: '#F1F5F9',
+    color: '#475569',
+    icon: '📋',
+  };
+}
+
+export interface RoomOccupancyDetails {
+  isFullyBooked: boolean;
+  isPartiallyBooked: boolean;
+  isAvailable: boolean;
+  occupiedUntil?: string;
+  availableFrom?: string;
+  startDate?: string;
+  endDate?: string;
+  startFormatted?: string;
+  endFormatted?: string;
+  rangeDisplay?: string;
+  vacatingDate?: string;
+  badgeText: string;
+  badgeType: 'available' | 'occupied' | 'partial' | 'upcoming';
+  subNote?: string;
+  vacancyTimingText: string;
+  vacancyNotice: string;
+}
+
+export function getRoomOccupancyInfo(
+  room: any,
+  loc: 'ar' | 'en',
+  property?: any,
+  liveBookings?: any[]
+): RoomOccupancyDetails {
+  const availableBeds = Number(room?.availableBeds ?? 0);
+  const totalBeds = Number(room?.totalBeds ?? 1);
+  const isFull = availableBeds <= 0 || room?.status === 'FULL';
+  const isPartial = availableBeds > 0 && availableBeds < totalBeds;
+
+  // Check possible date sources on the room
+  let untilDate = room?.occupiedUntil || room?.occupied_until || room?.endDate || room?.end_date;
+  let fromDate = room?.availableFrom || room?.available_from || room?.startDate || room?.start_date;
+
+  // 0. Live Bookings directly fetched from the backend API (highest priority & accuracy)
+  if (Array.isArray(liveBookings) && liveBookings.length > 0) {
+    const activeBk = liveBookings.filter((b: any) => {
+      const matchRoom = String(b.roomId || b.room_id || b.room?.id || '') === String(room?.id || '');
+      const st = String(b.status || '').toUpperCase();
+      if (st === 'CANCELLED' || st === 'REJECTED') return false;
+      const end = b.endDate || b.end_date || b.moveOutDate;
+      return matchRoom && end && new Date(end).getTime() > Date.now();
+    });
+    if (activeBk.length > 0) {
+      const sorted = [...activeBk].sort(
+        (a, b) => new Date(a.endDate || a.end_date || a.moveOutDate).getTime() - new Date(b.endDate || b.end_date || b.moveOutDate).getTime()
+      );
+      untilDate = sorted[0].endDate || sorted[0].end_date || sorted[0].moveOutDate;
+      if (!fromDate) {
+        fromDate = sorted[0].startDate || sorted[0].start_date || sorted[0].moveInDate;
+      }
+    }
+  }
+
+  // 1. If room has bookings array with active bookings
+  if (!untilDate && Array.isArray(room?.bookings) && room.bookings.length > 0) {
+    const activeBk = room.bookings.filter((b: any) => {
+      const st = String(b.status || '').toUpperCase();
+      if (st === 'CANCELLED' || st === 'REJECTED') return false;
+      const end = b.endDate || b.end_date || b.moveOutDate;
+      return end && new Date(end).getTime() > Date.now();
+    });
+    if (activeBk.length > 0) {
+      const sorted = [...activeBk].sort(
+        (a, b) => new Date(a.endDate || a.end_date || a.moveOutDate).getTime() - new Date(b.endDate || b.end_date || b.moveOutDate).getTime()
+      );
+      untilDate = sorted[0].endDate || sorted[0].end_date || sorted[0].moveOutDate;
+      if (!fromDate) {
+        fromDate = sorted[0].startDate || sorted[0].start_date || sorted[0].moveInDate;
+      }
+    }
+  }
+
+  // 2. If room has no untilDate, check property-level bookings
+  if (!untilDate && property && Array.isArray(property.bookings) && property.bookings.length > 0) {
+    const activeBk = property.bookings.filter((b: any) => {
+      const matchRoom = String(b.roomId || b.room_id || '') === String(room?.id || '');
+      const st = String(b.status || '').toUpperCase();
+      if (st === 'CANCELLED' || st === 'REJECTED') return false;
+      const end = b.endDate || b.end_date || b.moveOutDate;
+      return matchRoom && end && new Date(end).getTime() > Date.now();
+    });
+    if (activeBk.length > 0) {
+      const sorted = [...activeBk].sort(
+        (a, b) => new Date(a.endDate || a.end_date || a.moveOutDate).getTime() - new Date(b.endDate || b.end_date || b.moveOutDate).getTime()
+      );
+      untilDate = sorted[0].endDate || sorted[0].end_date || sorted[0].moveOutDate;
+      if (!fromDate) {
+        fromDate = sorted[0].startDate || sorted[0].start_date || sorted[0].moveInDate;
+      }
+    }
+  }
+
+  // 3. Fallback to property-level occupiedUntil / endDate / availableTo
+  if (!untilDate && property) {
+    untilDate = property.occupiedUntil || property.occupied_until || property.endDate || property.end_date || property.availableTo || property.available_to;
+  }
+
+  // 4. Fallback to parsing description if dates are mentioned in text (e.g. "فترة الإتاحة: من 08/2026 إلى 06/2027")
+  if (!untilDate && property?.description) {
+    const descText = typeof property.description === 'object'
+      ? (property.description.ar || property.description.en || '')
+      : String(property.description || '');
+    const textDates = extractDatesFromText(descText);
+    if (textDates.until) {
+      untilDate = textDates.until;
+    }
+    if (!fromDate && textDates.from) {
+      fromDate = textDates.from;
+    }
+  }
+
+  // 5. Fallback to room description or notes
+  if (!untilDate && (room?.description || room?.notes)) {
+    const textDates = extractDatesFromText(String(room.description || room.notes || ''));
+    if (textDates.until) {
+      untilDate = textDates.until;
+    }
+    if (!fromDate && textDates.from) {
+      fromDate = textDates.from;
+    }
+  }
+
+  const formattedUntil = untilDate ? formatOccupancyDate(untilDate, loc) : '';
+  const formattedFrom = fromDate ? formatOccupancyDate(fromDate, loc) : '';
+  const rangeDisplay = formattedFrom && formattedUntil ? `${formattedFrom} ↓ ${formattedUntil}` : (formattedUntil || formattedFrom);
+
+  if (isFull) {
+    if (formattedUntil) {
+      return {
+        isFullyBooked: true,
+        isPartiallyBooked: false,
+        isAvailable: false,
+        occupiedUntil: untilDate,
+        availableFrom: fromDate,
+        startDate: fromDate,
+        endDate: untilDate,
+        startFormatted: formattedFrom,
+        endFormatted: formattedUntil,
+        rangeDisplay,
+        vacatingDate: formattedUntil,
+        badgeType: 'occupied',
+        badgeText: loc === 'ar' ? `🔒 محجوزة حتى ${formattedUntil}` : `🔒 Booked until ${formattedUntil}`,
+        subNote:
+          loc === 'ar'
+            ? `ستكون الغرفة متاحة للشغور والحجز بدءاً من ${formattedUntil}`
+            : `Room is expected to become available starting ${formattedUntil}`,
+        vacancyTimingText:
+          loc === 'ar'
+            ? `ستفضى في: ${formattedUntil}`
+            : `Available from: ${formattedUntil}`,
+        vacancyNotice:
+          loc === 'ar'
+            ? `هذه الغرفة محجوزة بالكامل في الوقت الحالي ${formattedFrom && formattedUntil ? `(فترة الحجز: ${formattedFrom} ↓ ${formattedUntil})` : ''}، وستفضى وتكون متاحة للحجز مرة أخرى في ${formattedUntil}.`
+            : `This room is fully booked at this time ${formattedFrom && formattedUntil ? `(Period: ${formattedFrom} ↓ ${formattedUntil})` : ''} and will be vacant and available for booking starting ${formattedUntil}.`,
+      };
+    }
+    // Determine standard academic estimated period if no exact date is found
+    // (In Egypt student housing, contracts conclude at end of academic year in June)
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1; // 1-12
+    const academicEndYear = currentMonth >= 9 ? currentYear + 1 : currentYear;
+    const estimatedAcademicEnd = loc === 'ar' ? `يونيو ${academicEndYear} (نهاية العام الدراسي)` : `June ${academicEndYear} (End of Academic Year)`;
+
+    return {
+      isFullyBooked: true,
+      isPartiallyBooked: false,
+      isAvailable: false,
+      badgeType: 'occupied',
+      badgeText: loc === 'ar' ? '🔒 ممتلئة بالكامل حالياً' : '🔒 Currently Fully Booked',
+      subNote:
+        loc === 'ar'
+          ? `متوقع الشغور مع ${estimatedAcademicEnd}`
+          : `Expected vacancy by ${estimatedAcademicEnd}`,
+      vacancyTimingText:
+        loc === 'ar'
+          ? `المتوقع أن تفضى في: ${estimatedAcademicEnd}`
+          : `Estimated to be vacant by: ${estimatedAcademicEnd}`,
+      vacancyNotice:
+        loc === 'ar'
+          ? `الغرفة محجوزة بالكامل حالياً، وعقود الطلاب تمتد عادة للعام الدراسي بالكامل (من المتوقع أن تفضى في ${estimatedAcademicEnd}). يمكنك التواصل مع المالك لمعرفة الموعد الدقيق للشغور أو مراجعة الغرف الأخرى.`
+          : `This room is fully booked; student leases typically conclude at the end of the academic year (expected vacancy: ${estimatedAcademicEnd}). Contact the owner for exact dates.`,
+    };
+  }
+
+  if (isPartial) {
+    if (formattedUntil) {
+      return {
+        isFullyBooked: false,
+        isPartiallyBooked: true,
+        isAvailable: true,
+        availableBeds,
+        totalBeds,
+        occupiedUntil: untilDate,
+        availableFrom: fromDate,
+        startDate: fromDate,
+        endDate: untilDate,
+        startFormatted: formattedFrom,
+        endFormatted: formattedUntil,
+        rangeDisplay,
+        vacatingDate: formattedUntil,
+        badgeType: 'partial',
+        badgeText:
+          loc === 'ar'
+            ? `⚠️ متاح ${availableBeds} من ${totalBeds} أسرّة`
+            : `⚠️ ${availableBeds} of ${totalBeds} beds available`,
+        subNote:
+          loc === 'ar'
+            ? `السرير الآخر محجوز حتى ${formattedUntil}`
+            : `Other bed occupied until ${formattedUntil}`,
+        vacancyTimingText:
+          loc === 'ar'
+            ? `السرير الآخر سيفضى في: ${formattedUntil}`
+            : `Other bed vacating: ${formattedUntil}`,
+        vacancyNotice:
+          loc === 'ar'
+            ? `السرير الآخر محجوز حالياً ${formattedFrom && formattedUntil ? `(فترة الحجز: ${formattedFrom} ↓ ${formattedUntil})` : ''} وسيفضى في ${formattedUntil}، بينما السرير الحالي شاغر ومتاح للحجز الفوري الآن!`
+            : `The other bed is occupied ${formattedFrom && formattedUntil ? `(Period: ${formattedFrom} ↓ ${formattedUntil})` : ''} and vacates on ${formattedUntil}, while this bed is vacant and ready for immediate booking now!`,
+      };
+    }
+
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1; // 1-12
+    const academicEndYear = currentMonth >= 9 ? currentYear + 1 : currentYear;
+    const estimatedAcademicEnd = loc === 'ar' ? `يونيو ${academicEndYear} (نهاية العام الدراسي)` : `June ${academicEndYear} (End of Academic Year)`;
+
+    return {
+      isFullyBooked: false,
+      isPartiallyBooked: true,
+      isAvailable: true,
+      badgeType: 'partial',
+      badgeText:
+        loc === 'ar'
+          ? `⚠️ متاح ${availableBeds} من ${totalBeds} أسرّة`
+          : `⚠️ ${availableBeds} of ${totalBeds} beds available`,
+      subNote:
+        loc === 'ar'
+          ? `السرير المحجوز سيفضى مع ${estimatedAcademicEnd}`
+          : `Booked bed vacating by ${estimatedAcademicEnd}`,
+      vacancyTimingText:
+        loc === 'ar'
+          ? `السرير الآخر متوقع أن يفضى في: ${estimatedAcademicEnd}`
+          : `Other bed estimated to be vacant by: ${estimatedAcademicEnd}`,
+      vacancyNotice:
+        loc === 'ar'
+          ? `يوجد سرير محجوز في هذه الغرفة (من المتوقع أن يفضى مع ${estimatedAcademicEnd})، بينما السرير المتبقي شاغر وجاهز للحجز الفوري الآن قبل اكتمال العدد.`
+          : `One bed is occupied (estimated to vacate by ${estimatedAcademicEnd}); the remaining bed is vacant and available for immediate booking.`,
+    };
+  }
+
+  if (formattedFrom && new Date(fromDate).getTime() > Date.now()) {
+    return {
+      isFullyBooked: false,
+      isPartiallyBooked: false,
+      isAvailable: true,
+      availableFrom: fromDate,
+      badgeType: 'upcoming',
+      badgeText: loc === 'ar' ? `📅 متاحة بدءاً من ${formattedFrom}` : `📅 Available from ${formattedFrom}`,
+      subNote:
+        loc === 'ar'
+          ? `يمكنك تقديم طلب حجز للفترة التي تبدأ من ${formattedFrom}`
+          : `Booking requests accepted starting from ${formattedFrom}`,
+      vacancyTimingText:
+        loc === 'ar'
+          ? `متاحة بدءاً من ${formattedFrom}`
+          : `Available from ${formattedFrom}`,
+      vacancyNotice:
+        loc === 'ar'
+          ? `هذه الغرفة ستكون شاغرة ومتاحة للحجز بدءاً من ${formattedFrom}. يمكنك تقديم طلب الحجز لتلك الفترة الآن.`
+          : `This room will be available starting ${formattedFrom}. You may submit your booking request now.`,
+    };
+  }
+
+  return {
+    isFullyBooked: false,
+    isPartiallyBooked: false,
+    isAvailable: true,
+    badgeType: 'available',
+    badgeText:
+      loc === 'ar'
+        ? `✓ شاغرة (${availableBeds} من ${totalBeds} متاح)`
+        : `✓ Vacant (${availableBeds} of ${totalBeds} available)`,
+    subNote:
+      loc === 'ar'
+        ? 'شاغرة وجاهزة للحجز الفوري'
+        : 'Vacant and ready for booking',
+    vacancyTimingText:
+      loc === 'ar'
+        ? 'شاغرة ومتاحة للحجز الفوري الآن'
+        : 'Vacant & available for immediate booking',
+    vacancyNotice:
+      loc === 'ar'
+        ? 'هذه الغرفة شاغرة بالكامل ومتاحة للحجز الفوري المباشر لجميع الأسرّة.'
+        : 'This room is completely vacant and available for immediate booking for all beds.',
+  };
+}
 
 export default function PropertyDetailsPage() {
   const { id } = useParams<{ id: string }>();
@@ -130,6 +591,172 @@ export default function PropertyDetailsPage() {
     return false;
   }, [property]);
 
+  // Live bookings fetched directly from API for maximum precision on room and property vacancy dates
+  const [liveBookings, setLiveBookings] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!id) return;
+    let isCancelled = false;
+
+    async function fetchPropertyLiveBookings() {
+      // Candidate endpoints to fetch live bookings for this specific property
+      const candidates = [
+        () => BookingService.getOwnerBookings(id),
+        () => ApiClient.get<any>(`/properties/${id}/bookings`),
+        () => ApiClient.get<any>(`/property/${id}/bookings`),
+        () => ApiClient.get<any>(`/booking/property/${id}`),
+        () => ApiClient.get<any>(`/bookings/property/${id}`),
+        () => ApiClient.get<any>(`/booking?propertyId=${id}&limit=100`),
+        () => ApiClient.get<any>(`/dashboard/booking/calendar?propertyId=${id}&limit=100`),
+      ];
+
+      for (const call of candidates) {
+        try {
+          const res = await call();
+          const list =
+            Array.isArray(res) ? res :
+            Array.isArray(res?.data?.bookings) ? res.data.bookings :
+            Array.isArray(res?.data?.data) ? res.data.data :
+            Array.isArray(res?.data) ? res.data :
+            Array.isArray(res?.bookings) ? res.bookings :
+            Array.isArray(res?.events) ? res.events :
+            [];
+
+          if (list.length > 0) {
+            if (!isCancelled) {
+              setLiveBookings(list);
+            }
+            return;
+          }
+        } catch {
+          // silently continue to next candidate
+        }
+      }
+    }
+
+    fetchPropertyLiveBookings();
+    return () => {
+      isCancelled = true;
+    };
+  }, [id]);
+
+  // Earliest date when a fully-booked property or room is expected to become vacant
+  const earliestVacancyDate = useMemo(() => {
+    if (!property) return null;
+    const timestamps: number[] = [];
+
+    // 0. Check live bookings from backend API first (highest accuracy)
+    if (Array.isArray(liveBookings) && liveBookings.length > 0) {
+      for (const b of liveBookings) {
+        const st = String(b.status || '').toUpperCase();
+        if (st === 'CANCELLED' || st === 'REJECTED') continue;
+        const occ = b.endDate || b.end_date;
+        if (occ) {
+          const t = new Date(occ).getTime();
+          if (!isNaN(t) && t > Date.now()) timestamps.push(t);
+        }
+      }
+    }
+
+    if (Array.isArray(property.rooms_)) {
+      for (const r of property.rooms_) {
+        const occ = (r as any).occupiedUntil || (r as any).occupied_until || (r as any).endDate || (r as any).end_date;
+        if (occ) {
+          const t = new Date(occ).getTime();
+          if (!isNaN(t) && t > Date.now()) timestamps.push(t);
+        }
+        if (Array.isArray((r as any).bookings)) {
+          for (const b of (r as any).bookings) {
+            const end = b.endDate || b.end_date;
+            if (end) {
+              const t = new Date(end).getTime();
+              if (!isNaN(t) && t > Date.now()) timestamps.push(t);
+            }
+          }
+        }
+      }
+    }
+    const propOcc = property.occupiedUntil || (property as any).occupied_until || (property as any).endDate;
+    if (propOcc) {
+      const t = new Date(propOcc).getTime();
+      if (!isNaN(t) && t > Date.now()) timestamps.push(t);
+    }
+    if (timestamps.length > 0) {
+      timestamps.sort((a, b) => a - b);
+      return new Date(timestamps[0]).toISOString();
+    }
+    // Fallback: extract from description
+    if (property.description) {
+      const descText = typeof property.description === 'object'
+        ? (property.description.ar || property.description.en || '')
+        : String(property.description || '');
+      const dates = extractDatesFromText(descText);
+      if (dates.until) return dates.until;
+    }
+    return null;
+  }, [property, liveBookings]);
+
+  // Active booking date range for property (e.g. ٢٧/٩/٢٠٢٦ ↓ ٢٧/١٢/٢٠٢٦)
+  const propertyActiveBookingRange = useMemo(() => {
+    const candidates = [
+      ...(Array.isArray(liveBookings) ? liveBookings : []),
+      ...(Array.isArray(property?.bookings) ? property.bookings : []),
+    ];
+    const active = candidates.filter((b: any) => {
+      const st = String(b.status || '').toUpperCase();
+      if (st === 'CANCELLED' || st === 'REJECTED') return false;
+      const end = b.endDate || b.end_date || b.moveOutDate;
+      return end && new Date(end).getTime() > Date.now();
+    });
+    if (active.length > 0) {
+      active.sort((a, b) => new Date(a.endDate || a.end_date || a.moveOutDate).getTime() - new Date(b.endDate || b.end_date || b.moveOutDate).getTime());
+      const s = active[0].startDate || active[0].start_date || active[0].moveInDate;
+      const e = active[0].endDate || active[0].end_date || active[0].moveOutDate;
+      return {
+        startDate: s,
+        endDate: e,
+        startFormatted: s ? formatOccupancyDate(s, locale) : undefined,
+        endFormatted: e ? formatOccupancyDate(e, locale) : undefined,
+      };
+    }
+    return null;
+  }, [liveBookings, property, locale]);
+
+  // Existing bookings placed by this authenticated tenant on this property
+  const [existingUserBookings, setExistingUserBookings] = useState<RentalBooking[]>([]);
+
+  const fetchExistingUserBookings = useCallback(async () => {
+    if (!isAuthenticated || !id) {
+      setExistingUserBookings([]);
+      return;
+    }
+    try {
+      const rentals = await TenantService.getRentals();
+      const matched = (rentals || []).filter((b: any) => {
+        const bPropId = String(b.propertyId || b.property?.id || b.property_id || '');
+        return bPropId === String(id);
+      });
+      setExistingUserBookings(matched);
+    } catch (err) {
+      console.warn('[PropertyDetailsPage] Failed to fetch existing user bookings:', err);
+    }
+  }, [id, isAuthenticated]);
+
+  useEffect(() => {
+    fetchExistingUserBookings();
+  }, [fetchExistingUserBookings]);
+
+  // Set of room IDs that this user already booked
+  const userBookedRoomIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const b of existingUserBookings) {
+      if (b.status === 'CANCELLED' || b.status === 'REJECTED') continue;
+      const rId = b.roomId || b.room?.id || (b as any).room_id;
+      if (rId) ids.add(String(rId));
+    }
+    return ids;
+  }, [existingUserBookings]);
+
   // Auto-select first available room when property loads
   useEffect(() => {
     if (property && Array.isArray(property.rooms_) && property.rooms_.length > 0) {
@@ -196,6 +823,7 @@ export default function PropertyDetailsPage() {
   // Submit booking request
   async function handleBookingSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (bookingLoading) return;
     if (!id) return;
 
     if (isFullyBooked) {
@@ -244,6 +872,7 @@ export default function PropertyDetailsPage() {
         }
       }
       setBookingSuccess(true);
+      fetchExistingUserBookings();
     } catch (err: any) {
       setBookingError(
         err?.message ||
@@ -316,6 +945,7 @@ export default function PropertyDetailsPage() {
 
   // ── Toggle Favorite ───────────────────────────────────────────────────────
   async function handleToggleFavorite() {
+    if (favLoading) return;
     if (!isAuthenticated) {
       navigate('/login');
       return;
@@ -1128,6 +1758,28 @@ export default function PropertyDetailsPage() {
                     📚 {locale === 'ar' ? 'مخصص للطلاب والدارسين' : 'Students Only'}
                   </span>
                 )}
+
+                {/* Property Occupancy & Vacancy Header Badge */}
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    padding: '0.35rem 0.8rem',
+                    borderRadius: '999px',
+                    backgroundColor: isFullyBooked ? '#FEE2E2' : '#DCFCE7',
+                    color: isFullyBooked ? '#991B1B' : '#15803D',
+                    border: `1px solid ${isFullyBooked ? '#FECACA' : '#BBF7D0'}`,
+                  }}
+                >
+                  {isFullyBooked
+                    ? (locale === 'ar'
+                        ? (earliestVacancyDate ? `🔒 ممتلئ بالكامل (سيفضى في ${formatOccupancyDate(earliestVacancyDate, locale)})` : '🔒 ممتلئ بالكامل حالياً')
+                        : (earliestVacancyDate ? `🔒 Fully Booked (Vacant ${formatOccupancyDate(earliestVacancyDate, locale)})` : '🔒 Fully Booked'))
+                    : (locale === 'ar' ? '✓ تتوفر أسرّة شاغرة للحجز الفوري' : '✓ Vacant Beds Available Now')}
+                </span>
               </div>
 
               <h1 style={{ fontSize: '1.95rem', fontWeight: 900, color: 'var(--color-navy)', marginBottom: '0.65rem', lineHeight: 1.3 }}>
@@ -1288,10 +1940,60 @@ export default function PropertyDetailsPage() {
             {/* Rooms list */}
             {Array.isArray(property.rooms_) && property.rooms_.length > 0 && (
               <div style={{ marginBottom: '1.75rem' }}>
-                <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-navy)', marginBottom: '0.85rem' }}>
-                  {locale === 'ar' ? '🛏️ خيارات الغرف والأسرّة المتاحة' : '🛏️ Available Rooms & Beds'}
-                </h3>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '1rem' }}>
+                {/* Notice for tenant who has prior bookings for this property */}
+                {isAuthenticated && existingUserBookings.length > 0 && (
+                  <div
+                    style={{
+                      backgroundColor: '#FFFBEB',
+                      border: '2px solid #F59E0B',
+                      borderRadius: '14px',
+                      padding: '1.1rem 1.25rem',
+                      marginBottom: '1.5rem',
+                      boxShadow: '0 4px 14px rgba(245, 158, 11, 0.12)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                      <span style={{ fontSize: '1.6rem', lineHeight: 1 }}>⚠️</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.98rem', color: '#92400E', marginBottom: '0.35rem' }}>
+                          {locale === 'ar' ? 'تنبيه: لديك حجز سابق مسجل في هذا السكن' : 'Notice: You have a registered booking in this property'}
+                        </div>
+                        <p style={{ margin: '0 0 0.65rem', fontSize: '0.86rem', color: '#B45309', lineHeight: 1.6 }}>
+                          {locale === 'ar'
+                            ? 'لقد قمت بإتمام طلب حجز في هذا السكن مسبقاً (موضح في السجل أدناه). إمكانية الحجز لا تزال مفتوحة لك بالكامل في حال رغبتك بحجز غرفة أخرى أو سرير إضافي لزميلك أو تمديد إقامتك، وهذه الملاحظة للتنبيه فقط حتى تتأكد من عدم تكرار حجز نفس الغرفة أو السرير مرتين عن طريق السهو.'
+                            : 'You have previously booked in this property. You can still freely book another room or extend your stay; this alert is just to ensure you do not accidentally duplicate your booking.'}
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', backgroundColor: '#FEF3C7', padding: '8px 12px', borderRadius: '10px' }}>
+                          {existingUserBookings.map((bk, i) => {
+                            const badge = getBookingStatusBadge(bk.status, locale);
+                            return (
+                              <div key={bk.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <span style={{ color: '#78350F', fontWeight: 700, fontSize: '0.82rem' }}>
+                                  🏢 {bk.room?.roomType || (locale === 'ar' ? 'طلب حجز' : 'Booking')}
+                                  {bk.startDate ? ` (من ${formatOccupancyDate(bk.startDate, locale)} إلى ${bk.endDate ? formatOccupancyDate(bk.endDate, locale) : '—'})` : ''}
+                                </span>
+                                <span style={{ backgroundColor: badge.bg, color: badge.color, padding: '2px 8px', borderRadius: '6px', fontWeight: 700, fontSize: '0.74rem' }}>
+                                  {badge.icon} {badge.text}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--color-navy)', margin: 0 }}>
+                    {locale === 'ar' ? '🛏️ خيارات الغرف والأسرّة المتاحة ومواعيد الشغور' : '🛏️ Available Rooms, Beds & Vacancy Schedule'}
+                  </h3>
+                  <span style={{ fontSize: '0.8rem', color: '#64748B', fontWeight: 600 }}>
+                    {locale === 'ar' ? '💡 توضح كل غرفة حالة إشغالها وموعد شغورها المتوقع' : '💡 Each room displays its occupancy and expected vacancy date'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
                   {property.rooms_.map((room: any, idx: number) => {
                     const roomName =
                       room.roomType === 'SINGLE' ? (locale === 'ar' ? 'غرفة فردية' : 'Single Room') :
@@ -1299,6 +2001,8 @@ export default function PropertyDetailsPage() {
                       room.roomType === 'TRIPLE' ? (locale === 'ar' ? 'غرفة ثلاثية' : 'Triple Room') :
                       room.roomType === 'QUAD' ? (locale === 'ar' ? 'غرفة رباعية' : 'Quad Room') : room.roomType;
                     const isAvailable = Number(room.availableBeds) > 0 && room.status !== 'FULL';
+                    const occ = getRoomOccupancyInfo(room, locale, property, liveBookings);
+                    const isUserBookedInThisRoom = userBookedRoomIds.has(String(room.id));
 
                     return (
                       <div
@@ -1306,20 +2010,93 @@ export default function PropertyDetailsPage() {
                         style={{
                           padding: '1rem',
                           borderRadius: '14px',
-                          border: selectedRoomId === room.id ? '2px solid var(--color-blue)' : '1px solid #E2E8F0',
-                          backgroundColor: selectedRoomId === room.id ? '#EFF6FF' : '#F8FAFC',
+                          border: isUserBookedInThisRoom
+                            ? '2px solid #3B82F6'
+                            : selectedRoomId === room.id
+                            ? '2px solid var(--color-blue)'
+                            : '1px solid #E2E8F0',
+                          backgroundColor: isUserBookedInThisRoom
+                            ? '#F8FAFF'
+                            : selectedRoomId === room.id
+                            ? '#EFF6FF'
+                            : '#F8FAFC',
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'space-between',
                           boxShadow: selectedRoomId === room.id ? '0 4px 14px rgba(47, 107, 255, 0.15)' : 'none',
                           transition: 'all 0.2s ease',
+                          position: 'relative',
                         }}
                       >
                         <div>
+                          {/* Occupancy / Availability Status Banner */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '0.35rem 0.65rem',
+                              borderRadius: '8px',
+                              marginBottom: '0.65rem',
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              backgroundColor:
+                                occ.badgeType === 'occupied'
+                                  ? '#FEE2E2'
+                                  : occ.badgeType === 'partial'
+                                  ? '#FEF3C7'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#E0F2FE'
+                                  : '#DCFCE7',
+                              color:
+                                occ.badgeType === 'occupied'
+                                  ? '#991B1B'
+                                  : occ.badgeType === 'partial'
+                                  ? '#92400E'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#0369A1'
+                                  : '#15803D',
+                              border:
+                                '1px solid ' +
+                                (occ.badgeType === 'occupied'
+                                  ? '#FCA5A5'
+                                  : occ.badgeType === 'partial'
+                                  ? '#FCD34D'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#BAE6FD'
+                                  : '#86EFAC'),
+                            }}
+                          >
+                            <span>{occ.badgeText}</span>
+                          </div>
+
+                          {/* Specific Tag for Tenant who already booked this room */}
+                          {isUserBookedInThisRoom && (
+                            <div
+                              style={{
+                                backgroundColor: '#EFF6FF',
+                                border: '1px solid #93C5FD',
+                                borderRadius: '8px',
+                                padding: '0.4rem 0.65rem',
+                                marginBottom: '0.65rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                color: '#1D4ED8',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                              }}
+                            >
+                              <span>👤</span>
+                              <span>{locale === 'ar' ? 'أنت حجزت في هذه الغرفة بالفعل' : 'You have a booking in this room'}</span>
+                            </div>
+                          )}
+
                           {room.photoUrl && (
                             <img
                               src={room.photoUrl}
-                              alt={roomName}
+                              alt=""
+                              aria-hidden="true"
                               style={{ width: '100%', height: '130px', objectFit: 'cover', borderRadius: '10px', marginBottom: '0.75rem' }}
                               onError={(e) => {
                                 (e.currentTarget as HTMLImageElement).src =
@@ -1330,13 +2107,89 @@ export default function PropertyDetailsPage() {
                           <div style={{ fontWeight: 800, color: 'var(--color-navy)', fontSize: '1rem', marginBottom: '0.35rem' }}>
                             {roomName}
                           </div>
-                          <div style={{ color: 'var(--color-blue)', fontWeight: 900, fontSize: '1.15rem', marginBottom: '0.45rem' }}>
+                          <div style={{ color: 'var(--color-blue)', fontWeight: 900, fontSize: '1.15rem', marginBottom: '0.55rem' }}>
                             {room.pricePerBed} {property.currency} <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--color-text-muted)' }}>/ {locale === 'ar' ? 'سرير شهرياً' : 'bed/mo'}</span>
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: isAvailable ? '#15803D' : '#DC2626', fontWeight: 700, marginBottom: '0.85rem' }}>
+
+                          {/* Clear Vacancy & Occupancy Timing Box for the User */}
+                          <div
+                            style={{
+                              backgroundColor:
+                                occ.badgeType === 'occupied'
+                                  ? '#FEF2F2'
+                                  : occ.badgeType === 'partial'
+                                  ? '#FFFBEB'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#F0F9FF'
+                                  : '#F0FDF4',
+                              border:
+                                '1px solid ' +
+                                (occ.badgeType === 'occupied'
+                                  ? '#FECACA'
+                                  : occ.badgeType === 'partial'
+                                  ? '#FDE68A'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#BAE6FD'
+                                  : '#BBF7D0'),
+                              borderRadius: '10px',
+                              padding: '0.6rem 0.75rem',
+                              marginBottom: '0.75rem',
+                              fontSize: '0.79rem',
+                              lineHeight: 1.5,
+                              color:
+                                occ.badgeType === 'occupied'
+                                  ? '#991B1B'
+                                  : occ.badgeType === 'partial'
+                                  ? '#92400E'
+                                  : occ.badgeType === 'upcoming'
+                                  ? '#0369A1'
+                                  : '#166534',
+                            }}
+                          >
+                            <div style={{ fontWeight: 800, display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '3px' }}>
+                              <span>
+                                {occ.badgeType === 'occupied' ? '🔒' : occ.badgeType === 'partial' ? '⏳' : occ.badgeType === 'upcoming' ? '📅' : '✓'}
+                              </span>
+                              <span>
+                                {occ.badgeType === 'occupied'
+                                  ? (locale === 'ar' ? 'موعد الشغور وحالة الغرفة:' : 'Vacancy Schedule & Room Status:')
+                                  : occ.badgeType === 'partial'
+                                  ? (locale === 'ar' ? 'تفاصيل السرير المحجوز وموعد الشغور:' : 'Occupancy & Vacancy Details:')
+                                  : occ.badgeType === 'upcoming'
+                                  ? (locale === 'ar' ? 'موعد الإتاحة القادم:' : 'Upcoming Availability:')
+                                  : (locale === 'ar' ? 'حالة الإتاحة الحالية:' : 'Current Availability:')}
+                              </span>
+                            </div>
+                            <div style={{ fontWeight: 600 }}>{occ.vacancyNotice}</div>
+                            {occ.rangeDisplay && (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  marginTop: '0.45rem',
+                                  paddingTop: '0.4rem',
+                                  borderTop: '1px dashed rgba(0,0,0,0.12)',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 800,
+                                }}
+                              >
+                                <span>📅 {locale === 'ar' ? 'فترة الحجز الحالية:' : 'Stay Period:'}</span>
+                                <span style={{ color: '#0B2A4A', direction: 'ltr', unicodeBidi: 'embed' }}>
+                                  {occ.startFormatted}
+                                </span>
+                                <span style={{ color: '#2563EB', fontWeight: 900, fontSize: '0.9rem' }}>↓</span>
+                                <span style={{ color: '#0B2A4A', direction: 'ltr', unicodeBidi: 'embed' }}>
+                                  {occ.endFormatted}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ fontSize: '0.82rem', color: isAvailable ? '#15803D' : '#DC2626', fontWeight: 700, marginBottom: '0.85rem' }}>
                             {isAvailable
                               ? (locale === 'ar' ? `✓ المتاح: ${room.availableBeds} من أصل ${room.totalBeds} أسرّة` : `✓ ${room.availableBeds} of ${room.totalBeds} beds available`)
-                              : (locale === 'ar' ? '✕ ممتلئة بالكامل' : '✕ Fully Booked')}
+                              : (locale === 'ar' ? (occ.occupiedUntil ? `✕ ممتلئة حتى ${formatOccupancyDate(occ.occupiedUntil, locale)}` : '✕ ممتلئة بالكامل') : (occ.occupiedUntil ? `✕ Booked until ${formatOccupancyDate(occ.occupiedUntil, locale)}` : '✕ Fully Booked'))}
                           </div>
                         </div>
 
@@ -1707,6 +2560,59 @@ export default function PropertyDetailsPage() {
                     </span>
                   </div>
                 )}
+
+                {/* Notice for tenant who has prior bookings for this property */}
+                {isAuthenticated && existingUserBookings.length > 0 && (
+                  <div
+                    style={{
+                      backgroundColor: '#FFFBEB',
+                      border: '1.5px solid #FCD34D',
+                      borderRadius: '12px',
+                      padding: '0.85rem 1rem',
+                      marginBottom: '1rem',
+                      boxShadow: '0 2px 8px rgba(245, 158, 11, 0.08)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                      <span style={{ fontSize: '1.25rem', lineHeight: 1 }}>💡</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: '0.85rem', color: '#92400E', marginBottom: '0.25rem' }}>
+                          {locale === 'ar' ? 'ملاحظة: لديك حجز سابق مسجل في هذا السكن' : 'Notice: You have a prior booking in this property'}
+                        </div>
+                        <p style={{ margin: '0 0 0.55rem', fontSize: '0.78rem', color: '#B45309', lineHeight: 1.5 }}>
+                          {locale === 'ar'
+                            ? 'لقد قمت بإتمام حجز هنا مسبقاً. يمكنك بالطبع حجز غرفة أخرى أو سرير إضافي أو فترة جديدة بحرية تامة، وهذه الملاحظة للتنبيه فقط لضمان عدم حجز نفس السرير مرتين عن طريق الخطأ.'
+                            : 'You have previously booked here. You can still freely book another room or extend your stay; this reminder is just to ensure you do not accidentally duplicate your booking.'}
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', backgroundColor: '#FEF3C7', padding: '6px 8px', borderRadius: '8px', fontSize: '0.74rem' }}>
+                          {existingUserBookings.slice(0, 3).map((bk, i) => {
+                            const badge = getBookingStatusBadge(bk.status, locale);
+                            return (
+                              <div key={bk.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                                <span style={{ color: '#78350F', fontWeight: 600 }}>
+                                  {bk.room?.roomType || (locale === 'ar' ? 'طلب حجز' : 'Booking')}
+                                  {bk.startDate ? ` (${formatOccupancyDate(bk.startDate, locale)} ← ${bk.endDate ? formatOccupancyDate(bk.endDate, locale) : ''})` : ''}
+                                </span>
+                                <span style={{ backgroundColor: badge.bg, color: badge.color, padding: '1px 6px', borderRadius: '4px', fontWeight: 700, fontSize: '0.7rem' }}>
+                                  {badge.icon} {badge.text}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div style={{ marginTop: '0.5rem', textAlign: locale === 'ar' ? 'left' : 'right' }}>
+                          <Link
+                            to={isOwner ? '/owner-dashboard/my-rentals' : '/dashboard/rentals'}
+                            style={{ fontSize: '0.75rem', fontWeight: 700, color: '#2563EB', textDecoration: 'underline' }}
+                          >
+                            {locale === 'ar' ? 'مراجعة تفاصيل حجوزاتي السابقة ←' : 'View your previous bookings →'}
+                          </Link>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {isFullyBooked ? (
                   <div
                     style={{
@@ -1729,6 +2635,36 @@ export default function PropertyDetailsPage() {
                         ? 'نعتذر، جميع الغرف والأسرة في هذا السكن محجوزة بالكامل حالياً.'
                         : 'All rooms and beds in this property are currently occupied.'}
                     </p>
+                    {earliestVacancyDate && (
+                      <div style={{ marginTop: '0.55rem', padding: '0.45rem', backgroundColor: '#FEF2F2', borderRadius: '8px', border: '1px dashed #F87171', fontSize: '0.76rem', color: '#7F1D1D', fontWeight: 700 }}>
+                        {locale === 'ar'
+                          ? `📅 أقرب موعد متوقع للشغور: ${formatOccupancyDate(earliestVacancyDate, locale)}`
+                          : `📅 Expected next vacancy: ${formatOccupancyDate(earliestVacancyDate, locale)}`}
+                      </div>
+                    )}
+                    {propertyActiveBookingRange?.startFormatted && propertyActiveBookingRange?.endFormatted && (
+                      <div
+                        style={{
+                          marginTop: '0.45rem',
+                          padding: '0.4rem 0.6rem',
+                          backgroundColor: '#FFFFFF',
+                          borderRadius: '8px',
+                          border: '1px dashed #F87171',
+                          fontSize: '0.76rem',
+                          color: '#7F1D1D',
+                          fontWeight: 800,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                        }}
+                      >
+                        <span>📅 {locale === 'ar' ? 'فترة الحجز الحالية:' : 'Stay Period:'}</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>{propertyActiveBookingRange.startFormatted}</span>
+                        <span style={{ color: '#DC2626', fontWeight: 900, fontSize: '0.9rem' }}>↓</span>
+                        <span style={{ direction: 'ltr', unicodeBidi: 'embed' }}>{propertyActiveBookingRange.endFormatted}</span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <button
@@ -2131,6 +3067,36 @@ export default function PropertyDetailsPage() {
                   </div>
                 )}
 
+                {/* Prior booking reminder inside modal */}
+                {isAuthenticated && existingUserBookings.length > 0 && (
+                  <div
+                    style={{
+                      backgroundColor: '#FFFBEB',
+                      border: '1px solid #FCD34D',
+                      borderRadius: '10px',
+                      padding: '0.75rem 0.95rem',
+                      fontSize: '0.8rem',
+                      color: '#92400E',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: '8px',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>💡</span>
+                    <div>
+                      <div style={{ fontWeight: 800, marginBottom: '2px' }}>
+                        {locale === 'ar' ? 'تنبيه: لديك حجز سابق في هذا السكن' : 'Notice: Prior Booking Recorded'}
+                      </div>
+                      <div>
+                        {locale === 'ar'
+                          ? 'يمكنك إتمام هذا الطلب كحجز جديد كلياً (لسرير آخر أو شخص آخر أو فترة إقامة جديدة)، ولكن يُرجى التأكد من عدم تكرار نفس الغرفة وتواريخ الحجز السابق بالخطأ.'
+                          : 'You already have an existing booking for this property. You can proceed with a new booking for another room, bed, or period; please ensure you are not duplicating your previous request.'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Select Room */}
                 {Array.isArray(property.rooms_) && property.rooms_.length > 0 && (
                   <div>
@@ -2145,9 +3111,21 @@ export default function PropertyDetailsPage() {
                     >
                       {property.rooms_.map((r: any, i: number) => {
                         const isAvail = Number(r.availableBeds) > 0 && r.status !== 'FULL';
+                        const roomOcc = getRoomOccupancyInfo(r, locale, property, liveBookings);
+                        const untilText = roomOcc.occupiedUntil ? formatOccupancyDate(roomOcc.occupiedUntil, locale) : '';
+                        const unavailableLabel = untilText
+                          ? (locale === 'ar' ? `ممتلئة حتى ${untilText}` : `Booked until ${untilText}`)
+                          : (locale === 'ar' ? (roomOcc.vacancyTimingText || 'ممتلئة بالكامل') : (roomOcc.vacancyTimingText || 'Fully Booked'));
+
+                        const rName =
+                          r.roomType === 'SINGLE' ? (locale === 'ar' ? 'غرفة فردية' : 'Single Room') :
+                          r.roomType === 'DOUBLE' ? (locale === 'ar' ? 'غرفة ثنائية' : 'Double Room') :
+                          r.roomType === 'TRIPLE' ? (locale === 'ar' ? 'غرفة ثلاثية' : 'Triple Room') :
+                          r.roomType === 'QUAD' ? (locale === 'ar' ? 'غرفة رباعية' : 'Quad Room') : r.roomType;
+
                         return (
                           <option key={r.id || i} value={r.id} disabled={!isAvail}>
-                            {r.roomType} — {r.pricePerBed} {property.currency} / {locale === 'ar' ? 'سرير' : 'bed'} ({isAvail ? `${r.availableBeds} ${locale === 'ar' ? 'أسرّة متاحة' : 'beds available'}` : (locale === 'ar' ? 'ممتلئة بالكامل' : 'Fully Booked')})
+                            {rName} — {r.pricePerBed} {property.currency} / {locale === 'ar' ? 'سرير' : 'bed'} ({isAvail ? `${r.availableBeds} ${locale === 'ar' ? 'أسرّة متاحة' : 'beds available'}` : unavailableLabel})
                           </option>
                         );
                       })}

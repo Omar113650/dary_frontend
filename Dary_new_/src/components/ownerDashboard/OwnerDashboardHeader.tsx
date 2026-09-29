@@ -69,14 +69,19 @@ export default function OwnerDashboardHeader({
         <Link
           to={`${basePath}/notifications`}
           className="dary-icon-btn"
-          aria-label="Notifications"
-          title={locale === 'ar' ? 'الإشعارات' : 'Notifications'}
+          aria-label={locale === 'ar' ? `الإشعارات (${unreadCount} غير مقروء)` : `Notifications (${unreadCount} unread)`}
+          title={locale === 'ar' ? (unreadCount > 0 ? `لديك ${unreadCount} إشعار غير مقروء` : 'الإشعارات') : (unreadCount > 0 ? `${unreadCount} unread notifications` : 'Notifications')}
+          style={unreadCount > 0 ? { borderColor: '#BFDBFE', backgroundColor: '#F8FAFF' } : undefined}
         >
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill={unreadCount > 0 ? 'rgba(217, 119, 6, 0.15)' : 'none'} stroke={unreadCount > 0 ? '#D97706' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
             <path d="M13.73 21a2 2 0 0 1-3.46 0" />
           </svg>
-          {unreadCount > 0 && <span className="dary-notif-dot" />}
+          {unreadCount > 0 && (
+            <span className="dary-notif-badge">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </Link>
       </div>
     </header>

@@ -47,6 +47,7 @@ export interface OwnerPropertyItem {
   propertyType?: string;
   propertyClass?: string;
   status?: 'PENDING' | 'APPROVED' | 'REJECTED' | 'SUSPENDED' | 'ARCHIVED' | string;
+  rejectionReason?: string;
   isAvailable?: boolean;
   price?: number;
   currency?: string;

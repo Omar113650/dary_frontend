@@ -29,6 +29,8 @@ export class ApiClient {
     typeof window !== 'undefined' ? localStorage.getItem('dary_refresh_token') : null;
   private static refreshPromise: Promise<boolean> | null = null;
   private static inFlightGetRequests = new Map<string, Promise<any>>();
+  private static inFlightMutations = new Map<string, Promise<any>>();
+  private static recentMutations = new Map<string, { result: any; timestamp: number }>();
 
   /**
    * Save tokens both in-memory and in localStorage for persistence.
@@ -72,6 +74,32 @@ export class ApiClient {
       this.refreshToken = localStorage.getItem('dary_refresh_token');
     }
     return this.refreshToken;
+  }
+
+  /**
+   * Optimization helper: decodes JWT payload to check if exp timestamp is within bufferSeconds.
+   * NOTE: This is client-side optimization only, real signature verification happens on backend.
+   */
+  static isAccessTokenExpired(token?: string | null, bufferSeconds = 30): boolean {
+    const t = token || this.getAccessToken();
+    if (!t) return true;
+    try {
+      const parts = t.split('.');
+      if (parts.length < 2) return true;
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const payload = JSON.parse(jsonPayload);
+      if (!payload.exp) return false;
+      const now = Math.floor(Date.now() / 1000);
+      return payload.exp <= now + bufferSeconds;
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -136,13 +164,29 @@ export class ApiClient {
       headers.set('Content-Type', 'application/json');
     }
 
+    // Protected endpoint check - don't refresh on auth-specific routes
+    const isAuthEndpoint =
+      endpoint.includes('/auth/login') ||
+      endpoint.includes('/auth/register') ||
+      endpoint.includes('/auth/refresh-token') ||
+      endpoint.includes('/auth/verify-otp') ||
+      endpoint.includes('/auth/forget-password') ||
+      endpoint.includes('/auth/reset-password');
+
     // Attach Bearer token as secondary / fallback transport alongside cookies
-    const currentToken = this.getAccessToken();
+    let currentToken = this.getAccessToken();
+    if (currentToken && !isAuthEndpoint && !_retry && this.isAccessTokenExpired(currentToken, 30)) {
+      const refreshed = await this.refreshAuth();
+      if (refreshed) {
+        currentToken = this.getAccessToken();
+      }
+    }
+
     if (currentToken && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${currentToken}`);
     }
 
-    const timeoutMs = options.timeout ?? 12000;
+    const timeoutMs = options.timeout ?? 30000;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
       controller.abort();
@@ -181,11 +225,42 @@ export class ApiClient {
       }
     }
 
-    const isGet = (!customOptions.method || customOptions.method.toUpperCase() === 'GET') && data === undefined;
-    const requestKey = isGet ? url : null;
+    const method = (customOptions.method || 'GET').toUpperCase();
+    const isGet = method === 'GET' && data === undefined;
+    const getRequestKey = isGet ? url : null;
 
-    if (requestKey && this.inFlightGetRequests.has(requestKey)) {
-      return this.inFlightGetRequests.get(requestKey) as Promise<T>;
+    if (getRequestKey && this.inFlightGetRequests.has(getRequestKey)) {
+      return this.inFlightGetRequests.get(getRequestKey) as Promise<T>;
+    }
+
+    // Mutating request signature for deduplication (POST, PUT, PATCH, DELETE)
+    let mutationKey: string | null = null;
+    if (!isGet) {
+      let serializedData = '';
+      if (isFormData) {
+        serializedData = 'form-data';
+      } else if (typeof data === 'string') {
+        serializedData = data;
+      } else if (data) {
+        try {
+          serializedData = JSON.stringify(data);
+        } catch {
+          serializedData = String(data);
+        }
+      }
+      mutationKey = `${method}:${url}:${serializedData}`;
+
+      // A: If exact same mutation is ALREADY running (in-flight), return the running promise!
+      // This immediately stops double submissions across the entire application.
+      if (this.inFlightMutations.has(mutationKey)) {
+        return this.inFlightMutations.get(mutationKey) as Promise<T>;
+      }
+
+      // B: If exact same mutation completed < 600ms ago, return recent result (prevents rapid double-clicks)
+      const recent = this.recentMutations.get(mutationKey);
+      if (recent && Date.now() - recent.timestamp < 600) {
+        return Promise.resolve(recent.result as T);
+      }
     }
 
     const executeRequest = async (): Promise<T> => {
@@ -234,6 +309,14 @@ export class ApiClient {
           throw new ApiError(message, code, response.status, json);
         }
 
+        // Cache recent successful mutation for 600ms debounce
+        if (mutationKey) {
+          this.recentMutations.set(mutationKey, { result: json, timestamp: Date.now() });
+          setTimeout(() => {
+            if (mutationKey) this.recentMutations.delete(mutationKey);
+          }, 1000);
+        }
+
         return json as T;
       } catch (error: any) {
         if (error instanceof ApiError) {
@@ -252,16 +335,22 @@ export class ApiClient {
           0
         );
       } finally {
-        if (requestKey) {
-          this.inFlightGetRequests.delete(requestKey);
+        if (getRequestKey) {
+          this.inFlightGetRequests.delete(getRequestKey);
+        }
+        if (mutationKey) {
+          this.inFlightMutations.delete(mutationKey);
         }
         clearTimeout(timeoutId);
       }
     };
 
     const fetchPromise = executeRequest();
-    if (requestKey) {
-      this.inFlightGetRequests.set(requestKey, fetchPromise);
+    if (getRequestKey) {
+      this.inFlightGetRequests.set(getRequestKey, fetchPromise);
+    }
+    if (mutationKey) {
+      this.inFlightMutations.set(mutationKey, fetchPromise);
     }
     return fetchPromise;
   }

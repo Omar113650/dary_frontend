@@ -534,8 +534,14 @@ export function useMutation<TData = any, TVariables = void, TError = any>(
   const [isPending, setIsPending] = React.useState(false);
   const [isSuccess, setIsSuccess] = React.useState(false);
   const [isError, setIsError] = React.useState(false);
+  const isMutatingRef = useRef(false);
 
   const mutateAsync = async (variables: TVariables): Promise<TData> => {
+    // Guard against rapid duplicate double-click calls
+    if (isMutatingRef.current) {
+      return data as TData;
+    }
+    isMutatingRef.current = true;
     setIsPending(true);
     setIsError(false);
     setError(null);
@@ -561,11 +567,13 @@ export function useMutation<TData = any, TVariables = void, TError = any>(
       }
       throw err;
     } finally {
+      isMutatingRef.current = false;
       setIsPending(false);
     }
   };
 
   const mutate = (variables: TVariables) => {
+    if (isMutatingRef.current) return;
     mutateAsync(variables).catch(() => {});
   };
 
