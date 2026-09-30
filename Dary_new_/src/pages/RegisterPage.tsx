@@ -574,6 +574,11 @@ export default function RegisterPage() {
 
             <a
               href={`${API_BASE_URL}/auth/google`}
+              onClick={() => {
+                try {
+                  localStorage.removeItem('dary_logged_out');
+                } catch {}
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -25,7 +25,21 @@ export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Errors & Unverified Account State
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const storedAuthErr = sessionStorage.getItem('dary_auth_error');
+        if (storedAuthErr) {
+          sessionStorage.removeItem('dary_auth_error');
+          return storedAuthErr;
+        }
+        const params = new URLSearchParams(window.location.search);
+        const oauthError = params.get('error') || params.get('message');
+        if (oauthError) return oauthError;
+      } catch {}
+    }
+    return null;
+  });
   const [isUnverified, setIsUnverified] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [resendSending, setResendSending] = useState(false);
@@ -501,6 +515,11 @@ export default function LoginPage() {
 
             <a
               href={`${API_BASE_URL}/auth/google`}
+              onClick={() => {
+                try {
+                  localStorage.removeItem('dary_logged_out');
+                } catch {}
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',

@@ -457,6 +457,11 @@ export function useQuery<TData = any, TError = any>(
   useEffect(() => {
     if (!enabled) return;
 
+    const errStatus = (queryState.error as any)?.status;
+    if (queryState.status === 'error' && (errStatus === 401 || errStatus === 403)) {
+      return;
+    }
+
     const isStale =
       queryState.data === undefined ||
       queryState.dataUpdatedAt === 0 ||
@@ -468,7 +473,9 @@ export function useQuery<TData = any, TError = any>(
         queryFn,
         staleTime,
       }).catch((err) => {
-        console.error(`[useQuery] Fetch error for key ${hash}:`, err);
+        if (err?.status !== 401) {
+          console.error(`[useQuery] Fetch error for key ${hash}:`, err);
+        }
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -478,6 +485,14 @@ export function useQuery<TData = any, TError = any>(
   useEffect(() => {
     if (!enabled || !refetchInterval || typeof refetchInterval !== 'number') return;
     const interval = setInterval(() => {
+      if (typeof window !== 'undefined' && localStorage.getItem('dary_logged_out') === 'true') {
+        return;
+      }
+      const currentState = client.getQueryState(queryKey);
+      const errStatus = (currentState?.error as any)?.status;
+      if (currentState?.status === 'error' && (errStatus === 401 || errStatus === 403)) {
+        return;
+      }
       client.fetchQuery({
         queryKey,
         queryFn,

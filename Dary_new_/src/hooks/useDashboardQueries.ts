@@ -194,6 +194,12 @@ export function useFeaturedProperties(limit = 6) {
 // 4. NOTIFICATIONS QUERIES & MUTATIONS
 // ==========================================
 
+function hasActiveAuthSession(): boolean {
+  if (typeof window === 'undefined') return false;
+  if (localStorage.getItem('dary_logged_out') === 'true') return false;
+  return Boolean(localStorage.getItem('dary_access_token') || localStorage.getItem('dary_user'));
+}
+
 /** Notifications list with 10s freshness and 15s auto-polling */
 export function useNotifications(page = 1, limit = 50, params?: { isRead?: boolean | string; event?: string }) {
   return useQuery({
@@ -207,6 +213,7 @@ export function useNotifications(page = 1, limit = 50, params?: { isRead?: boole
       (items as any).total = res?.total ?? items.length;
       return items;
     },
+    enabled: hasActiveAuthSession(),
     staleTime: 10 * 1000,
     refetchInterval: 15 * 1000, // 15-second background polling for live updates
   });
@@ -220,6 +227,7 @@ export function useUnreadNotificationsCount() {
       const res = await NotificationService.getNotifications({ page: 1, limit: 10 });
       return res?.unreadCount ?? 0;
     },
+    enabled: hasActiveAuthSession(),
     staleTime: 10 * 1000,
     refetchInterval: 15 * 1000, // 15-second background polling
   });

@@ -75,16 +75,25 @@ export class AuthService {
   /**
    * 1. POST /auth/login
    * Body: { email, password }
-   * Backend sets httpOnly AccessToken and RefreshToken cookies.
+   * Backend verifies ACTIVE status, deletes old refresh tokens, persists 1 hashed refreshToken (7d),
+   * and returns/sets accessToken (15m) + refreshToken (7d).
    */
   static async login(credentials: LoginCredentials): Promise<AuthResponse> {
     const res = await ApiClient.post<AuthResponse>('/auth/login', {
       email: credentials.email.trim().toLowerCase(),
       password: credentials.password,
     });
-    const tokens = (res as any)?.data?.tokens || (res as any)?.tokens;
-    if (tokens?.accessToken || tokens?.refreshToken) {
-      ApiClient.setTokens(tokens.accessToken, tokens.refreshToken);
+    const raw = res as any;
+    const tokens = raw?.data?.tokens || raw?.tokens;
+    const accessToken = tokens?.accessToken || raw?.data?.accessToken || raw?.accessToken;
+    const refreshToken = tokens?.refreshToken || raw?.data?.refreshToken || raw?.refreshToken;
+    if (accessToken || refreshToken) {
+      ApiClient.setTokens(accessToken, refreshToken);
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('dary_logged_out');
+      } catch {}
     }
     return res;
   }
@@ -134,21 +143,29 @@ export class AuthService {
 
   /**
    * 5. POST /auth/logout
-   * Clears server-side refresh token and removes cookies.
+   * Uses optionalAuthMiddleware on backend so logout succeeds even if the 15m accessToken expired.
+   * Permanently deletes the user's refreshToken row (deleteMany) and clears auth cookies.
    */
   static async logout(): Promise<void> {
     try {
-      await ApiClient.post('/auth/logout');
+      const refreshToken = ApiClient.getRefreshToken();
+      await ApiClient.post('/auth/logout', refreshToken ? { refreshToken } : {});
     } catch (err) {
       console.warn('[AuthService] Logout request warning:', err);
     } finally {
       ApiClient.clearTokens();
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem('dary_user');
+          localStorage.setItem('dary_logged_out', 'true');
+        } catch {}
+      }
     }
   }
 
   /**
    * 6. POST /auth/refresh-token
-   * Reads RefreshToken cookie and issues new cookies.
+   * Rotates both accessToken (15m) and refreshToken (7d) in-place on the single DB row.
    */
   static async refreshToken(): Promise<boolean> {
     return ApiClient.refreshAuth();
@@ -198,24 +215,41 @@ export class AuthService {
   /**
    * 9. POST /auth/reset-password
    * Body: { userId, resetToken, newPassword }
+   * Backend deletes user's refreshToken (deleteMany) and invalidates session cache immediately.
    */
   static async resetPassword(data: {
     userId: string;
     resetToken: string;
     newPassword: string;
   }): Promise<any> {
-    return ApiClient.post<any>('/auth/reset-password', {
+    const res = await ApiClient.post<any>('/auth/reset-password', {
       userId: data.userId.trim(),
       resetToken: data.resetToken.trim(),
       newPassword: data.newPassword,
     });
+    // Backend revokes/deletes all refresh tokens on password reset — clear local session state
+    ApiClient.clearTokens();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('dary_user');
+      } catch {}
+    }
+    return res;
   }
 
   /**
    * 10. DELETE /auth/delete
-   * Deletes the authenticated user's own account.
+   * Deletes the authenticated user's own account, removes refreshToken in DB, and clears cache.
    */
   static async deleteAccount(): Promise<any> {
-    return ApiClient.delete<any>('/auth/delete');
+    const res = await ApiClient.delete<any>('/auth/delete');
+    ApiClient.clearTokens();
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('dary_user');
+        localStorage.setItem('dary_logged_out', 'true');
+      } catch {}
+    }
+    return res;
   }
 }

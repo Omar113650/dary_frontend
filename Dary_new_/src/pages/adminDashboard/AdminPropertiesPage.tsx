@@ -8,6 +8,8 @@ import Pagination from '../../components/common/Pagination';
 import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
+import { propertyService } from '../../services/propertyService';
+
 export interface PropertyOccupancyInfo {
   isFullyBooked: boolean;
   isPartiallyBooked: boolean;
@@ -25,12 +27,12 @@ export function getPropertyOccupancyStatus(
   const pStatus = String(property?.status || '').toUpperCase();
   const isDirectBooked = pStatus === 'RENTED' || pStatus === 'OCCUPIED' || pStatus === 'BOOKED';
 
-  // 1. Find active bookings for this property
+  // 1. Find active (non-cancelled, non-rejected, non-expired) bookings for this property
   const propBookings = allBookings.filter((b) => {
     const bPropId = String(b.propertyId || b.property?.id || b.property_id || '');
     if (!bPropId || bPropId !== String(property.id)) return false;
     const st = String(b.status || '').toUpperCase();
-    if (st === 'CANCELLED' || st === 'REJECTED') return false;
+    if (st === 'CANCELLED' || st === 'REJECTED' || st === 'PENDING') return false;
     if (b.endDate) {
       const end = new Date(b.endDate).getTime();
       if (!isNaN(end) && end < Date.now()) return false;
@@ -52,13 +54,20 @@ export function getPropertyOccupancyStatus(
   }
 
   // 3. Examine rooms
-  const rawRooms =
+  const rawRoomsList =
     (Array.isArray(property.rooms_) && property.rooms_.length > 0 ? property.rooms_ : null) ||
-    (Array.isArray((property as any).propertyRooms) && (property as any).propertyRooms.length > 0 ? (property as any).propertyRooms : null) ||
+    (Array.isArray((property as any).propertyRooms) && (property as any).propertyRooms.length > 0
+      ? (property as any).propertyRooms
+      : null) ||
     (Array.isArray(property.rooms) && property.rooms.length > 0 ? property.rooms : []);
+
+  const rawRooms = rawRoomsList.filter(
+    (r: any) => String(r?.status || '').toUpperCase() !== 'HIDDEN'
+  );
 
   let totalBeds = 0;
   let availableBeds = 0;
+  let availableRoomsCount = 0;
   const hasRooms = rawRooms.length > 0;
   let allRoomsFull = hasRooms;
 
@@ -66,16 +75,21 @@ export function getPropertyOccupancyStatus(
     for (const r of rawRooms) {
       const rTotal = Number(r.totalBeds || r.total_beds || 1);
       const rAvail = Number(
-        r.availableBeds !== undefined
+        r.availableBeds !== undefined && r.availableBeds !== null
           ? r.availableBeds
-          : r.remainingBeds !== undefined
+          : r.available_beds !== undefined && r.available_beds !== null
+          ? r.available_beds
+          : r.remainingBeds !== undefined && r.remainingBeds !== null
           ? r.remainingBeds
           : rTotal
       );
+      const rStatus = String(r.status || '').toUpperCase();
       totalBeds += rTotal;
-      availableBeds += Math.max(0, rAvail);
-      if (rAvail > 0 && r.status !== 'FULL') {
+      const effectiveAvail = rStatus === 'FULL' ? 0 : Math.max(0, rAvail);
+      availableBeds += effectiveAvail;
+      if (effectiveAvail > 0) {
         allRoomsFull = false;
+        availableRoomsCount += 1;
       }
       const occ = r.occupiedUntil || r.occupied_until || r.endDate || r.end_date;
       if (occ) {
@@ -99,18 +113,21 @@ export function getPropertyOccupancyStatus(
 
   // Determine availability
   const isSuspendedOrRejected = pStatus === 'SUSPENDED' || pStatus === 'REJECTED';
+
+  // If rooms array is present, rely on actual room/bed availability so properties with empty rooms are NOT marked full
   const isFullyBooked =
     !isSuspendedOrRejected &&
     (isDirectBooked ||
-      (hasRooms && (allRoomsFull || availableBeds <= 0)) ||
-      (!hasRooms && propBookings.length > 0) ||
-      property.isAvailable === false);
+      (hasRooms
+        ? allRoomsFull || availableBeds <= 0
+        : property.isAvailable === false));
 
   const isPartiallyBooked =
     !isSuspendedOrRejected &&
     !isFullyBooked &&
-    hasRooms &&
-    (availableBeds < totalBeds || propBookings.length > 0);
+    (hasRooms
+      ? availableBeds < totalBeds || availableRoomsCount < rawRooms.length
+      : propBookings.length > 0);
 
   const isAvailable = !isSuspendedOrRejected && !isFullyBooked;
 
@@ -120,10 +137,14 @@ export function getPropertyOccupancyStatus(
       ? (locale === 'ar' ? `محجوز حتى ${bookedUntilFormatted}` : `Booked until ${bookedUntilFormatted}`)
       : (locale === 'ar' ? 'محجوز بالكامل' : 'Fully Booked');
   } else if (isPartiallyBooked) {
-    detailsText =
-      locale === 'ar'
-        ? `متاح ${availableBeds} من ${totalBeds} أسرّة`
-        : `${availableBeds} of ${totalBeds} beds available`;
+    if (hasRooms) {
+      detailsText =
+        locale === 'ar'
+          ? `متاح ${availableRoomsCount} من ${rawRooms.length} غرف (${availableBeds} من ${totalBeds} أسرّة)`
+          : `${availableRoomsCount}/${rawRooms.length} rooms (${availableBeds}/${totalBeds} beds) available`;
+    } else {
+      detailsText = locale === 'ar' ? 'محجوز جزئياً (توجد غرف متاحة)' : 'Partially Booked';
+    }
   } else if (isSuspendedOrRejected) {
     detailsText = locale === 'ar' ? 'غير متاح حالياً' : 'Currently Unavailable';
   } else {
@@ -242,14 +263,39 @@ export default function AdminPropertiesPage() {
         staleTime: STALE_TIMES.LISTS,
       });
       const list = data?.properties || data?.items || data?.data || (Array.isArray(data) ? data : []);
-      setProperties(Array.isArray(list) ? list : []);
+      const safeList: AdminPropertyItem[] = Array.isArray(list) ? list : [];
+      setProperties(safeList);
+
+      // Hydrate rooms_ for properties if the list endpoint omitted room details
+      const needsRoomsHydration = safeList.some(
+        (p) => !Array.isArray(p.rooms_) || p.rooms_.length === 0
+      );
+      if (needsRoomsHydration && safeList.length > 0) {
+        Promise.allSettled(
+          safeList.map(async (p) => {
+            if (Array.isArray(p.rooms_) && p.rooms_.length > 0) return p;
+            try {
+              const fullProp = await propertyService.getPropertyById(p.id);
+              if (fullProp && Array.isArray(fullProp.rooms_) && fullProp.rooms_.length > 0) {
+                return { ...p, rooms_: fullProp.rooms_, isAvailable: fullProp.isAvailable ?? p.isAvailable };
+              }
+            } catch {
+              // Ignore individual hydration errors
+            }
+            return p;
+          })
+        ).then((results) => {
+          const enriched = results.map((r, i) => (r.status === 'fulfilled' ? r.value : safeList[i]));
+          setProperties(enriched);
+        });
+      }
 
       const total =
         data?.pagination?.totalProperties ??
         data?.meta?.total ??
         data?.totalCount ??
         data?.total ??
-        (Array.isArray(list) ? list.length : 0);
+        safeList.length;
       setTotalCount(total);
       const pages =
         data?.pagination?.totalPages ??

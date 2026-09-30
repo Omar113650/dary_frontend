@@ -27,25 +27,59 @@ export class ApiClient {
     typeof window !== 'undefined' ? localStorage.getItem('dary_access_token') : null;
   private static refreshToken: string | null =
     typeof window !== 'undefined' ? localStorage.getItem('dary_refresh_token') : null;
+  private static clockSkewSeconds = 0;
+  private static lastRefreshTimestamp = 0;
+  private static sessionDead = false;
   private static refreshPromise: Promise<boolean> | null = null;
   private static inFlightGetRequests = new Map<string, Promise<any>>();
   private static inFlightMutations = new Map<string, Promise<any>>();
   private static recentMutations = new Map<string, { result: any; timestamp: number }>();
 
+  private static decodeJwtPayload(token: string): Record<string, any> | null {
+    try {
+      const parts = token.split('.');
+      if (parts.length < 2) return null;
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      return JSON.parse(jsonPayload);
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Save tokens both in-memory and in localStorage for persistence.
    */
   static setTokens(accessToken?: string | null, refreshToken?: string | null) {
+    if (accessToken || refreshToken) {
+      this.sessionDead = false;
+    }
     if (accessToken) {
       this.accessToken = accessToken;
+      const payload = this.decodeJwtPayload(accessToken);
+      if (payload?.iat) {
+        const clientNow = Math.floor(Date.now() / 1000);
+        this.clockSkewSeconds = payload.iat - clientNow;
+      }
       if (typeof window !== 'undefined') {
-        localStorage.setItem('dary_access_token', accessToken);
+        try {
+          localStorage.setItem('dary_access_token', accessToken);
+          localStorage.removeItem('dary_logged_out');
+        } catch {}
       }
     }
     if (refreshToken) {
       this.refreshToken = refreshToken;
       if (typeof window !== 'undefined') {
-        localStorage.setItem('dary_refresh_token', refreshToken);
+        try {
+          localStorage.setItem('dary_refresh_token', refreshToken);
+          localStorage.removeItem('dary_logged_out');
+        } catch {}
       }
     }
   }
@@ -56,59 +90,84 @@ export class ApiClient {
   static clearTokens() {
     this.accessToken = null;
     this.refreshToken = null;
+    this.lastRefreshTimestamp = 0;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('dary_access_token');
-      localStorage.removeItem('dary_refresh_token');
+      try {
+        localStorage.removeItem('dary_access_token');
+        localStorage.removeItem('dary_refresh_token');
+      } catch {}
     }
   }
 
   static getAccessToken(): string | null {
-    if (!this.accessToken && typeof window !== 'undefined') {
-      this.accessToken = localStorage.getItem('dary_access_token');
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('dary_access_token');
+        if (stored !== null) {
+          this.accessToken = stored;
+          return stored;
+        }
+      } catch {}
     }
     return this.accessToken;
   }
 
   static getRefreshToken(): string | null {
-    if (!this.refreshToken && typeof window !== 'undefined') {
-      this.refreshToken = localStorage.getItem('dary_refresh_token');
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('dary_refresh_token');
+        if (stored !== null) {
+          this.refreshToken = stored;
+          return stored;
+        }
+      } catch {}
     }
     return this.refreshToken;
   }
 
   /**
    * Optimization helper: decodes JWT payload to check if exp timestamp is within bufferSeconds.
-   * NOTE: This is client-side optimization only, real signature verification happens on backend.
+   * Accounts for client/server clock skew and avoids rapid back-to-back refresh loops.
    */
   static isAccessTokenExpired(token?: string | null, bufferSeconds = 30): boolean {
     const t = token || this.getAccessToken();
     if (!t) return true;
-    try {
-      const parts = t.split('.');
-      if (parts.length < 2) return true;
-      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      const jsonPayload = decodeURIComponent(
-        atob(base64)
-          .split('')
-          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-          .join('')
-      );
-      const payload = JSON.parse(jsonPayload);
-      if (!payload.exp) return false;
-      const now = Math.floor(Date.now() / 1000);
-      return payload.exp <= now + bufferSeconds;
-    } catch {
-      return true;
+    // Prevent rapid proactive refresh loops if a token was just refreshed in the last 10 seconds
+    if (Date.now() - this.lastRefreshTimestamp < 10_000) {
+      return false;
     }
+    const payload = this.decodeJwtPayload(t);
+    if (!payload) return true;
+    if (!payload.exp) return false;
+    const adjustedNow = Math.floor(Date.now() / 1000) + this.clockSkewSeconds;
+    return payload.exp <= adjustedNow + bufferSeconds;
   }
 
   /**
    * Mutex lock for token refreshing.
    * If multiple concurrent requests receive 401, they will all wait for
    * this single execution rather than firing multiple refresh requests
-   * (which would revoke single-use refresh tokens on the backend).
+   * (which would invalidate the single rotated refresh_tokens row on the backend).
    */
   static async refreshAuth(): Promise<boolean> {
+    // Do not spam /auth/refresh-token if refresh already failed or user explicitly logged out
+    if (
+      this.sessionDead ||
+      (typeof window !== 'undefined' && localStorage.getItem('dary_logged_out') === 'true')
+    ) {
+      return false;
+    }
+
+    // If another request or tab just rotated the token within the last 5 seconds and it's valid, reuse it
+    const currentAccess = this.getAccessToken();
+    if (
+      currentAccess &&
+      Date.now() - this.lastRefreshTimestamp < 5_000 &&
+      !this.isAccessTokenExpired(currentAccess, 5)
+    ) {
+      return true;
+    }
+
     if (!this.refreshPromise) {
       this.refreshPromise = this.executeRefresh();
     }
@@ -133,21 +192,57 @@ export class ApiClient {
       });
 
       if (!res.ok) {
-        this.clearTokens();
+        // Only wipe tokens if the server explicitly rejected the refresh token (401 / 403)
+        if (res.status === 401 || res.status === 403) {
+          this.sessionDead = true;
+          this.clearTokens();
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('dary_logged_out', 'true');
+            } catch {}
+            window.dispatchEvent(new CustomEvent('auth:expired'));
+          }
+        }
         return false;
       }
 
       const json = await res.json().catch(() => null);
-      const newAccessToken = json?.data?.tokens?.accessToken;
-      const newRefreshToken = json?.data?.tokens?.refreshToken;
+      const tokens = json?.data?.tokens || json?.tokens;
+      const newAccessToken = tokens?.accessToken || json?.data?.accessToken || json?.accessToken;
+      const newRefreshToken = tokens?.refreshToken || json?.data?.refreshToken || json?.refreshToken;
 
+      this.sessionDead = false;
       if (newAccessToken || newRefreshToken) {
         this.setTokens(newAccessToken, newRefreshToken);
+      }
+      this.lastRefreshTimestamp = Date.now();
+
+      // Update cached user roles/status if returned by refresh endpoint
+      const refreshedUser = json?.data?.user || json?.user;
+      if (refreshedUser?.id && typeof window !== 'undefined') {
+        try {
+          const existingRaw = localStorage.getItem('dary_user');
+          const existingUser = existingRaw ? JSON.parse(existingRaw) : {};
+          const primaryRole =
+            refreshedUser.role ||
+            (Array.isArray(refreshedUser.roles) ? refreshedUser.roles[0] : undefined) ||
+            existingUser.role;
+          localStorage.setItem(
+            'dary_user',
+            JSON.stringify({
+              ...existingUser,
+              ...refreshedUser,
+              role: primaryRole,
+            })
+          );
+        } catch {
+          // Ignore storage errors
+        }
       }
 
       return true;
     } catch {
-      this.clearTokens();
+      // Network error during refresh — do not wipe valid tokens
       return false;
     } finally {
       this.refreshPromise = null;
@@ -168,20 +263,23 @@ export class ApiClient {
     const isAuthEndpoint =
       endpoint.includes('/auth/login') ||
       endpoint.includes('/auth/register') ||
+      endpoint.includes('/auth/logout') ||
       endpoint.includes('/auth/refresh-token') ||
       endpoint.includes('/auth/verify-otp') ||
+      endpoint.includes('/auth/resend-otp') ||
       endpoint.includes('/auth/forget-password') ||
       endpoint.includes('/auth/reset-password');
 
     // Attach Bearer token as secondary / fallback transport alongside cookies
     let currentToken = this.getAccessToken();
+    let proactiveRefreshAttempted = false;
     if (currentToken && !isAuthEndpoint && !_retry && this.isAccessTokenExpired(currentToken, 30)) {
-      const refreshed = await this.refreshAuth();
-      if (refreshed) {
-        currentToken = this.getAccessToken();
-      }
+      proactiveRefreshAttempted = true;
+      await this.refreshAuth();
+      currentToken = this.getAccessToken();
     }
 
+    const tokenUsedForRequest = currentToken;
     if (currentToken && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${currentToken}`);
     }
@@ -288,18 +386,67 @@ export class ApiClient {
           const isAuthEndpoint =
             endpoint.includes('/auth/login') ||
             endpoint.includes('/auth/register') ||
+            endpoint.includes('/auth/logout') ||
             endpoint.includes('/auth/refresh-token') ||
             endpoint.includes('/auth/verify-otp') ||
+            endpoint.includes('/auth/resend-otp') ||
             endpoint.includes('/auth/forget-password') ||
             endpoint.includes('/auth/reset-password');
 
+          // Check if backend authMiddleware rejected user due to immediate MemoryCache status update (SUSPENDED / INACTIVE / DELETED)
+          const lowerMsg = String(message || '').toLowerCase();
+          const lowerCode = String(code || '').toLowerCase();
+          const isAccountSuspendedOrDeleted =
+            !isAuthEndpoint &&
+            (response.status === 403 || response.status === 401) &&
+            (lowerMsg.includes('suspended') ||
+              lowerMsg.includes('inactive') ||
+              lowerMsg.includes('disabled') ||
+              lowerMsg.includes('banned') ||
+              lowerMsg.includes('user not found') ||
+              lowerMsg.includes('account deleted') ||
+              lowerMsg.includes('معلق') ||
+              lowerMsg.includes('موقوف') ||
+              lowerMsg.includes('محظور') ||
+              lowerMsg.includes('غير نشط') ||
+              lowerCode.includes('suspended') ||
+              lowerCode.includes('account_inactive') ||
+              lowerCode.includes('user_suspended') ||
+              json?.data?.status === 'SUSPENDED' ||
+              json?.data?.status === 'INACTIVE');
+
+          if (isAccountSuspendedOrDeleted) {
+            this.clearTokens();
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent('auth:expired', {
+                  detail: { reason: 'suspended', message },
+                })
+              );
+            }
+            throw new ApiError(message, code, response.status, json);
+          }
+
           if (response.status === 401 && !isAuthEndpoint && !_retry) {
-            const refreshed = await this.refreshAuth();
+            // If another concurrent request already rotated the single refresh_tokens row while this request was in-flight,
+            // reuse the newly stored accessToken immediately without hitting /auth/refresh-token a second time.
+            const latestToken = this.getAccessToken();
+            if (
+              latestToken &&
+              latestToken !== tokenUsedForRequest &&
+              !this.isAccessTokenExpired(latestToken, 5)
+            ) {
+              return this.request<T>(endpoint, { ...options, _retry: true });
+            }
+
+            // Only attempt refresh if proactive refresh didn't already just fail on this exact request
+            const refreshed = proactiveRefreshAttempted ? false : await this.refreshAuth();
             if (refreshed) {
               // Re-try the exact original request once with new token
               return this.request<T>(endpoint, { ...options, _retry: true });
             } else {
-              // Refresh failed permanently (token revoked / expired)
+              // Refresh failed permanently (token deleted / expired in DB)
+              this.clearTokens();
               if (typeof window !== 'undefined') {
                 window.dispatchEvent(new CustomEvent('auth:expired'));
               }

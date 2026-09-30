@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback } from 'rea
 import type { ReactNode } from 'react';
 import { AuthService } from '../services/authService';
 import { ApiClient } from '../services/apiClient';
+import { defaultQueryClient } from '../lib/queryClient';
 import type { User, LoginCredentials } from '../services/authService';
 
 export interface AuthContextType {
@@ -64,6 +65,27 @@ export function isUserAdmin(user: any): boolean {
 export const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Capture OAuth callback tokens from URL query/hash if present (e.g. Google Login redirect)
+  if (typeof window !== 'undefined') {
+    try {
+      const searchParams = new URLSearchParams(window.location.search);
+      const urlAccessToken = searchParams.get('accessToken') || searchParams.get('token');
+      const urlRefreshToken = searchParams.get('refreshToken');
+      if (urlAccessToken || urlRefreshToken) {
+        ApiClient.setTokens(urlAccessToken, urlRefreshToken);
+        searchParams.delete('accessToken');
+        searchParams.delete('refreshToken');
+        searchParams.delete('token');
+        const cleanSearch = searchParams.toString();
+        const cleanUrl =
+          window.location.pathname +
+          (cleanSearch ? `?${cleanSearch}` : '') +
+          window.location.hash;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }
+    } catch {}
+  }
+
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -89,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') return false;
     const token = localStorage.getItem('dary_access_token');
     const cached = localStorage.getItem('dary_user');
-    // If no token, user is definitely guest -> don't block
+    // If no token, user is guest (or will silently check cookie in background) -> don't block
     if (!token) return false;
     // If we have both token and cached user, render instantly! (Revalidate in background)
     if (cached) return false;
@@ -102,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (userData && userData.id) {
       try {
         localStorage.setItem('dary_user', JSON.stringify(userData));
+        localStorage.removeItem('dary_logged_out');
       } catch {}
     } else {
       try {
@@ -111,8 +134,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshUser = useCallback(async () => {
-    const token = ApiClient.getAccessToken();
-    if (!token) {
+    let token = ApiClient.getAccessToken();
+    const refreshToken = ApiClient.getRefreshToken();
+    const isExplicitlyLoggedOut =
+      typeof window !== 'undefined' && localStorage.getItem('dary_logged_out') === 'true';
+
+    // If no local tokens AND user explicitly logged out, skip network call
+    if (!token && !refreshToken && isExplicitlyLoggedOut) {
       setUser(null);
       setRole(null);
       saveUserLocally(null);
@@ -121,8 +149,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      // 1. Proactive Auth Bootstrap: check if access token is expired (or < 30s left)
-      if (ApiClient.isAccessTokenExpired(token, 30)) {
+      // 1. Proactive Auth Bootstrap: if we have a local token that is expired (or < 30s left), or only a refreshToken
+      if ((token && ApiClient.isAccessTokenExpired(token, 30)) || (!token && refreshToken)) {
         const refreshed = await ApiClient.refreshAuth();
         if (!refreshed) {
           setUser(null);
@@ -132,8 +160,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setIsLoading(false);
           return;
         }
+        token = ApiClient.getAccessToken();
       }
 
+      // 2. Fetch current profile (also works with httpOnly cookies from Google OAuth even when localStorage tokens are empty)
       const userData = await AuthService.getMe();
       if (userData && userData.id) {
         setUser(userData);
@@ -151,6 +181,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setRole(null);
         saveUserLocally(null);
         ApiClient.clearTokens();
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('dary_logged_out', 'true');
+          } catch {}
+        }
       } else {
         const currentToken = ApiClient.getAccessToken();
         if (!currentToken) {
@@ -167,16 +202,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshUser();
 
-    const handleExpired = () => {
+    const handleExpired = (event?: Event) => {
+      const customEvent = event as CustomEvent<{ reason?: string; message?: string }>;
+      if (customEvent?.detail?.message && typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem('dary_auth_error', customEvent.detail.message);
+        } catch {}
+      }
       setUser(null);
       setRole(null);
       saveUserLocally(null);
       ApiClient.clearTokens();
+      defaultQueryClient.clear();
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('dary_logged_out', 'true');
+        } catch {}
+      }
+    };
+
+    // Sync authentication state across multiple browser tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'dary_user') {
+        if (!e.newValue) {
+          setUser(null);
+          setRole(null);
+          defaultQueryClient.clear();
+        } else {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            if (parsed && parsed.id) {
+              setUser(parsed);
+              setRole(extractUserRole(parsed));
+            }
+          } catch {}
+        }
+      } else if (e.key === 'dary_logged_out' && e.newValue === 'true') {
+        setUser(null);
+        setRole(null);
+        ApiClient.clearTokens();
+        defaultQueryClient.clear();
+      }
     };
 
     window.addEventListener('auth:expired', handleExpired);
+    window.addEventListener('storage', handleStorageChange);
     return () => {
       window.removeEventListener('auth:expired', handleExpired);
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, [refreshUser]);
 
@@ -214,6 +287,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(null);
       setRole(null);
       saveUserLocally(null);
+      defaultQueryClient.clear();
       setIsLoading(false);
     }
   };
