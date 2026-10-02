@@ -4,7 +4,7 @@ import type { SupportTicketItem, TicketMessageItem } from './supportTicketServic
 
 export interface RentalBooking {
   id: string;
-  status: 'PENDING' | 'CONTACTED' | 'CLOSED' | 'CANCELLED' | string;
+  status: 'PENDING' | 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED' | string;
   bedsRequested?: number;
   startDate?: string;
   endDate?: string;

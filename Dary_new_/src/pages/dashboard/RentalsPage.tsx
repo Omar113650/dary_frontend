@@ -130,28 +130,38 @@ export default function RentalsPage() {
     if (s === 'PENDING') {
       return (
         <span className="dary-badge dary-badge-pending">
-          {locale === 'ar' ? 'قيد المراجعة' : 'Pending'}
+          {locale === 'ar' ? '⏳ قيد الانتظار' : 'Pending'}
         </span>
       );
     }
     if (s === 'CONTACTED') {
       return (
         <span className="dary-badge dary-badge-contacted">
-          {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
+          {locale === 'ar' ? '📞 تم التواصل' : 'Contacted'}
+        </span>
+      );
+    }
+    if (s === 'CONFIRMED') {
+      return (
+        <span
+          className="dary-badge"
+          style={{ backgroundColor: '#E0E7FF', color: '#3730A3', border: '1px solid #C7D2FE', fontWeight: 700 }}
+        >
+          {locale === 'ar' ? '✓ مؤكد ومعتمد' : 'Confirmed'}
         </span>
       );
     }
     if (s === 'CLOSED') {
       return (
         <span className="dary-badge dary-badge-closed">
-          {locale === 'ar' ? 'مكتمل' : 'Closed'}
+          {locale === 'ar' ? '🏁 مكتمل نهائياً' : 'Closed'}
         </span>
       );
     }
     if (s === 'CANCELLED') {
       return (
         <span className="dary-badge dary-badge-cancelled">
-          {locale === 'ar' ? 'ملغي' : 'Cancelled'}
+          {locale === 'ar' ? '✕ ملغي' : 'Cancelled'}
         </span>
       );
     }
@@ -187,9 +197,10 @@ export default function RentalsPage() {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.75rem' }}>
             {[
               { id: 'ALL', labelAr: 'كافة الحجوزات', labelEn: 'All Rentals', count: rentals.length },
-              { id: 'PENDING', labelAr: 'قيد المراجعة', labelEn: 'Pending', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length },
+              { id: 'PENDING', labelAr: 'قيد الانتظار', labelEn: 'Pending', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length },
               { id: 'CONTACTED', labelAr: 'تم التواصل', labelEn: 'Contacted', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CONTACTED').length },
-              { id: 'CLOSED', labelAr: 'مكتملة ومؤكدة', labelEn: 'Closed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CLOSED').length },
+              { id: 'CONFIRMED', labelAr: 'مؤكد ومعتمد', labelEn: 'Confirmed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CONFIRMED').length },
+              { id: 'CLOSED', labelAr: 'مكتمل نهائياً', labelEn: 'Closed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CLOSED').length },
               { id: 'CANCELLED', labelAr: 'ملغية', labelEn: 'Cancelled', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CANCELLED').length },
             ].map((tab) => {
               const isActive = statusFilter === tab.id;

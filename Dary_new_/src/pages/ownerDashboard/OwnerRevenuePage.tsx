@@ -27,6 +27,7 @@ export default function OwnerRevenuePage() {
     revenueData?.revenue ??
     (typeof revenueData === 'number' ? revenueData : 0);
 
+  const pendingRevenue = revenueData?.pendingRevenue ?? 0;
   const currency = revenueData?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
   const completedBookings = revenueData?.completedBookings ?? 0;
   const pendingBookings = revenueData?.pendingBookings ?? 0;
@@ -44,8 +45,8 @@ export default function OwnerRevenuePage() {
             </h2>
             <p style={{ margin: '0.35rem 0 0', fontSize: '0.875rem', color: '#64748B' }}>
               {locale === 'ar'
-                ? 'متابعة تفصيلية للإيرادات المحققة من عقاراتك المؤجرة بناءً على عقود وحجوزات الطلاب الفعلية.'
-                : 'Track student booking earnings, completed payments, and property performance.'}
+                ? 'متابعة تفصيلية للإيرادات النهائية المحصلة (CLOSED) والمبالغ المعلقة (PENDING, CONTACTED, CONFIRMED).'
+                : 'Track finalized student booking earnings (CLOSED) and pending revenue in progress.'}
             </p>
           </div>
         </div>
@@ -85,7 +86,7 @@ export default function OwnerRevenuePage() {
             >
               <div>
                 <span style={{ fontSize: '0.9rem', color: '#CBD5E1', display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-                  {locale === 'ar' ? 'إجمالي الحصيلة المالية المحققة' : 'Total Earned Revenue'}
+                  {locale === 'ar' ? 'إجمالي الإيرادات النهائية المحصلة (CLOSED)' : 'Total Finalized Revenue (Closed)'}
                 </span>
                 <div style={{ fontSize: '2.75rem', fontWeight: 900, color: '#FFFFFF', letterSpacing: '-0.5px', lineHeight: 1 }}>
                   <AnimatedCounter value={Number(parsedTotal)} />
@@ -95,8 +96,8 @@ export default function OwnerRevenuePage() {
                 </div>
                 <p style={{ margin: '0.75rem 0 0', fontSize: '0.85rem', color: '#93C5FD' }}>
                   {locale === 'ar'
-                    ? 'الأرباح الناتجة من الحجوزات المكتملة وتسكين الطلاب'
-                    : 'Revenue generated from confirmed and completed student housing stays.'}
+                    ? 'الأرباح النهائية الناتجة من الحجوزات التي وصلت لمرحلة الانتهاء وتفعيل العقد (CLOSED) فقط'
+                    : 'Final revenue generated from completed and contract-activated bookings (CLOSED) only.'}
                 </p>
               </div>
 
@@ -110,38 +111,53 @@ export default function OwnerRevenuePage() {
                   textAlign: locale === 'ar' ? 'right' : 'left',
                 }}
               >
-                <div style={{ fontSize: '0.8rem', color: '#E2E8F0', marginBottom: '0.25rem' }}>
-                  {locale === 'ar' ? 'حالة الحساب المالي' : 'Account Financial Status'}
+                <div style={{ fontSize: '0.8rem', color: '#FDE68A', fontWeight: 700, marginBottom: '0.3rem' }}>
+                  ⏳ {locale === 'ar' ? 'إيرادات معلقة قيد التعاقد (Pending Revenue)' : 'Pending Revenue'}
                 </div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#4ADE80' }}>
-                  ✓ {locale === 'ar' ? 'حساب نشط ومطابق' : 'Active & Verified'}
+                <div style={{ fontSize: '1.5rem', fontWeight: 900, color: '#FDE047' }}>
+                  <AnimatedCounter value={Number(pendingRevenue)} suffix={` ${currency}`} />
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#E2E8F0', marginTop: '0.25rem' }}>
+                  {locale === 'ar' ? 'تشمل مراحل (PENDING, CONTACTED, CONFIRMED)' : 'Includes PENDING, CONTACTED, CONFIRMED'}
                 </div>
               </div>
             </div>
 
-            {/* 4 Performance Metric Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            {/* Performance Metric Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div style={{ padding: '1.25rem', backgroundColor: '#FFFBEB', borderRadius: '12px', border: '1px solid #FDE68A' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#92400E', display: 'block', marginBottom: '0.35rem' }}>
+                  ⏳ {locale === 'ar' ? 'المبالغ المعلقة (Pending Revenue)' : 'Pending Revenue'}
+                </span>
+                <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#B45309' }}>
+                  <AnimatedCounter value={Number(pendingRevenue)} suffix={` ${currency}`} />
+                </div>
+                <span style={{ fontSize: '0.75rem', color: '#D97706' }}>
+                  {locale === 'ar' ? 'تسمّع في الإيرادات فور إتمام العقد (CLOSED)' : 'Collected once booking reaches CLOSED'}
+                </span>
+              </div>
+
               <div style={{ padding: '1.25rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B', display: 'block', marginBottom: '0.35rem' }}>
-                  ✅ {locale === 'ar' ? 'الحجوزات المكتملة والمحصلة' : 'Completed Bookings'}
+                  🏁 {locale === 'ar' ? 'الحجوزات المكتملة والمحصلة (CLOSED)' : 'Completed Bookings (Closed)'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
                   <AnimatedCounter value={completedBookings} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#16A34A' }}>
-                  {locale === 'ar' ? 'حجوزات تم إتمامها وتسكينها' : 'Fully completed bookings'}
+                  {locale === 'ar' ? 'حجوزات تم إتمامها وتحصيل مبالغها' : 'Fully completed & collected bookings'}
                 </span>
               </div>
 
               <div style={{ padding: '1.25rem', backgroundColor: '#F8FAFC', borderRadius: '12px', border: '1px solid #E2E8F0' }}>
                 <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#64748B', display: 'block', marginBottom: '0.35rem' }}>
-                  ⏳ {locale === 'ar' ? 'حجوزات قيد المعالجة' : 'Pending Bookings'}
+                  📋 {locale === 'ar' ? 'حجوزات معلقة (شاملة المؤكدة CONFIRMED)' : 'Pending Bookings (incl. Confirmed)'}
                 </span>
                 <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#0B2A4A' }}>
                   <AnimatedCounter value={pendingBookings} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#CA8A04' }}>
-                  {locale === 'ar' ? 'طلبات حجز بانتظار التأكيد' : 'Requests in progress'}
+                  {locale === 'ar' ? 'في مراحل الانتظار، التواصل، أو التأكيد المبدئي' : 'In Pending, Contacted, or Confirmed stages'}
                 </span>
               </div>
 
@@ -165,7 +181,7 @@ export default function OwnerRevenuePage() {
                   <AnimatedCounter value={avgRevenuePerProperty} suffix={` ${currency}`} />
                 </div>
                 <span style={{ fontSize: '0.75rem', color: '#9333EA' }}>
-                  {locale === 'ar' ? 'متوسط العائد لكل وحدة' : 'Average return per unit'}
+                  {locale === 'ar' ? 'متوسط العائد المحصل لكل وحدة' : 'Average finalized return per unit'}
                 </span>
               </div>
             </div>

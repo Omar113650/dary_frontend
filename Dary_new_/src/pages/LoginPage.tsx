@@ -15,7 +15,7 @@ export default function LoginPage() {
   const location = useLocation();
 
   const locationState = (location.state as any) || {};
-  const prefillEmail = locationState.email || '';
+  const prefillEmail = locationState.email || locationState.phone || '';
   const successNotice = locationState.message || null;
 
   const [email, setEmail] = useState(prefillEmail);
@@ -87,20 +87,29 @@ export default function LoginPage() {
     setIsUnverified(false);
     setResendNotice(null);
 
-    const cleanEmail = email.trim().toLowerCase();
+    const rawInput = email.trim();
+    const isEmailInput = rawInput.includes('@');
+    const cleanIdentifier = isEmailInput
+      ? rawInput.toLowerCase()
+      : rawInput.replace(/\s+/g, '');
 
-    if (!cleanEmail || !password) {
+    if (!cleanIdentifier || !password) {
       setErrorMsg(
         locale === 'ar'
-          ? 'يرجى إدخال البريد الإلكتروني وكلمة المرور'
-          : 'Please enter both email and password'
+          ? 'يرجى إدخال البريد الإلكتروني أو رقم الهاتف وكلمة المرور'
+          : 'Please enter your email or phone number and password'
       );
       return;
     }
 
     setIsLoading(true);
     try {
-      const user = await login({ email: cleanEmail, password });
+      const user = await login({
+        identifier: cleanIdentifier,
+        email: isEmailInput ? cleanIdentifier : undefined,
+        phone: !isEmailInput ? cleanIdentifier : undefined,
+        password,
+      });
 
       const userRole = extractUserRole(user);
       const isAdminUser = isUserAdmin(user);
@@ -399,10 +408,10 @@ export default function LoginPage() {
           )}
 
           <form className="auth-form auth-stagger-item" onSubmit={handleSubmit} noValidate>
-            {/* Email Field */}
+            {/* Email or Phone Field */}
             <div className="auth-field-group">
               <label htmlFor="login-email" className="auth-label">
-                {t.auth_email_label}
+                {locale === 'ar' ? 'البريد الإلكتروني أو رقم الهاتف' : 'Email or Phone Number'}
               </label>
               <div className="auth-input-wrapper">
                 <span className="auth-input-icon" aria-hidden="true">
@@ -413,12 +422,17 @@ export default function LoginPage() {
                 </span>
                 <input
                   id="login-email"
-                  type="email"
+                  type="text"
                   className="auth-input"
-                  placeholder={t.auth_email_placeholder}
+                  placeholder={
+                    locale === 'ar'
+                      ? 'name@example.com أو +201012345678'
+                      : 'name@example.com or +201012345678'
+                  }
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
+                  autoComplete="username"
+                  dir="ltr"
                   required
                 />
               </div>

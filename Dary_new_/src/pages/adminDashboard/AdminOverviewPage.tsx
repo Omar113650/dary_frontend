@@ -154,6 +154,9 @@ export default function AdminOverviewPage() {
     revenueData?.total ??
     (typeof revenueData === 'number' ? revenueData : null);
 
+  const parsedPendingRevenue =
+    revenueData?.pendingRevenue ?? null;
+
   const revenueCurrency = revenueData?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
 
   return (
@@ -280,10 +283,10 @@ export default function AdminOverviewPage() {
           </div>
         )}
 
-        {/* Total Revenue */}
+        {/* Total Revenue (Final / CLOSED) */}
         {hasAdminModuleAccess(user, 'analytics') && (
           <div className="dary-metric-card">
-            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="12" y1="1" x2="12" y2="23" />
                 <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
@@ -299,7 +302,32 @@ export default function AdminOverviewPage() {
                 />
               </h3>
               <p className="dary-metric-label">
-                {locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Platform Revenue'}
+                {locale === 'ar' ? 'الإيرادات النهائية المحصلة (CLOSED)' : 'Final Revenue (Closed)'}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Pending Revenue (PENDING, CONTACTED, CONFIRMED) */}
+        {hasAdminModuleAccess(user, 'analytics') && (
+          <div className="dary-metric-card">
+            <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="dary-metric-number">
+                <AnimatedCounter
+                  value={revenueError ? null : parsedPendingRevenue}
+                  loading={loadingRevenue}
+                  suffix={` ${revenueCurrency}`}
+                  fallback="—"
+                />
+              </h3>
+              <p className="dary-metric-label">
+                {locale === 'ar' ? 'مبالغ الحجوزات المعلقة' : 'Pending Revenue'}
               </p>
             </div>
           </div>
@@ -418,36 +446,68 @@ export default function AdminOverviewPage() {
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-                {bookingsStatusList.map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.75rem 1rem',
-                      backgroundColor: '#F8FAFC',
-                      borderRadius: '8px',
-                      border: '1px solid #E2E8F0',
-                    }}
-                  >
-                    <span style={{ fontWeight: 600, color: '#0B2A4A' }}>{item.status}</span>
-                    <span
+                {bookingsStatusList.map((item, idx) => {
+                  const st = (item.status || '').toUpperCase();
+                  const label =
+                    st === 'CLOSED'
+                      ? (locale === 'ar' ? '🏁 تم الانتهاء والتعاقد (CLOSED)' : '🏁 Closed (Completed)')
+                      : st === 'CONFIRMED'
+                      ? (locale === 'ar' ? '✓ مؤكد - مبلغ معلق (CONFIRMED)' : '✓ Confirmed (Pending Revenue)')
+                      : st === 'CONTACTED'
+                      ? (locale === 'ar' ? '📞 تم التواصل (CONTACTED)' : '📞 Contacted')
+                      : st === 'PENDING'
+                      ? (locale === 'ar' ? '⏳ قيد الانتظار (PENDING)' : '⏳ Pending')
+                      : st === 'CANCELLED'
+                      ? (locale === 'ar' ? '✕ ملغي (CANCELLED)' : '✕ Cancelled')
+                      : item.status;
+
+                  return (
+                    <div
+                      key={idx}
                       style={{
-                        padding: '0.25rem 0.65rem',
-                        borderRadius: '12px',
-                        fontSize: '0.82rem',
-                        fontWeight: 700,
-                        backgroundColor:
-                          item.status === 'CONFIRMED' ? '#DCFCE7' : item.status === 'PENDING' ? '#FEF9C3' : '#FEE2E2',
-                        color:
-                          item.status === 'CONFIRMED' ? '#15803D' : item.status === 'PENDING' ? '#A16207' : '#B91C1C',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.75rem 1rem',
+                        backgroundColor: '#F8FAFC',
+                        borderRadius: '8px',
+                        border: '1px solid #E2E8F0',
                       }}
                     >
-                      {item.count}
-                    </span>
-                  </div>
-                ))}
+                      <span style={{ fontWeight: 600, color: '#0B2A4A', fontSize: '0.85rem' }}>{label}</span>
+                      <span
+                        style={{
+                          padding: '0.25rem 0.65rem',
+                          borderRadius: '12px',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          backgroundColor:
+                            st === 'CLOSED'
+                              ? '#DCFCE7'
+                              : st === 'CONFIRMED'
+                              ? '#E0E7FF'
+                              : st === 'CONTACTED'
+                              ? '#E0F2FE'
+                              : st === 'PENDING'
+                              ? '#FEF9C3'
+                              : '#FEE2E2',
+                          color:
+                            st === 'CLOSED'
+                              ? '#15803D'
+                              : st === 'CONFIRMED'
+                              ? '#3730A3'
+                              : st === 'CONTACTED'
+                              ? '#0369A1'
+                              : st === 'PENDING'
+                              ? '#A16207'
+                              : '#B91C1C',
+                        }}
+                      >
+                        {item.count}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

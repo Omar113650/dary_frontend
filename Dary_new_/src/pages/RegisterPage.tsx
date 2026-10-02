@@ -65,7 +65,14 @@ export default function RegisterPage() {
 
     const cleanEmail = email.trim().toLowerCase();
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!cleanEmail || !emailRegex.test(cleanEmail) || cleanEmail.length > 255) {
+    if (role === 'tenant') {
+      if (!cleanEmail || !emailRegex.test(cleanEmail) || cleanEmail.length > 255) {
+        errors.email =
+          locale === 'ar'
+            ? 'يرجى إدخال بريد إلكتروني صحيح (بحد أقصى 255 حرفًا).'
+            : 'Please enter a valid email address (max 255 chars).';
+      }
+    } else if (cleanEmail && (!emailRegex.test(cleanEmail) || cleanEmail.length > 255)) {
       errors.email =
         locale === 'ar'
           ? 'يرجى إدخال بريد إلكتروني صحيح (بحد أقصى 255 حرفًا).'
@@ -123,23 +130,43 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     try {
+      const cleanEmail = email.trim().toLowerCase();
       const cleanPhone = phone.trim().replace(/\s+/g, '');
       const cleanWhatsapp = whatsappPhone.trim().replace(/\s+/g, '');
 
       // POST /auth/register
-      await AuthService.register({
+      const res = await AuthService.register({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
-        email: email.trim().toLowerCase(),
+        email: cleanEmail || undefined,
         password,
         phone: cleanPhone,
         whatsappPhone: cleanWhatsapp || undefined,
         roles: role, // 'tenant' or 'owner' only
       });
 
-      // Redirect to OTP verification screen
+      const registeredUser = res?.data?.user || res?.user;
+      const isAlreadyVerified = registeredUser?.isVerified === true;
+
+      // If owner registered without an email (or account is already verified), redirect to login
+      if (!cleanEmail || isAlreadyVerified) {
+        navigate('/login', {
+          state: {
+            email: cleanEmail || cleanPhone,
+            phone: cleanPhone,
+            message:
+              locale === 'ar'
+                ? 'تم إنشاء حسابك بنجاح! يمكنك الآن تسجيل الدخول.'
+                : 'Your account has been created successfully! You can now sign in.',
+          },
+          replace: true,
+        });
+        return;
+      }
+
+      // Redirect to OTP verification screen when email verification is needed
       navigate('/verify-otp', {
-        state: { email: email.trim().toLowerCase() },
+        state: { email: cleanEmail },
         replace: true,
       });
     } catch (err: any) {
@@ -278,7 +305,16 @@ export default function RegisterPage() {
 
                 <button
                   type="button"
-                  onClick={() => setRole('owner')}
+                  onClick={() => {
+                    setRole('owner');
+                    if (fieldErrors.email) {
+                      setFieldErrors((prev) => {
+                        const next = { ...prev };
+                        delete next.email;
+                        return next;
+                      });
+                    }
+                  }}
                   className={`auth-role-card ${role === 'owner' ? 'auth-role-card--active' : ''}`}
                 >
                   <span className="auth-role-card-icon">🔑</span>
@@ -348,6 +384,11 @@ export default function RegisterPage() {
             <div className="auth-field-group">
               <label htmlFor="reg-email" className="auth-label">
                 {t.auth_email_label}
+                {role === 'owner' && (
+                  <span style={{ fontWeight: 500, color: '#64748B', marginInlineStart: '0.35rem' }}>
+                    {locale === 'ar' ? '(اختياري)' : '(Optional)'}
+                  </span>
+                )}
               </label>
               <div className="auth-input-wrapper">
                 <span className="auth-input-icon" aria-hidden="true">
@@ -364,9 +405,16 @@ export default function RegisterPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   autoComplete="email"
-                  required
+                  required={role !== 'owner'}
                 />
               </div>
+              {role === 'owner' && (
+                <span className="auth-field-hint">
+                  {locale === 'ar'
+                    ? 'البريد الإلكتروني اختياري لمالك العقار — يمكنك التسجيل بدونه.'
+                    : 'Email is optional for property owners — you can register without it.'}
+                </span>
+              )}
               {fieldErrors.email && (
                 <span className="auth-field-error">{fieldErrors.email}</span>
               )}

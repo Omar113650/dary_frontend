@@ -188,11 +188,24 @@ export default function OwnerCalendarPage() {
               const roomName = b.room?.roomType ? `غرفة ${b.room.roomType}` : 'غرفة دراسية';
               const beds = b.bedsRequested || 1;
 
-              const isConfirmed = b.status === 'CONFIRMED' || b.status === 'CLOSED';
-              const isContacted = b.status === 'CONTACTED';
-              const isPending = b.status === 'PENDING';
-              const bg = isConfirmed ? '#DCFCE7' : isContacted ? '#E0F2FE' : isPending ? '#FEF9C3' : '#FEE2E2';
-              const color = isConfirmed ? '#15803D' : isContacted ? '#0369A1' : isPending ? '#A16207' : '#B91C1C';
+              const st = (b.status || '').toUpperCase();
+              const isClosed = st === 'CLOSED';
+              const isConfirmed = st === 'CONFIRMED';
+              const isContacted = st === 'CONTACTED';
+              const isPending = st === 'PENDING';
+              const bg = isClosed ? '#DCFCE7' : isConfirmed ? '#E0E7FF' : isContacted ? '#E0F2FE' : isPending ? '#FEF9C3' : '#FEE2E2';
+              const color = isClosed ? '#15803D' : isConfirmed ? '#3730A3' : isContacted ? '#0369A1' : isPending ? '#A16207' : '#B91C1C';
+              const statusLabel = isClosed
+                ? (locale === 'ar' ? '🏁 مكتمل نهائياً' : '🏁 Closed')
+                : isConfirmed
+                ? (locale === 'ar' ? '✓ مؤكد (مبلغ معلق)' : '✓ Confirmed')
+                : isContacted
+                ? (locale === 'ar' ? '📞 تم التواصل' : '📞 Contacted')
+                : isPending
+                ? (locale === 'ar' ? '⏳ قيد الانتظار' : '⏳ Pending')
+                : st === 'CANCELLED'
+                ? (locale === 'ar' ? '✕ ملغي' : '✕ Cancelled')
+                : b.status || 'PENDING';
 
               return (
                 <div
@@ -225,7 +238,7 @@ export default function OwnerCalendarPage() {
                           color: color,
                         }}
                       >
-                        {b.status || 'PENDING'}
+                        {statusLabel}
                       </span>
                     </div>
 

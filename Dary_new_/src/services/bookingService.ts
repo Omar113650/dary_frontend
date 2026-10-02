@@ -41,7 +41,7 @@ export interface BookingItem {
     lastName?: string;
     email?: string;
   } | null;
-  status: 'PENDING' | 'CONTACTED' | 'CLOSED' | 'CANCELLED' | string;
+  status: 'PENDING' | 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED' | string;
   note?: string | null;
   contactedAt?: string | null;
   startDate?: string;
@@ -223,11 +223,11 @@ export class BookingService {
 
   /**
    * 8. PATCH /booking/:id/status
-   * Change Booking Status (PENDING, CONTACTED, CLOSED, CANCELLED)
+   * Change Booking Status (PENDING, CONTACTED, CONFIRMED, CLOSED, CANCELLED)
    */
   static async changeBookingStatus(
     id: string,
-    status: 'PENDING' | 'CONTACTED' | 'CLOSED' | 'CANCELLED' | string,
+    status: 'PENDING' | 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED' | string,
     note?: string
   ): Promise<any> {
     const payload: { status: string; note?: string } = { status };
@@ -238,5 +238,22 @@ export class BookingService {
     }
     const res = await this.requestWithFallback<any>('patch', `/${id}/status`, payload);
     return res?.data || res;
+  }
+
+  /**
+   * 9. PATCH /contract/:contractId/activate
+   * Activate a signed contract (automatically sets booking to CLOSED on backend)
+   */
+  static async activateContract(contractId: string): Promise<any> {
+    try {
+      const res = await ApiClient.patch<any>(`/contract/${contractId}/activate`);
+      return res?.data || res;
+    } catch (err: any) {
+      if (err?.status === 404 || err?.statusCode === 404) {
+        const res = await ApiClient.patch<any>(`/contracts/${contractId}/activate`);
+        return res?.data || res;
+      }
+      throw err;
+    }
   }
 }

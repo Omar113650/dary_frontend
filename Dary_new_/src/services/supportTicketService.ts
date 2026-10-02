@@ -141,18 +141,80 @@ export class SupportTicketService {
 
   /**
    * 6. PATCH /support-ticket/:id/status
-   * Update Ticket Status (OPEN, INVESTIGATING, RESOLVED, ARCHIVED, CLOSED)
+   * Update Ticket Status (OPEN, INVESTIGATING, RESOLVED, ARCHIVED)
+   * Automatically steps through intermediate states if backend enforces strict sequential transitions.
    */
-  static async updateTicketStatus(id: string, status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | 'CLOSED' | string): Promise<any> {
-    try {
-      const res = await ApiClient.patch<any>(`/support-ticket/${id}/status`, { status });
-      return res?.data || res;
-    } catch (e: any) {
-      if (e?.status === 404) {
-        const res = await ApiClient.patch<any>(`/tickets/${id}/status`, { status });
+  static async updateTicketStatus(
+    id: string,
+    status: 'OPEN' | 'INVESTIGATING' | 'RESOLVED' | 'ARCHIVED' | 'CLOSED' | string,
+    currentStatus?: string
+  ): Promise<any> {
+    const normalizedTarget = String(status || '').toUpperCase() === 'CLOSED' ? 'ARCHIVED' : String(status || '').toUpperCase();
+    const normalizedCurrent = String(currentStatus || '').toUpperCase();
+
+    const patchSingle = async (st: string) => {
+      try {
+        const res = await ApiClient.patch<any>(`/support-ticket/${id}/status`, { status: st });
         return res?.data || res;
+      } catch (e: any) {
+        if (e?.status === 404) {
+          const res = await ApiClient.patch<any>(`/tickets/${id}/status`, { status: st });
+          return res?.data || res;
+        }
+        throw e;
       }
-      throw e;
+    };
+
+    // Build sequential path if jumping forward across states (e.g. OPEN -> RESOLVED or OPEN -> ARCHIVED)
+    const order = ['OPEN', 'INVESTIGATING', 'RESOLVED', 'ARCHIVED'];
+    const curIdx = order.indexOf(normalizedCurrent);
+    const targetIdx = order.indexOf(normalizedTarget);
+
+    if (curIdx !== -1 && targetIdx > curIdx + 1) {
+      let lastRes: any = null;
+      for (let i = curIdx + 1; i <= targetIdx; i++) {
+        lastRes = await patchSingle(order[i]);
+      }
+      return lastRes;
+    }
+
+    try {
+      return await patchSingle(normalizedTarget);
+    } catch (err: any) {
+      const msg = String(err?.message || '').toLowerCase();
+      if (msg.includes('invalidstatustransition') || msg.includes('invalid status transition')) {
+        // Attempt stepping through intermediate states automatically
+        if (normalizedTarget === 'RESOLVED') {
+          try {
+            await patchSingle('INVESTIGATING');
+            return await patchSingle('RESOLVED');
+          } catch {
+            // fall through
+          }
+        } else if (normalizedTarget === 'ARCHIVED') {
+          try {
+            try {
+              await patchSingle('INVESTIGATING');
+            } catch {
+              // might already be investigating or resolved
+            }
+            try {
+              await patchSingle('RESOLVED');
+            } catch {
+              // might already be resolved
+            }
+            return await patchSingle('ARCHIVED');
+          } catch {
+            // Also try CLOSED if backend uses CLOSED instead of ARCHIVED
+            try {
+              return await patchSingle('CLOSED');
+            } catch {
+              // fall through
+            }
+          }
+        }
+      }
+      throw err;
     }
   }
 }

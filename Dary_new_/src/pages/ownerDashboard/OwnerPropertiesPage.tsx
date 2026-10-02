@@ -205,8 +205,10 @@ export default function OwnerPropertiesPage() {
         type: 'success',
         text: locale === 'ar' ? 'تم تحديث حالة إتاحة العقار بنجاح.' : 'Property availability updated successfully.',
       });
-      queryClient.invalidateQueries({ queryKey: ['owner', 'my-properties'] });
-      fetchProperties();
+      queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
+      await fetchProperties();
     } catch (err: any) {
       setPageMessage({
         type: 'error',
@@ -230,8 +232,10 @@ export default function OwnerPropertiesPage() {
         type: 'success',
         text: locale === 'ar' ? 'تم حذف العقار بنجاح.' : 'Property deleted successfully.',
       });
-      queryClient.invalidateQueries({ queryKey: ['owner', 'my-properties'] });
-      fetchProperties();
+      queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
+      await fetchProperties();
     } catch (err: any) {
       setPageMessage({
         type: 'error',

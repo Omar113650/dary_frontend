@@ -8,7 +8,7 @@ import Pagination from '../../components/common/Pagination';
 import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
-import { propertyService } from '../../services/propertyService';
+import { propertyService, evictCachedProperty } from '../../services/propertyService';
 
 export interface PropertyOccupancyInfo {
   isFullyBooked: boolean;
@@ -218,12 +218,12 @@ export default function AdminPropertiesPage() {
   }, [actionMessage]);
 
   // 2. Fetch Properties List
-  const fetchProperties = useCallback(async () => {
+  const fetchProperties = useCallback(async (forceRefresh = false) => {
     const isPending = statusFilter === 'PENDING';
     const cacheKey = isPending
       ? ['admin', 'properties', 'pending', { page, limit, search: debouncedSearch }]
       : ['admin', 'properties', { page, limit, status: statusFilter, search: debouncedSearch, sort: sortBy, order: sortOrder }];
-    const cached = queryClient.getQueryData<any>(cacheKey);
+    const cached = !forceRefresh ? queryClient.getQueryData<any>(cacheKey) : undefined;
     if (cached) {
       const list = cached?.properties || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
       setProperties(Array.isArray(list) ? list : []);
@@ -242,7 +242,7 @@ export default function AdminPropertiesPage() {
       setTotalPages(pages);
       setHasNextPage(Boolean(cached?.pagination?.hasNextPage ?? cached?.meta?.hasNextPage ?? cached?.hasNextPage ?? page < pages));
       setHasPrevPage(Boolean(cached?.pagination?.hasPrevPage ?? cached?.meta?.hasPrevPage ?? cached?.hasPrevPage ?? page > 1));
-    } else {
+    } else if (!forceRefresh) {
       setLoading(true);
     }
     setError(null);
@@ -261,6 +261,7 @@ export default function AdminPropertiesPage() {
                 order: sortOrder,
               }),
         staleTime: STALE_TIMES.LISTS,
+        force: forceRefresh,
       });
       const list = data?.properties || data?.items || data?.data || (Array.isArray(data) ? data : []);
       const safeList: AdminPropertyItem[] = Array.isArray(list) ? list : [];
@@ -286,7 +287,10 @@ export default function AdminPropertiesPage() {
           })
         ).then((results) => {
           const enriched = results.map((r, i) => (r.status === 'fulfilled' ? r.value : safeList[i]));
-          setProperties(enriched);
+          setProperties((prev) => {
+            const currentIds = new Set(prev.map((item) => item.id));
+            return enriched.filter((item) => currentIds.has(item.id));
+          });
         });
       }
 
@@ -331,7 +335,7 @@ export default function AdminPropertiesPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus()]);
     } catch (err: any) {
       setActionMessage({
         type: 'error',
@@ -364,8 +368,9 @@ export default function AdminPropertiesPage() {
       setRejectionReason('');
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus()]);
     } catch (err: any) {
+      setRejectModalId(null);
       setActionMessage({
         type: 'error',
         text: err?.message || (locale === 'ar' ? 'فشلت عملية رفض العقار.' : 'Failed to reject property.'),
@@ -389,8 +394,9 @@ export default function AdminPropertiesPage() {
       setSuspendModalId(null);
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus()]);
     } catch (err: any) {
+      setSuspendModalId(null);
       setActionMessage({
         type: 'error',
         text: err?.message || (locale === 'ar' ? 'فشلت عملية تعليق العقار.' : 'Failed to suspend property.'),
@@ -413,7 +419,7 @@ export default function AdminPropertiesPage() {
       });
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus()]);
     } catch (err: any) {
       setActionMessage({
         type: 'error',
@@ -427,19 +433,25 @@ export default function AdminPropertiesPage() {
   // Handle Delete Property
   const handleConfirmDelete = async () => {
     if (actionLoadingId || !deleteModalId) return;
-    setActionLoadingId(deleteModalId);
+    const targetId = deleteModalId;
+    setActionLoadingId(targetId);
     setActionMessage(null);
     try {
-      await AdminService.deleteProperty(deleteModalId);
+      await AdminService.deleteProperty(targetId);
+      evictCachedProperty(targetId);
+      setProperties((prev) => prev.filter((p) => p.id !== targetId));
+      setTotalCount((prev) => Math.max(0, prev - 1));
       setActionMessage({
         type: 'success',
         text: locale === 'ar' ? 'تم حذف العقار بنجاح.' : 'Property deleted successfully.',
       });
       setDeleteModalId(null);
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
+      queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus()]);
     } catch (err: any) {
+      setDeleteModalId(null);
       setActionMessage({
         type: 'error',
         text: err?.message || (locale === 'ar' ? 'فشلت عملية حذف العقار.' : 'Failed to delete property.'),
@@ -756,7 +768,7 @@ export default function AdminPropertiesPage() {
         ) : error ? (
           <div className="dary-error-alert" style={{ margin: '1rem' }}>
             <span>{error}</span>
-            <button type="button" onClick={fetchProperties} className="dary-retry-btn">
+            <button type="button" onClick={() => fetchProperties(true)} className="dary-retry-btn">
               {locale === 'ar' ? 'إعادة المحاولة' : 'Retry'}
             </button>
           </div>

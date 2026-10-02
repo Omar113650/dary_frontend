@@ -60,6 +60,9 @@ export default function AdminAnalyticsPage() {
     revenue?.total ??
     (typeof revenue === 'number' ? revenue : null);
 
+  const pendingRevenue =
+    revenue?.pendingRevenue ?? null;
+
   const currency = revenue?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
 
   return (
@@ -126,7 +129,7 @@ export default function AdminAnalyticsPage() {
         </div>
       ) : (
         <>
-          {/* Main 4 Metric Cards */}
+          {/* Main Metric Cards */}
           <div className="dary-metrics-grid" style={{ marginBottom: '2rem' }}>
             {/* Occupancy Rate */}
             <div className="dary-metric-card">
@@ -167,9 +170,9 @@ export default function AdminAnalyticsPage() {
               </div>
             </div>
 
-            {/* Platform Revenue */}
+            {/* Platform Revenue (CLOSED only) */}
             <div className="dary-metric-card">
-              <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
+              <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
                 💰
               </div>
               <div>
@@ -180,7 +183,24 @@ export default function AdminAnalyticsPage() {
                     fallback="—"
                   />
                 </h3>
-                <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي إيرادات المنصة' : 'Total Revenue'}</p>
+                <p className="dary-metric-label">{locale === 'ar' ? 'إيرادات المنصة المحصلة (CLOSED)' : 'Final Revenue (Closed)'}</p>
+              </div>
+            </div>
+
+            {/* Pending Revenue */}
+            <div className="dary-metric-card">
+              <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+                ⏳
+              </div>
+              <div>
+                <h3 className="dary-metric-number">
+                  <AnimatedCounter
+                    value={pendingRevenue}
+                    suffix={` ${currency}`}
+                    fallback="—"
+                  />
+                </h3>
+                <p className="dary-metric-label">{locale === 'ar' ? 'المبالغ المعلقة (قيد التعاقد)' : 'Pending Revenue'}</p>
               </div>
             </div>
           </div>

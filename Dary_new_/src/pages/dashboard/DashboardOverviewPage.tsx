@@ -66,28 +66,38 @@ export default function DashboardOverviewPage() {
     if (s === 'PENDING') {
       return (
         <span className="dary-badge dary-badge-pending">
-          {locale === 'ar' ? 'قيد المراجعة' : 'Pending'}
+          {locale === 'ar' ? '⏳ قيد الانتظار' : 'Pending'}
         </span>
       );
     }
     if (s === 'CONTACTED') {
       return (
         <span className="dary-badge dary-badge-contacted">
-          {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
+          {locale === 'ar' ? '📞 تم التواصل' : 'Contacted'}
+        </span>
+      );
+    }
+    if (s === 'CONFIRMED') {
+      return (
+        <span
+          className="dary-badge"
+          style={{ backgroundColor: '#E0E7FF', color: '#3730A3', border: '1px solid #C7D2FE', fontWeight: 700 }}
+        >
+          {locale === 'ar' ? '✓ مؤكد ومعتمد' : 'Confirmed'}
         </span>
       );
     }
     if (s === 'CLOSED') {
       return (
         <span className="dary-badge dary-badge-closed">
-          {locale === 'ar' ? 'مكتمل' : 'Closed'}
+          {locale === 'ar' ? '🏁 مكتمل نهائياً' : 'Closed'}
         </span>
       );
     }
     if (s === 'CANCELLED') {
       return (
         <span className="dary-badge dary-badge-cancelled">
-          {locale === 'ar' ? 'ملغي' : 'Cancelled'}
+          {locale === 'ar' ? '✕ ملغي' : 'Cancelled'}
         </span>
       );
     }

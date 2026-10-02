@@ -131,7 +131,7 @@ export default function OwnerMyRentalsPage() {
 
   function getStatusBadge(status?: string) {
     const s = (status || '').toUpperCase();
-    if (s === 'CLOSED' || s === 'CONFIRMED') {
+    if (s === 'CLOSED') {
       return (
         <span
           style={{
@@ -142,10 +142,28 @@ export default function OwnerMyRentalsPage() {
             fontWeight: 700,
             backgroundColor: '#DCFCE7',
             color: '#15803D',
-            border: '1px solid #BBF7D0',
+            border: '1px solid #86EFAC',
           }}
         >
-          {locale === 'ar' ? '✓ مؤكد ومكتمل' : '✓ Confirmed'}
+          {locale === 'ar' ? '🏁 مكتمل نهائياً' : '🏁 Closed'}
+        </span>
+      );
+    }
+    if (s === 'CONFIRMED') {
+      return (
+        <span
+          style={{
+            display: 'inline-block',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '9999px',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            backgroundColor: '#E0E7FF',
+            color: '#3730A3',
+            border: '1px solid #C7D2FE',
+          }}
+        >
+          {locale === 'ar' ? '✓ مؤكد ومعتمد' : '✓ Confirmed'}
         </span>
       );
     }
@@ -181,7 +199,7 @@ export default function OwnerMyRentalsPage() {
             border: '1px solid #FEF08A',
           }}
         >
-          {locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending'}
+          {locale === 'ar' ? '⏳ قيد الانتظار' : 'Pending'}
         </span>
       );
     }
@@ -379,9 +397,10 @@ export default function OwnerMyRentalsPage() {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '1.25rem', borderBottom: '1px solid #E2E8F0', paddingBottom: '0.75rem' }}>
             {[
               { id: 'ALL', labelAr: 'كافة الحجوزات', labelEn: 'All Rentals', count: rentals.length },
-              { id: 'PENDING', labelAr: 'قيد المراجعة', labelEn: 'Pending', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length },
+              { id: 'PENDING', labelAr: 'قيد الانتظار', labelEn: 'Pending', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'PENDING').length },
               { id: 'CONTACTED', labelAr: 'تم التواصل', labelEn: 'Contacted', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CONTACTED').length },
-              { id: 'CLOSED', labelAr: 'مكتملة ومؤكدة', labelEn: 'Closed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CLOSED').length },
+              { id: 'CONFIRMED', labelAr: 'مؤكد ومعتمد', labelEn: 'Confirmed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CONFIRMED').length },
+              { id: 'CLOSED', labelAr: 'مكتمل نهائياً', labelEn: 'Closed', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CLOSED').length },
               { id: 'CANCELLED', labelAr: 'ملغية', labelEn: 'Cancelled', count: rentals.filter((r) => (r.status || '').toUpperCase() === 'CANCELLED').length },
             ].map((tab) => {
               const isActive = statusFilter === tab.id;

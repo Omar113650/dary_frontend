@@ -80,16 +80,32 @@ export default function BookingDetailsModal({
   };
 
   // Handle Status Update (Admin or Tenant Cancel)
-  const handleStatusChange = async (newStatus: 'CONTACTED' | 'CLOSED' | 'CANCELLED', note?: string) => {
+  const handleStatusChange = async (
+    newStatus: 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED',
+    note?: string
+  ) => {
     if (!booking) return;
     setActionLoading(true);
     setActionMsg(null);
     try {
-      await BookingService.changeBookingStatus(booking.id, newStatus, note);
+      const contractId = booking.contract?.id || (booking as any).contractId;
+      const contractStatus = (booking.contract?.status || '').toUpperCase();
+
+      if (newStatus === 'CLOSED' && contractId && contractStatus === 'SIGNED') {
+        try {
+          await BookingService.activateContract(contractId);
+        } catch {
+          await BookingService.changeBookingStatus(booking.id, 'CLOSED', note);
+        }
+      } else {
+        await BookingService.changeBookingStatus(booking.id, newStatus, note);
+      }
+
       const labels: Record<string, string> = {
-        CONTACTED: locale === 'ar' ? 'تم التواصل' : 'Contacted',
-        CLOSED: locale === 'ar' ? 'مؤكد ومعتمد' : 'Closed / Confirmed',
-        CANCELLED: locale === 'ar' ? 'ملغي' : 'Cancelled',
+        CONTACTED: locale === 'ar' ? '📞 تم التواصل' : 'Contacted',
+        CONFIRMED: locale === 'ar' ? '✓ مؤكد ومعتمد (المبلغ معلق)' : 'Confirmed (Pending Revenue)',
+        CLOSED: locale === 'ar' ? '🏁 تم الانتهاء والتعاقد (تم تحصيل المبلغ)' : 'Closed (Revenue Collected)',
+        CANCELLED: locale === 'ar' ? '✕ ملغي' : 'Cancelled',
       };
       setActionMsg({
         type: 'success',
@@ -113,7 +129,7 @@ export default function BookingDetailsModal({
 
   const getStatusBadge = (status?: string) => {
     const s = (status || '').toUpperCase();
-    if (s === 'CLOSED' || s === 'CONFIRMED') {
+    if (s === 'CLOSED') {
       return (
         <span
           style={{
@@ -123,10 +139,27 @@ export default function BookingDetailsModal({
             fontWeight: 700,
             backgroundColor: '#DCFCE7',
             color: '#15803D',
-            border: '1px solid #BBF7D0',
+            border: '1px solid #86EFAC',
           }}
         >
-          ✓ {locale === 'ar' ? 'مؤكد ومعتمد' : 'Confirmed'}
+          🏁 {locale === 'ar' ? 'تم الانتهاء (تم تحصيل المبلغ)' : 'Closed (Revenue Collected)'}
+        </span>
+      );
+    }
+    if (s === 'CONFIRMED') {
+      return (
+        <span
+          style={{
+            padding: '0.3rem 0.85rem',
+            borderRadius: '9999px',
+            fontSize: '0.8rem',
+            fontWeight: 700,
+            backgroundColor: '#E0E7FF',
+            color: '#3730A3',
+            border: '1px solid #C7D2FE',
+          }}
+        >
+          ✓ {locale === 'ar' ? 'مؤكد ومعتمد (المبلغ معلق)' : 'Confirmed (Pending Revenue)'}
         </span>
       );
     }
@@ -160,7 +193,7 @@ export default function BookingDetailsModal({
             border: '1px solid #FEF08A',
           }}
         >
-          ⏳ {locale === 'ar' ? 'قيد المراجعة' : 'Pending'}
+          ⏳ {locale === 'ar' ? 'قيد الانتظار' : 'Pending'}
         </span>
       );
     }
@@ -668,7 +701,7 @@ export default function BookingDetailsModal({
           {/* Admin Workflow Status Actions */}
           {role === 'admin' && booking && !showCancelInput ? (
             <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {booking.status === 'PENDING' && (
+              {(booking.status || '').toUpperCase() === 'PENDING' && (
                 <button
                   type="button"
                   disabled={actionLoading}
@@ -688,11 +721,11 @@ export default function BookingDetailsModal({
                 </button>
               )}
 
-              {booking.status === 'CONTACTED' && (
+              {(booking.status || '').toUpperCase() === 'CONTACTED' && (
                 <button
                   type="button"
                   disabled={actionLoading}
-                  onClick={() => handleStatusChange('CLOSED', 'تم إتمام وتأكيد الحجز رسمياً')}
+                  onClick={() => handleStatusChange('CONFIRMED', 'تم تأكيد واعتماد الحجز (المبلغ معلق لحين التعاقد النهائي)')}
                   style={{
                     padding: '0.45rem 0.85rem',
                     borderRadius: '8px',
@@ -704,11 +737,31 @@ export default function BookingDetailsModal({
                     cursor: actionLoading ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  ✓ {locale === 'ar' ? 'إتمام وتأكيد الحجز' : 'Confirm / Close'}
+                  {locale === 'ar' ? '✓ تأكيد واعتماد' : '✓ Confirm & Approve'}
                 </button>
               )}
 
-              {booking.status !== 'CANCELLED' && (
+              {(booking.status || '').toUpperCase() === 'CONFIRMED' && (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => handleStatusChange('CLOSED', 'تم إتمام الحجز نهائياً وتفعيل العقد وتحصيل المبلغ')}
+                  style={{
+                    padding: '0.45rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid #15803D',
+                    backgroundColor: '#16A34A',
+                    color: '#FFFFFF',
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    cursor: actionLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {locale === 'ar' ? '🏁 إتمام الحجز نهائياً / تفعيل العقد' : '🏁 Finalize Booking / Activate Contract'}
+                </button>
+              )}
+
+              {(booking.status || '').toUpperCase() !== 'CANCELLED' && (booking.status || '').toUpperCase() !== 'CLOSED' && (
                 <button
                   type="button"
                   disabled={actionLoading}

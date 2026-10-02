@@ -47,6 +47,16 @@ export function getCachedProperty(id: string): Property | null {
   return null;
 }
 
+export function evictCachedProperty(id: string): void {
+  if (!id) return;
+  propertyMemoryCache.delete(id);
+  if (typeof window !== 'undefined') {
+    try {
+      sessionStorage.removeItem(`dary_prop_${id}`);
+    } catch {}
+  }
+}
+
 export function normalizeProperty(raw: any): Property {
   const id = String(raw.id || raw._id || raw.propertyId || '');
 
@@ -504,6 +514,7 @@ export const propertyService = {
    */
   async deleteProperty(id: string): Promise<any> {
     const res = await ApiClient.delete<any>(`/properties/${id}`);
+    evictCachedProperty(id);
     return res?.data || res;
   },
 

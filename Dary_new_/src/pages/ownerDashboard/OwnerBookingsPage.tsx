@@ -156,12 +156,8 @@ export default function OwnerBookingsPage() {
         const bStatus = (b.status || '').toUpperCase();
         if (selectedStatusTab === 'PENDING' && bStatus !== 'PENDING') return false;
         if (selectedStatusTab === 'CONTACTED' && bStatus !== 'CONTACTED') return false;
-        if (
-          selectedStatusTab === 'CLOSED' &&
-          bStatus !== 'CLOSED' &&
-          bStatus !== 'CONFIRMED'
-        )
-          return false;
+        if (selectedStatusTab === 'CONFIRMED' && bStatus !== 'CONFIRMED') return false;
+        if (selectedStatusTab === 'CLOSED' && bStatus !== 'CLOSED') return false;
         if (selectedStatusTab === 'CANCELLED' && bStatus !== 'CANCELLED') return false;
       }
 
@@ -193,12 +189,13 @@ export default function OwnerBookingsPage() {
 
   // Status counts from current bookings
   const statusCounts = useMemo(() => {
-    const counts = { ALL: propertyBookings.length, PENDING: 0, CONTACTED: 0, CLOSED: 0, CANCELLED: 0 };
+    const counts = { ALL: propertyBookings.length, PENDING: 0, CONTACTED: 0, CONFIRMED: 0, CLOSED: 0, CANCELLED: 0 };
     for (const b of propertyBookings) {
       const s = (b.status || '').toUpperCase();
       if (s === 'PENDING') counts.PENDING++;
       else if (s === 'CONTACTED') counts.CONTACTED++;
-      else if (s === 'CLOSED' || s === 'CONFIRMED') counts.CLOSED++;
+      else if (s === 'CONFIRMED') counts.CONFIRMED++;
+      else if (s === 'CLOSED') counts.CLOSED++;
       else if (s === 'CANCELLED') counts.CANCELLED++;
     }
     return counts;
@@ -206,7 +203,7 @@ export default function OwnerBookingsPage() {
 
   function getStatusBadge(status?: string) {
     const s = (status || '').toUpperCase();
-    if (s === 'CLOSED' || s === 'CONFIRMED') {
+    if (s === 'CLOSED') {
       return (
         <span
           style={{
@@ -217,10 +214,28 @@ export default function OwnerBookingsPage() {
             fontWeight: 700,
             backgroundColor: '#DCFCE7',
             color: '#15803D',
-            border: '1px solid #BBF7D0',
+            border: '1px solid #86EFAC',
           }}
         >
-          {locale === 'ar' ? '✓ مكتمل / مؤكد' : '✓ Confirmed'}
+          {locale === 'ar' ? '🏁 تم الانتهاء (تم تحصيل المبلغ)' : '🏁 Closed (Revenue Collected)'}
+        </span>
+      );
+    }
+    if (s === 'CONFIRMED') {
+      return (
+        <span
+          style={{
+            display: 'inline-block',
+            padding: '0.25rem 0.75rem',
+            borderRadius: '9999px',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            backgroundColor: '#E0E7FF',
+            color: '#3730A3',
+            border: '1px solid #C7D2FE',
+          }}
+        >
+          {locale === 'ar' ? '✓ مؤكد ومعتمد (المبلغ معلق)' : '✓ Confirmed (Pending Revenue)'}
         </span>
       );
     }
@@ -256,7 +271,7 @@ export default function OwnerBookingsPage() {
             border: '1px solid #FEF08A',
           }}
         >
-          {locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending'}
+          {locale === 'ar' ? '⏳ قيد الانتظار' : 'Pending'}
         </span>
       );
     }
@@ -518,6 +533,23 @@ export default function OwnerBookingsPage() {
               style={{
                 padding: '1rem',
                 borderRadius: '12px',
+                backgroundColor: '#E0E7FF',
+                border: '1px solid #C7D2FE',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#3730A3', marginBottom: '0.2rem' }}>
+                {statusCounts.CONFIRMED}
+              </div>
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#312E81' }}>
+                {locale === 'ar' ? '✓ مؤكد (مبلغ معلق)' : 'Confirmed (Pending)'}
+              </span>
+            </div>
+
+            <div
+              style={{
+                padding: '1rem',
+                borderRadius: '12px',
                 backgroundColor: '#DCFCE7',
                 border: '1px solid #BBF7D0',
                 textAlign: 'center',
@@ -527,7 +559,7 @@ export default function OwnerBookingsPage() {
                 {statusCounts.CLOSED}
               </div>
               <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#166534' }}>
-                {locale === 'ar' ? '✓ مؤكد / مكتمل' : 'Confirmed'}
+                {locale === 'ar' ? '🏁 مكتمل نهائياً' : 'Closed (Completed)'}
               </span>
             </div>
 
@@ -632,9 +664,10 @@ export default function OwnerBookingsPage() {
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderTop: '1px solid #E2E8F0', paddingTop: '0.85rem' }}>
             {[
               { id: 'ALL', labelAr: 'الكل', labelEn: 'All', count: statusCounts.ALL },
-              { id: 'PENDING', labelAr: '⏳ قيد المراجعة', labelEn: '⏳ Pending', count: statusCounts.PENDING },
+              { id: 'PENDING', labelAr: '⏳ قيد الانتظار', labelEn: '⏳ Pending', count: statusCounts.PENDING },
               { id: 'CONTACTED', labelAr: '📞 تم التواصل', labelEn: '📞 Contacted', count: statusCounts.CONTACTED },
-              { id: 'CLOSED', labelAr: '✓ مؤكد', labelEn: '✓ Confirmed', count: statusCounts.CLOSED },
+              { id: 'CONFIRMED', labelAr: '✓ مؤكد - مبلغ معلق', labelEn: '✓ Confirmed (Pending)', count: statusCounts.CONFIRMED },
+              { id: 'CLOSED', labelAr: '🏁 مكتمل نهائياً', labelEn: '🏁 Closed (Completed)', count: statusCounts.CLOSED },
               { id: 'CANCELLED', labelAr: '✕ ملغي', labelEn: '✕ Cancelled', count: statusCounts.CANCELLED },
             ].map((tab) => {
               const isActive = selectedStatusTab === tab.id;
@@ -747,20 +780,26 @@ export default function OwnerBookingsPage() {
                 <div
                   key={b.id}
                   style={{
-                    border: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                    border: currentStatus === 'CLOSED'
                       ? '1.5px solid #86EFAC'
+                      : currentStatus === 'CONFIRMED'
+                      ? '1.5px solid #C7D2FE'
                       : currentStatus === 'PENDING'
                       ? '1.5px solid #FCD34D'
                       : '1px solid #E2E8F0',
                     borderRadius: '14px',
                     padding: '1.35rem',
-                    backgroundColor: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                    backgroundColor: currentStatus === 'CLOSED'
                       ? '#F8FCF9'
+                      : currentStatus === 'CONFIRMED'
+                      ? '#F8FAFF'
                       : currentStatus === 'PENDING'
                       ? '#FFFDF5'
                       : '#FFFFFF',
-                    boxShadow: (currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED')
+                    boxShadow: currentStatus === 'CLOSED'
                       ? '0 4px 14px rgba(22, 163, 74, 0.08)'
+                      : currentStatus === 'CONFIRMED'
+                      ? '0 4px 14px rgba(55, 48, 163, 0.06)'
                       : currentStatus === 'PENDING'
                       ? '0 4px 12px rgba(245, 158, 11, 0.08)'
                       : '0 1px 3px rgba(0,0,0,0.03)',
@@ -768,7 +807,7 @@ export default function OwnerBookingsPage() {
                   }}
                 >
                   {/* Automated Dary Team Communication Status Banner */}
-                  {(currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED') && (
+                  {currentStatus === 'CLOSED' && (
                     <div
                       style={{
                         padding: '0.85rem 1.15rem',
@@ -784,15 +823,15 @@ export default function OwnerBookingsPage() {
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
-                        <span style={{ fontSize: '1.6rem' }}>🎉</span>
+                        <span style={{ fontSize: '1.6rem' }}>🏁</span>
                         <div>
                           <div style={{ fontWeight: 800, color: '#166534', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
-                            {locale === 'ar' ? 'تم اعتماد وإتمام حجز هذا العقار بنجاح!' : 'Booking Confirmed by Dary Admin!'}
+                            {locale === 'ar' ? 'تم إتمام الحجز نهائياً وتفعيل العقد وتحصيل المبلغ!' : 'Booking Completed & Revenue Collected!'}
                           </div>
                           <div style={{ fontSize: '0.835rem', color: '#15803D', lineHeight: 1.5 }}>
                             {locale === 'ar'
-                              ? 'تلقى عقارك حجزاً مؤكداً. قام السوبر أدمن بإتمام الحجز وسيتواصل معك فريق منصة داري (Dary Team) فوراً لتنسيق تسليم الغرفة واستلام مستحقاتك.'
-                              : 'Your property has received a confirmed booking. Super Admin completed it and Dary team will contact you shortly to coordinate handover and payouts.'}
+                              ? 'تم إتمام التعاقد النهائي وتسكين الطالب وإضافة المبلغ إلى إيراداتك المحصلة النهائية.'
+                              : 'The booking contract is finalized and the amount has been added to your total collected revenue.'}
                           </div>
                         </div>
                       </div>
@@ -810,7 +849,54 @@ export default function OwnerBookingsPage() {
                           gap: '0.35rem',
                         }}
                       >
-                        📞 {locale === 'ar' ? 'تيم داري سيتواصل معك' : 'Dary Team will contact you'}
+                        ✓ {locale === 'ar' ? 'تم تحصيل المبلغ' : 'Revenue Collected'}
+                      </span>
+                    </div>
+                  )}
+
+                  {currentStatus === 'CONFIRMED' && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1.15rem',
+                        borderRadius: '12px',
+                        backgroundColor: '#EEF2FF',
+                        border: '1.5px solid #C7D2FE',
+                        marginBottom: '1rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: '1 1 300px' }}>
+                        <span style={{ fontSize: '1.6rem' }}>✓</span>
+                        <div>
+                          <div style={{ fontWeight: 800, color: '#3730A3', fontSize: '0.92rem', marginBottom: '0.2rem' }}>
+                            {locale === 'ar' ? 'تم تأكيد واعتماد الحجز (المبلغ معلق لحين التعاقد النهائي)' : 'Booking Confirmed (Pending Revenue)'}
+                          </div>
+                          <div style={{ fontSize: '0.835rem', color: '#4338CA', lineHeight: 1.5 }}>
+                            {locale === 'ar'
+                              ? 'اعتمدت إدارة داري الحجز، والمبلغ حالياً ضمن الإيرادات المعلقة وسيسمّع في إيراداتك النهائية فور إتمام التعاقد النهائي (CLOSED).'
+                              : 'Dary Admin confirmed this booking. Revenue is pending and will be added to final revenue once closed.'}
+                          </div>
+                        </div>
+                      </div>
+                      <span
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#FEF3C7',
+                          color: '#B45309',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          border: '1px solid #FDE68A',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                        }}
+                      >
+                        ⏳ {locale === 'ar' ? 'المبلغ معلق' : 'Pending Revenue'}
                       </span>
                     </div>
                   )}
@@ -1018,7 +1104,8 @@ export default function OwnerBookingsPage() {
                       >
                         {currentStatus === 'PENDING' && (locale === 'ar' ? '⏳ قيد المراجعة والتحقق من الإدارة' : 'Pending Admin Verification')}
                         {currentStatus === 'CONTACTED' && (locale === 'ar' ? '📞 جارٍ التواصل والترتيب مع الطالب' : 'Admin Contacting Student')}
-                        {(currentStatus === 'CLOSED' || currentStatus === 'CONFIRMED') && (locale === 'ar' ? '✓ تم التأكيد والاعتماد رسمياً' : 'Confirmed by Dary Admin')}
+                        {currentStatus === 'CONFIRMED' && (locale === 'ar' ? '✓ مؤكد ومعتمد (المبلغ معلق)' : 'Confirmed (Pending Revenue)')}
+                        {currentStatus === 'CLOSED' && (locale === 'ar' ? '🏁 تم الانتهاء والتعاقد (تم تحصيل المبلغ)' : 'Closed (Revenue Collected)')}
                         {currentStatus === 'CANCELLED' && (locale === 'ar' ? '✕ تم إلغاء الطلب من قِبل الإدارة' : 'Cancelled by Admin')}
                         {!['PENDING', 'CONTACTED', 'CLOSED', 'CONFIRMED', 'CANCELLED'].includes(currentStatus) && (locale === 'ar' ? 'تتم المتابعة بواسطة الإدارة' : 'Managed by Admin')}
                       </span>

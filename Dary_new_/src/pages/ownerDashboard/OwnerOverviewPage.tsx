@@ -204,6 +204,9 @@ export default function OwnerOverviewPage() {
     revenueData?.total ??
     (typeof revenueData === 'number' ? revenueData : null);
 
+  const parsedPendingRevenue =
+    revenueData?.pendingRevenue ?? null;
+
   const revenueCurrency = revenueData?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
 
   // Calendar summary data extraction
@@ -256,11 +259,11 @@ export default function OwnerOverviewPage() {
         </div>
       </div>
 
-      {/* 2. Top Metric Cards (Revenue + Counts + Occupancy + Personal Bookings) */}
+      {/* 2. Top Metric Cards (Revenue + Pending Revenue + Counts + Occupancy + Personal Bookings) */}
       <div className="dary-metrics-grid" style={{ marginBottom: '1.5rem' }}>
-        {/* Revenue Card */}
+        {/* Final Revenue Card (CLOSED only) */}
         <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
+          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
             💰
           </div>
           <div>
@@ -273,7 +276,27 @@ export default function OwnerOverviewPage() {
               />
             </h3>
             <p className="dary-metric-label">
-              {locale === 'ar' ? 'إجمالي الإيرادات المحققة' : 'Total Revenue'}
+              {locale === 'ar' ? 'الإيرادات النهائية المحصلة (CLOSED)' : 'Final Revenue (Closed)'}
+            </p>
+          </div>
+        </div>
+
+        {/* Pending Revenue Card */}
+        <div className="dary-metric-card">
+          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+            ⏳
+          </div>
+          <div>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter
+                value={revenueError ? null : parsedPendingRevenue}
+                loading={loadingRevenue}
+                suffix={` ${revenueCurrency}`}
+                fallback="—"
+              />
+            </h3>
+            <p className="dary-metric-label">
+              {locale === 'ar' ? 'المبالغ المعلقة (قيد التعاقد)' : 'Pending Revenue'}
             </p>
           </div>
         </div>
@@ -447,11 +470,25 @@ export default function OwnerOverviewPage() {
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '0.75rem' }}>
               {bookingStatusList.map((item) => {
-                const isConfirmed = item.status === 'CONFIRMED' || item.status === 'CLOSED';
-                const isContacted = item.status === 'CONTACTED';
-                const isPending = item.status === 'PENDING';
-                const bg = isConfirmed ? '#DCFCE7' : isContacted ? '#E0F2FE' : isPending ? '#FEF9C3' : '#FEE2E2';
-                const color = isConfirmed ? '#15803D' : isContacted ? '#0369A1' : isPending ? '#A16207' : '#B91C1C';
+                const st = (item.status || '').toUpperCase();
+                const isClosed = st === 'CLOSED';
+                const isConfirmed = st === 'CONFIRMED';
+                const isContacted = st === 'CONTACTED';
+                const isPending = st === 'PENDING';
+                const bg = isClosed ? '#DCFCE7' : isConfirmed ? '#E0E7FF' : isContacted ? '#E0F2FE' : isPending ? '#FEF9C3' : '#FEE2E2';
+                const color = isClosed ? '#15803D' : isConfirmed ? '#3730A3' : isContacted ? '#0369A1' : isPending ? '#A16207' : '#B91C1C';
+                const label =
+                  isClosed
+                    ? (locale === 'ar' ? '🏁 مكتمل نهائياً' : '🏁 Closed')
+                    : isConfirmed
+                    ? (locale === 'ar' ? '✓ مؤكد (مبلغ معلق)' : '✓ Confirmed (Pending)')
+                    : isContacted
+                    ? (locale === 'ar' ? '📞 تم التواصل' : '📞 Contacted')
+                    : isPending
+                    ? (locale === 'ar' ? '⏳ قيد الانتظار' : '⏳ Pending')
+                    : st === 'CANCELLED'
+                    ? (locale === 'ar' ? '✕ ملغي' : '✕ Cancelled')
+                    : item.status;
 
                 return (
                   <div
@@ -472,13 +509,13 @@ export default function OwnerOverviewPage() {
                         display: 'inline-block',
                         padding: '0.2rem 0.55rem',
                         borderRadius: '9999px',
-                        fontSize: '0.75rem',
+                        fontSize: '0.72rem',
                         fontWeight: 700,
                         backgroundColor: bg,
                         color: color,
                       }}
                     >
-                      {item.status}
+                      {label}
                     </span>
                   </div>
                 );

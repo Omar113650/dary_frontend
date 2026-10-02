@@ -239,16 +239,38 @@ export default function AdminBookingsPage() {
 
   const statusMetrics = normalizeStatusList(bookingsStatus);
 
+  const fallbackClosedRevenue = bookings
+    .filter((b: any) => (b.status || '').toUpperCase() === 'CLOSED')
+    .reduce((sum: number, b: any) => sum + (Number(b.totalPrice || b.room?.pricePerBed || b.room?.monthlyRent) || 0), 0);
+
+  const fallbackPendingRevenue = bookings
+    .filter((b: any) => ['PENDING', 'CONTACTED', 'CONFIRMED'].includes((b.status || '').toUpperCase()))
+    .reduce((sum: number, b: any) => sum + (Number(b.totalPrice || b.room?.pricePerBed || b.room?.monthlyRent) || 0), 0);
+
   const parsedRevenue =
     revenueData?.totalRevenue ??
     revenueData?.revenue ??
     revenueData?.total ??
-    (typeof revenueData === 'number' ? revenueData : null);
+    (typeof revenueData === 'number' ? revenueData : fallbackClosedRevenue);
+
+  const parsedPendingRevenue =
+    revenueData?.pendingRevenue ??
+    (typeof revenueData === 'object' && revenueData !== null ? fallbackPendingRevenue : null);
 
   const revenueCurrency = revenueData?.currency || (locale === 'ar' ? 'ج.م' : 'EGP');
 
+  const statusDisplayLabel = (st: string) => {
+    const upper = (st || '').toUpperCase();
+    if (upper === 'PENDING') return locale === 'ar' ? '⏳ قيد الانتظار (PENDING)' : '⏳ Pending';
+    if (upper === 'CONTACTED') return locale === 'ar' ? '📞 تم التواصل (CONTACTED)' : '📞 Contacted';
+    if (upper === 'CONFIRMED') return locale === 'ar' ? '✓ مؤكد - مبلغ معلق (CONFIRMED)' : '✓ Confirmed (Pending Revenue)';
+    if (upper === 'CLOSED') return locale === 'ar' ? '🏁 مكتمل نهائياً (CLOSED)' : '🏁 Closed (Completed)';
+    if (upper === 'CANCELLED') return locale === 'ar' ? '✕ ملغي (CANCELLED)' : '✕ Cancelled';
+    return st;
+  };
+
   const filteredBookings = bookings.filter((b: any) => {
-    if (statusFilter && b.status !== statusFilter) return false;
+    if (statusFilter && (b.status || '').toUpperCase() !== statusFilter) return false;
     if (searchTerm.trim()) {
       const term = searchTerm.trim().toLowerCase();
       const tenant = `${b.tenant?.name || ''} ${b.tenant?.firstName || ''} ${b.tenant?.lastName || ''} ${b.tenant?.phone || ''} ${b.tenant?.email || ''}`.toLowerCase();
@@ -300,27 +322,44 @@ export default function AdminBookingsPage() {
 
   const handleUpdateStatus = async (
     bookingId: string,
-    status: 'CONTACTED' | 'CLOSED' | 'CANCELLED',
-    note?: string
+    status: 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED',
+    note?: string,
+    bookingItem?: any
   ) => {
     setActionLoading(true);
     setActionMessage(null);
     try {
-      await AdminService.updateBookingStatus(bookingId, status, note);
+      const contractId = bookingItem?.contract?.id || bookingItem?.contractId;
+      const contractStatus = (bookingItem?.contract?.status || '').toUpperCase();
+
+      if (status === 'CLOSED' && contractId && contractStatus === 'SIGNED') {
+        try {
+          await AdminService.activateContract(contractId);
+        } catch {
+          await AdminService.updateBookingStatus(bookingId, 'CLOSED', note);
+        }
+      } else {
+        await AdminService.updateBookingStatus(bookingId, status, note);
+      }
+
       const statusLabels: Record<string, string> = {
-        CONTACTED: locale === 'ar' ? 'تم التواصل' : 'Contacted',
-        CLOSED: locale === 'ar' ? 'مؤكد ومعتمد رسمياً' : 'Confirmed',
-        CANCELLED: locale === 'ar' ? 'ملغي' : 'Cancelled',
+        CONTACTED: locale === 'ar' ? '📞 تم التواصل' : 'Contacted',
+        CONFIRMED: locale === 'ar' ? '✓ مؤكد ومعتمد (المبلغ معلق)' : 'Confirmed (Pending Revenue)',
+        CLOSED: locale === 'ar' ? '🏁 تم الانتهاء والتعاقد (تم تحصيل المبلغ)' : 'Closed (Revenue Collected)',
+        CANCELLED: locale === 'ar' ? '✕ ملغي' : 'Cancelled',
       };
       setActionMessage({
         type: 'success',
         text:
           locale === 'ar'
-            ? `✓ تم تحديث حالة الحجز إلى "${statusLabels[status] || status}" وإشعار مالك العقار بنجاح.`
-            : `✓ Booking status updated to "${statusLabels[status] || status}" and property owner notified.`,
+            ? `✓ تم تحديث حالة الحجز إلى "${statusLabels[status] || status}" بنجاح.`
+            : `✓ Booking status updated to "${statusLabels[status] || status}".`,
       });
       queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings-status'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
+      queryClient.invalidateQueries({ queryKey: ['owner'] });
+      queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchBookings(), fetchMetrics()]);
     } catch (e: any) {
       setActionMessage({
@@ -350,7 +389,9 @@ export default function AdminBookingsPage() {
       setCancelModalBookingId(null);
       setCancelReason('');
       queryClient.invalidateQueries({ queryKey: ['admin', 'bookings'] });
+      queryClient.invalidateQueries({ queryKey: ['admin', 'bookings-status'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'revenue'] });
+      queryClient.invalidateQueries({ queryKey: ['owner'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
       await Promise.all([fetchBookings(), fetchMetrics()]);
     } catch (e: any) {
@@ -417,9 +458,9 @@ export default function AdminBookingsPage() {
 
       {/* Metrics Cards */}
       <div className="dary-metrics-grid" style={{ marginBottom: '1.5rem' }}>
-        {/* Revenue Card */}
+        {/* Final Revenue Card (CLOSED only) */}
         <div className="dary-metric-card">
-          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FAF5FF', color: '#9333EA' }}>
+          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#DCFCE7', color: '#15803D' }}>
             💰
           </div>
           <div>
@@ -431,7 +472,25 @@ export default function AdminBookingsPage() {
                 fallback="—"
               />
             </h3>
-            <p className="dary-metric-label">{locale === 'ar' ? 'إجمالي الحصيلة المالية' : 'Total Revenue'}</p>
+            <p className="dary-metric-label">{locale === 'ar' ? 'الإيرادات النهائية المحصلة (CLOSED)' : 'Final Revenue (Closed)'}</p>
+          </div>
+        </div>
+
+        {/* Pending Revenue Card (PENDING, CONTACTED, CONFIRMED) */}
+        <div className="dary-metric-card">
+          <div className="dary-metric-icon-wrap" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+            ⏳
+          </div>
+          <div>
+            <h3 className="dary-metric-number">
+              <AnimatedCounter
+                value={parsedPendingRevenue}
+                loading={loadingMetrics}
+                suffix={` ${revenueCurrency}`}
+                fallback="—"
+              />
+            </h3>
+            <p className="dary-metric-label">{locale === 'ar' ? 'مبالغ معلقة قيد التعاقد' : 'Pending Revenue'}</p>
           </div>
         </div>
 
@@ -445,7 +504,7 @@ export default function AdminBookingsPage() {
               <h3 className="dary-metric-number">
                 <AnimatedCounter value={item.count} loading={loadingMetrics} />
               </h3>
-              <p className="dary-metric-label">{item.status}</p>
+              <p className="dary-metric-label">{statusDisplayLabel(item.status)}</p>
             </div>
           </div>
         ))}
@@ -503,27 +562,34 @@ export default function AdminBookingsPage() {
             <span style={{ fontWeight: 700, color: '#0B2A4A', fontSize: '0.85rem', marginInlineEnd: '0.25rem' }}>
               {locale === 'ar' ? 'تصفية الحالة:' : 'Filter Status:'}
             </span>
-            {['', 'PENDING', 'CONTACTED', 'CONFIRMED', 'CLOSED', 'CANCELLED'].map((st) => (
+            {[
+              { id: '', labelAr: 'الكل', labelEn: 'All' },
+              { id: 'PENDING', labelAr: '⏳ قيد الانتظار', labelEn: '⏳ Pending' },
+              { id: 'CONTACTED', labelAr: '📞 تم التواصل', labelEn: '📞 Contacted' },
+              { id: 'CONFIRMED', labelAr: '✓ مؤكد - مبلغ معلق', labelEn: '✓ Confirmed (Pending Revenue)' },
+              { id: 'CLOSED', labelAr: '🏁 مكتمل نهائياً', labelEn: '🏁 Closed (Completed)' },
+              { id: 'CANCELLED', labelAr: '✕ ملغي', labelEn: '✕ Cancelled' },
+            ].map((tab) => (
               <button
-                key={st}
+                key={tab.id}
                 type="button"
                 onClick={() => {
-                  setStatusFilter(st);
+                  setStatusFilter(tab.id);
                   setPage(1);
                 }}
                 style={{
-                  padding: '0.35rem 0.75rem',
+                  padding: '0.4rem 0.85rem',
                   borderRadius: '6px',
                   border: '1px solid',
-                  borderColor: statusFilter === st ? '#2F6BFF' : '#CBD5E1',
-                  backgroundColor: statusFilter === st ? '#2F6BFF' : '#FFFFFF',
-                  color: statusFilter === st ? '#FFFFFF' : '#475569',
-                  fontWeight: statusFilter === st ? 700 : 500,
+                  borderColor: statusFilter === tab.id ? '#2F6BFF' : '#CBD5E1',
+                  backgroundColor: statusFilter === tab.id ? '#2F6BFF' : '#FFFFFF',
+                  color: statusFilter === tab.id ? '#FFFFFF' : '#475569',
+                  fontWeight: statusFilter === tab.id ? 700 : 500,
                   fontSize: '0.8rem',
                   cursor: 'pointer',
                 }}
               >
-                {st === '' ? (locale === 'ar' ? 'الكل' : 'All') : st}
+                {locale === 'ar' ? tab.labelAr : tab.labelEn}
               </button>
             ))}
           </div>
@@ -810,127 +876,181 @@ export default function AdminBookingsPage() {
 
                         {/* Status Column */}
                         <td style={{ padding: '0.85rem 1rem' }}>
-                          <span
-                            style={{
-                              display: 'inline-block',
-                              padding: '0.25rem 0.65rem',
-                              borderRadius: '9999px',
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              backgroundColor:
-                                b.status === 'CONFIRMED' || b.status === 'CLOSED'
-                                  ? '#DCFCE7'
-                                  : b.status === 'CONTACTED'
-                                  ? '#E0F2FE'
-                                  : b.status === 'PENDING'
-                                  ? '#FEF9C3'
-                                  : '#FEE2E2',
-                              color:
-                                b.status === 'CONFIRMED' || b.status === 'CLOSED'
-                                  ? '#15803D'
-                                  : b.status === 'CONTACTED'
-                                  ? '#0369A1'
-                                  : b.status === 'PENDING'
-                                  ? '#A16207'
-                                  : '#B91C1C',
-                            }}
-                          >
-                            {b.status === 'CLOSED' || b.status === 'CONFIRMED'
-                              ? (locale === 'ar' ? '✓ مؤكد ومعتمد' : 'Confirmed')
-                              : b.status === 'CONTACTED'
-                              ? (locale === 'ar' ? '📞 تم التواصل' : 'Contacted')
-                              : b.status === 'PENDING'
-                              ? (locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending')
-                              : (locale === 'ar' ? '✕ ملغي' : 'Cancelled')}
-                          </span>
+                          {(() => {
+                            const rowStatus = (b.status || '').toUpperCase();
+                            return (
+                              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0.2rem' }}>
+                                <span
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '0.25rem 0.65rem',
+                                    borderRadius: '9999px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    backgroundColor:
+                                      rowStatus === 'CLOSED'
+                                        ? '#DCFCE7'
+                                        : rowStatus === 'CONFIRMED'
+                                        ? '#E0E7FF'
+                                        : rowStatus === 'CONTACTED'
+                                        ? '#E0F2FE'
+                                        : rowStatus === 'PENDING'
+                                        ? '#FEF9C3'
+                                        : '#FEE2E2',
+                                    color:
+                                      rowStatus === 'CLOSED'
+                                        ? '#15803D'
+                                        : rowStatus === 'CONFIRMED'
+                                        ? '#3730A3'
+                                        : rowStatus === 'CONTACTED'
+                                        ? '#0369A1'
+                                        : rowStatus === 'PENDING'
+                                        ? '#A16207'
+                                        : '#B91C1C',
+                                    border: `1px solid ${
+                                      rowStatus === 'CLOSED'
+                                        ? '#86EFAC'
+                                        : rowStatus === 'CONFIRMED'
+                                        ? '#C7D2FE'
+                                        : rowStatus === 'CONTACTED'
+                                        ? '#BAE6FD'
+                                        : rowStatus === 'PENDING'
+                                        ? '#FDE68A'
+                                        : '#FECACA'
+                                    }`,
+                                  }}
+                                >
+                                  {rowStatus === 'CLOSED'
+                                    ? (locale === 'ar' ? '🏁 تم الانتهاء (تم تحصيل المبلغ)' : '🏁 Closed (Revenue Collected)')
+                                    : rowStatus === 'CONFIRMED'
+                                    ? (locale === 'ar' ? '✓ مؤكد ومعتمد' : '✓ Confirmed & Approved')
+                                    : rowStatus === 'CONTACTED'
+                                    ? (locale === 'ar' ? '📞 تم التواصل' : '📞 Contacted')
+                                    : rowStatus === 'PENDING'
+                                    ? (locale === 'ar' ? '⏳ قيد الانتظار' : '⏳ Pending')
+                                    : (locale === 'ar' ? '✕ ملغي' : '✕ Cancelled')}
+                                </span>
+                                {rowStatus === 'CONFIRMED' && (
+                                  <span style={{ fontSize: '0.7rem', color: '#B45309', fontWeight: 700, paddingInlineStart: '0.35rem' }}>
+                                    ⏳ {locale === 'ar' ? 'المبلغ معلق' : 'Pending Revenue'}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
 
                         {/* Actions Column */}
                         <td style={{ padding: '0.85rem 1rem' }}>
-                          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            {/* View Details Button */}
-                            <button
-                              type="button"
-                              onClick={() => setSelectedBookingForDetails(b)}
-                              title={locale === 'ar' ? 'عرض تفاصيل الحجز كاملة' : 'View booking details'}
-                              style={{
-                                padding: '0.35rem 0.65rem',
-                                borderRadius: '6px',
-                                border: '1px solid #CBD5E1',
-                                backgroundColor: '#FFFFFF',
-                                color: '#0B2A4A',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              👁️ {locale === 'ar' ? 'التفاصيل' : 'Details'}
-                            </button>
+                          {(() => {
+                            const rowStatus = (b.status || '').toUpperCase();
+                            return (
+                              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                {/* View Details Button */}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedBookingForDetails(b)}
+                                  title={locale === 'ar' ? 'عرض تفاصيل الحجز كاملة' : 'View booking details'}
+                                  style={{
+                                    padding: '0.35rem 0.65rem',
+                                    borderRadius: '6px',
+                                    border: '1px solid #CBD5E1',
+                                    backgroundColor: '#FFFFFF',
+                                    color: '#0B2A4A',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  👁️ {locale === 'ar' ? 'التفاصيل' : 'Details'}
+                                </button>
 
+                                {rowStatus === 'PENDING' && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => handleUpdateStatus(b.id, 'CONTACTED', 'تم التواصل مع الطالب والمالك من قبل الإدارة', b)}
+                                    style={{
+                                      padding: '0.35rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid #0284C7',
+                                      backgroundColor: '#E0F2FE',
+                                      color: '#0369A1',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >
+                                    📞 {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
+                                  </button>
+                                )}
 
-                            {b.status === 'PENDING' && (
-                              <button
-                                type="button"
-                                disabled={actionLoading}
-                                onClick={() => handleUpdateStatus(b.id, 'CONTACTED', 'تم التواصل مع الطالب والمالك من قبل الإدارة')}
-                                style={{
-                                  padding: '0.35rem 0.65rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #0284C7',
-                                  backgroundColor: '#E0F2FE',
-                                  color: '#0369A1',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                                }}
-                              >
-                                📞 {locale === 'ar' ? 'تم التواصل' : 'Contacted'}
-                              </button>
-                            )}
+                                {rowStatus === 'CONTACTED' && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => handleUpdateStatus(b.id, 'CONFIRMED', 'تم تأكيد واعتماد الحجز (المبلغ معلق لحين التعاقد النهائي)', b)}
+                                    style={{
+                                      padding: '0.35rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid #16A34A',
+                                      backgroundColor: '#DCFCE7',
+                                      color: '#15803D',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >
+                                    {locale === 'ar' ? '✓ تأكيد واعتماد' : '✓ Confirm & Approve'}
+                                  </button>
+                                )}
 
-                            {b.status === 'CONTACTED' && (
-                              <button
-                                type="button"
-                                disabled={actionLoading}
-                                onClick={() => handleUpdateStatus(b.id, 'CLOSED', 'تم إتمام وتأكيد الحجز رسمياً')}
-                                style={{
-                                  padding: '0.35rem 0.65rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #16A34A',
-                                  backgroundColor: '#DCFCE7',
-                                  color: '#15803D',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                                }}
-                              >
-                                ✓ {locale === 'ar' ? 'إتمام وتأكيد' : 'Close / Finish'}
-                              </button>
-                            )}
+                                {rowStatus === 'CONFIRMED' && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => handleUpdateStatus(b.id, 'CLOSED', 'تم إتمام الحجز نهائياً وتفعيل العقد وتحصيل المبلغ', b)}
+                                    style={{
+                                      padding: '0.35rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid #15803D',
+                                      backgroundColor: '#16A34A',
+                                      color: '#FFFFFF',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                      boxShadow: '0 2px 5px rgba(22, 163, 74, 0.25)',
+                                    }}
+                                  >
+                                    {locale === 'ar' ? '🏁 إتمام الحجز نهائياً / تفعيل العقد' : '🏁 Finalize Booking / Activate Contract'}
+                                  </button>
+                                )}
 
-                            {b.status !== 'CANCELLED' && (
-                              <button
-                                type="button"
-                                disabled={actionLoading}
-                                onClick={() => {
-                                  setCancelModalBookingId(b.id);
-                                  setCancelReason('');
-                                }}
-                                style={{
-                                  padding: '0.35rem 0.65rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #EF4444',
-                                  backgroundColor: '#FEE2E2',
-                                  color: '#B91C1C',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 700,
-                                  cursor: actionLoading ? 'not-allowed' : 'pointer',
-                                }}
-                              >
-                                ✕ {locale === 'ar' ? 'إلغاء' : 'Cancel'}
-                              </button>
-                            )}
-                          </div>
+                                {rowStatus !== 'CANCELLED' && rowStatus !== 'CLOSED' && (
+                                  <button
+                                    type="button"
+                                    disabled={actionLoading}
+                                    onClick={() => {
+                                      setCancelModalBookingId(b.id);
+                                      setCancelReason('');
+                                    }}
+                                    style={{
+                                      padding: '0.35rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid #EF4444',
+                                      backgroundColor: '#FEE2E2',
+                                      color: '#B91C1C',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: actionLoading ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >
+                                    ✕ {locale === 'ar' ? 'إلغاء' : 'Cancel'}
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

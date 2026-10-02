@@ -127,17 +127,25 @@ export function formatOccupancyDate(dateStr?: string | Date, loc: 'ar' | 'en' = 
 
 export function getBookingStatusBadge(status?: string, loc: 'ar' | 'en' = 'ar') {
   const s = String(status || '').toUpperCase();
-  if (s === 'CONFIRMED' || s === 'APPROVED' || s === 'ACTIVE') {
+  if (s === 'CONFIRMED') {
     return {
-      text: loc === 'ar' ? 'مؤكد / ساري' : 'Confirmed / Active',
+      text: loc === 'ar' ? '✓ مؤكد ومعتمد (المبلغ معلق)' : '✓ Confirmed (Pending Payment)',
+      bg: '#CCFBF1',
+      color: '#0F766E',
+      icon: '✓',
+    };
+  }
+  if (s === 'CLOSED' || s === 'APPROVED' || s === 'ACTIVE') {
+    return {
+      text: loc === 'ar' ? '🏁 تم الانتهاء والتعاقد' : '🏁 Completed & Contracted',
       bg: '#DCFCE7',
       color: '#15803D',
-      icon: '✅',
+      icon: '🏁',
     };
   }
   if (s === 'PENDING') {
     return {
-      text: loc === 'ar' ? 'قيد المراجعة' : 'Pending Review',
+      text: loc === 'ar' ? 'قيد الانتظار' : 'Pending Review',
       bg: '#FEF3C7',
       color: '#B45309',
       icon: '⏳',
@@ -145,10 +153,10 @@ export function getBookingStatusBadge(status?: string, loc: 'ar' | 'en' = 'ar') 
   }
   if (s === 'CONTACTED') {
     return {
-      text: loc === 'ar' ? 'تم التواصل' : 'Contacted',
+      text: loc === 'ar' ? '📞 تم التواصل' : '📞 Contacted',
       bg: '#DBEAFE',
       color: '#1D4ED8',
-      icon: '💬',
+      icon: '📞',
     };
   }
   if (s === 'CANCELLED' || s === 'REJECTED') {
@@ -159,9 +167,9 @@ export function getBookingStatusBadge(status?: string, loc: 'ar' | 'en' = 'ar') 
       icon: '✕',
     };
   }
-  if (s === 'CLOSED' || s === 'EXPIRED') {
+  if (s === 'EXPIRED') {
     return {
-      text: loc === 'ar' ? 'مكتمل / منتهي' : 'Completed / Expired',
+      text: loc === 'ar' ? 'منتهي' : 'Expired',
       bg: '#F1F5F9',
       color: '#64748B',
       icon: '📁',
@@ -879,12 +887,41 @@ export default function PropertyDetailsPage() {
       setBookingSuccess(true);
       fetchExistingUserBookings();
     } catch (err: any) {
-      setBookingError(
-        err?.message ||
-          (locale === 'ar'
-            ? 'تعذر إرسال طلب الحجز. يرجى التحقق من التواريخ والمحاولة مرة أخرى.'
-            : 'Could not submit booking request. Please check dates and try again.')
-      );
+      const rawMsg = String(err?.message || '').trim();
+      const isGeneric500 =
+        err?.status === 500 ||
+        rawMsg.toLowerCase() === 'something went wrong' ||
+        rawMsg.toLowerCase() === 'internal server error' ||
+        rawMsg.toLowerCase() === 'request failed';
+
+      if (isGeneric500) {
+        const hasActiveSameRoomBooking = existingUserBookings.some((b: any) => {
+          const st = String(b.status || '').toUpperCase();
+          if (st === 'CANCELLED' || st === 'REJECTED') return false;
+          const bRoomId = String(b.roomId || b.room?.id || b.room_id || '');
+          return bRoomId === String(roomId);
+        });
+        if (hasActiveSameRoomBooking) {
+          setBookingError(
+            locale === 'ar'
+              ? 'لديك بالفعل طلب حجز نشط أو قيد المراجعة في هذه الغرفة. يرجى متابعة طلبك الحالي من صفحة "إيجاراتي" أو إلغاؤه أولاً قبل تقديم طلب جديد لنفس الغرفة.'
+              : 'You already have an active or pending booking request for this room. Please check "My Rentals" or cancel your existing request before submitting a new one for the same room.'
+          );
+        } else {
+          setBookingError(
+            locale === 'ar'
+              ? 'حدث خطأ في الخادم (500) أثناء معالجة طلب الحجز. يرجى التأكد من تحديث قاعدة البيانات (Prisma Migration لحالة CONFIRMED) أو المحاولة مرة أخرى.'
+              : 'Server error (500) occurred while processing the booking request. Please try again.'
+          );
+        }
+      } else {
+        setBookingError(
+          rawMsg ||
+            (locale === 'ar'
+              ? 'تعذر إرسال طلب الحجز. يرجى التحقق من التواريخ والمحاولة مرة أخرى.'
+              : 'Could not submit booking request. Please check dates and try again.')
+        );
+      }
     } finally {
       setBookingLoading(false);
     }

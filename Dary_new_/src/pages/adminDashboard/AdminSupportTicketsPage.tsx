@@ -78,7 +78,7 @@ export default function AdminSupportTicketsPage() {
       await SupportTicketService.sendMessage(selectedTicket.id, replyText.trim());
 
       if (andResolve) {
-        await SupportTicketService.updateTicketStatus(selectedTicket.id, 'RESOLVED');
+        await SupportTicketService.updateTicketStatus(selectedTicket.id, 'RESOLVED', selectedTicket.status);
         setSelectedTicket((prev) => (prev ? { ...prev, status: 'RESOLVED' } : null));
       }
 
@@ -96,9 +96,16 @@ export default function AdminSupportTicketsPage() {
       });
     } catch (err: any) {
       console.error('[AdminSupportTicketsPage] sendMessage failed:', err);
+      const rawErr = String(err?.message || '');
+      const friendlyErr =
+        rawErr.includes('invalidStatusTransition')
+          ? (locale === 'ar'
+              ? 'لا يمكن تغيير حالة التذكرة إلى هذه الحالة مباشرة.'
+              : 'Invalid ticket status transition.')
+          : rawErr || (locale === 'ar' ? 'فشل إرسال الرد.' : 'Failed to send reply.');
       setActionMessage({
         type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل إرسال الرد.' : 'Failed to send reply.'),
+        text: friendlyErr,
       });
     } finally {
       setSendingReply(false);
@@ -109,26 +116,35 @@ export default function AdminSupportTicketsPage() {
   const handleStatusChange = async (ticketId: string, newStatus: string) => {
     setUpdatingStatusId(ticketId);
     setActionMessage(null);
+    const currentTicket = tickets.find((t) => t.id === ticketId) || (selectedTicket?.id === ticketId ? selectedTicket : undefined);
+    const normalizedNew = newStatus === 'CLOSED' ? 'ARCHIVED' : newStatus;
     try {
-      await SupportTicketService.updateTicketStatus(ticketId, newStatus);
+      await SupportTicketService.updateTicketStatus(ticketId, normalizedNew, currentTicket?.status);
       setTickets((prev) =>
-        prev.map((t) => (t.id === ticketId ? { ...t, status: newStatus } : t))
+        prev.map((t) => (t.id === ticketId ? { ...t, status: normalizedNew } : t))
       );
       if (selectedTicket && selectedTicket.id === ticketId) {
-        setSelectedTicket((prev) => (prev ? { ...prev, status: newStatus } : null));
+        setSelectedTicket((prev) => (prev ? { ...prev, status: normalizedNew } : null));
       }
       setActionMessage({
         type: 'success',
         text:
           locale === 'ar'
-            ? `تم تحديث حالة التذكرة إلى (${getStatusLabel(newStatus)}).`
-            : `Ticket status updated to (${newStatus}).`,
+            ? `تم تحديث حالة التذكرة إلى (${getStatusLabel(normalizedNew)}).`
+            : `Ticket status updated to (${normalizedNew}).`,
       });
     } catch (err: any) {
       console.error('[AdminSupportTicketsPage] updateTicketStatus failed:', err);
+      const rawErr = String(err?.message || '');
+      const friendlyErr =
+        rawErr.includes('invalidStatusTransition')
+          ? (locale === 'ar'
+              ? 'لا يمكن إرجاع التذكرة إلى حالة سابقة بعد حلها أو أرشفتها.'
+              : 'Cannot revert ticket to a previous status once resolved or archived.')
+          : rawErr || (locale === 'ar' ? 'فشل تحديث الحالة.' : 'Failed to update status.');
       setActionMessage({
         type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل تحديث الحالة.' : 'Failed to update status.'),
+        text: friendlyErr,
       });
     } finally {
       setUpdatingStatusId(null);
@@ -611,8 +627,14 @@ export default function AdminSupportTicketsPage() {
                           </button>
 
                           <select
-                            disabled={isUpdating}
-                            value={String(t.status || 'OPEN').toUpperCase()}
+                            disabled={isUpdating || ['ARCHIVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())}
+                            value={
+                              ['ARCHIVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())
+                                ? 'ARCHIVED'
+                                : String(t.status || 'OPEN').toUpperCase() === 'IN_PROGRESS'
+                                ? 'INVESTIGATING'
+                                : String(t.status || 'OPEN').toUpperCase()
+                            }
                             onChange={(e) => handleStatusChange(t.id, e.target.value)}
                             style={{
                               padding: '0.3rem 0.5rem',
@@ -625,10 +647,25 @@ export default function AdminSupportTicketsPage() {
                               cursor: isUpdating ? 'not-allowed' : 'pointer',
                             }}
                           >
-                            <option value="OPEN">{locale === 'ar' ? 'مفتوحة' : 'Open'}</option>
-                            <option value="INVESTIGATING">{locale === 'ar' ? 'قيد المتابعة' : 'In Progress'}</option>
-                            <option value="RESOLVED">{locale === 'ar' ? 'تم الحل' : 'Resolved'}</option>
-                            <option value="CLOSED">{locale === 'ar' ? 'مغلقة' : 'Closed'}</option>
+                            <option
+                              value="OPEN"
+                              disabled={String(t.status || 'OPEN').toUpperCase() !== 'OPEN'}
+                            >
+                              {locale === 'ar' ? 'مفتوحة' : 'Open'}
+                            </option>
+                            <option
+                              value="INVESTIGATING"
+                              disabled={['RESOLVED', 'ARCHIVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())}
+                            >
+                              {locale === 'ar' ? 'قيد المتابعة' : 'In Progress'}
+                            </option>
+                            <option
+                              value="RESOLVED"
+                              disabled={['ARCHIVED', 'CLOSED'].includes(String(t.status || '').toUpperCase())}
+                            >
+                              {locale === 'ar' ? 'تم الحل' : 'Resolved'}
+                            </option>
+                            <option value="ARCHIVED">{locale === 'ar' ? 'مغلقة / مؤرشفة' : 'Archived / Closed'}</option>
                           </select>
                         </div>
                       </td>
@@ -885,7 +922,14 @@ export default function AdminSupportTicketsPage() {
                     {locale === 'ar' ? 'الحالة الحالية:' : 'Status:'}
                   </span>
                   <select
-                    value={String(selectedTicket.status || 'OPEN').toUpperCase()}
+                    disabled={['ARCHIVED', 'CLOSED'].includes(String(selectedTicket.status || '').toUpperCase())}
+                    value={
+                      ['ARCHIVED', 'CLOSED'].includes(String(selectedTicket.status || '').toUpperCase())
+                        ? 'ARCHIVED'
+                        : String(selectedTicket.status || 'OPEN').toUpperCase() === 'IN_PROGRESS'
+                        ? 'INVESTIGATING'
+                        : String(selectedTicket.status || 'OPEN').toUpperCase()
+                    }
                     onChange={(e) => handleStatusChange(selectedTicket.id, e.target.value)}
                     style={{
                       padding: '0.3rem 0.6rem',
@@ -895,10 +939,25 @@ export default function AdminSupportTicketsPage() {
                       fontWeight: 600,
                     }}
                   >
-                    <option value="OPEN">{locale === 'ar' ? 'مفتوحة' : 'Open'}</option>
-                    <option value="INVESTIGATING">{locale === 'ar' ? 'قيد المتابعة' : 'In Progress'}</option>
-                    <option value="RESOLVED">{locale === 'ar' ? 'تم الحل' : 'Resolved'}</option>
-                    <option value="CLOSED">{locale === 'ar' ? 'مغلقة' : 'Closed'}</option>
+                    <option
+                      value="OPEN"
+                      disabled={String(selectedTicket.status || 'OPEN').toUpperCase() !== 'OPEN'}
+                    >
+                      {locale === 'ar' ? 'مفتوحة' : 'Open'}
+                    </option>
+                    <option
+                      value="INVESTIGATING"
+                      disabled={['RESOLVED', 'ARCHIVED', 'CLOSED'].includes(String(selectedTicket.status || '').toUpperCase())}
+                    >
+                      {locale === 'ar' ? 'قيد المتابعة' : 'In Progress'}
+                    </option>
+                    <option
+                      value="RESOLVED"
+                      disabled={['ARCHIVED', 'CLOSED'].includes(String(selectedTicket.status || '').toUpperCase())}
+                    >
+                      {locale === 'ar' ? 'تم الحل' : 'Resolved'}
+                    </option>
+                    <option value="ARCHIVED">{locale === 'ar' ? 'مغلقة / مؤرشفة' : 'Archived / Closed'}</option>
                   </select>
                 </div>
 

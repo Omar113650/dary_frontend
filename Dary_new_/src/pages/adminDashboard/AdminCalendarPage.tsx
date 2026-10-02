@@ -474,10 +474,11 @@ export default function AdminCalendarPage() {
         <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #F1F5F9' }}>
           {[
             { id: '', labelAr: 'الكل', labelEn: 'All' },
-            { id: 'CONTACTED', labelAr: '📞 تم التواصل (CONTACTED)', labelEn: 'Contacted' },
-            { id: 'PENDING', labelAr: '⏳ قيد المراجعة (PENDING)', labelEn: 'Pending' },
-            { id: 'CLOSED,CONFIRMED', labelAr: '✓ مؤكد ومكتمل (CONFIRMED)', labelEn: 'Confirmed' },
-            { id: 'CANCELLED', labelAr: '✕ ملغي (CANCELLED)', labelEn: 'Cancelled' },
+            { id: 'PENDING', labelAr: '⏳ قيد الانتظار (PENDING)', labelEn: '⏳ Pending' },
+            { id: 'CONTACTED', labelAr: '📞 تم التواصل (CONTACTED)', labelEn: '📞 Contacted' },
+            { id: 'CONFIRMED', labelAr: '✓ مؤكد - مبلغ معلق (CONFIRMED)', labelEn: '✓ Confirmed (Pending)' },
+            { id: 'CLOSED', labelAr: '🏁 مكتمل نهائياً (CLOSED)', labelEn: '🏁 Closed (Completed)' },
+            { id: 'CANCELLED', labelAr: '✕ ملغي (CANCELLED)', labelEn: '✕ Cancelled' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -589,9 +590,11 @@ export default function AdminCalendarPage() {
               const beds = evt.bedsRequested || 1;
               const duration = calculateDuration(evt.startDate, evt.endDate);
 
-              const isContacted = evt.status === 'CONTACTED';
-              const isClosed = evt.status === 'CLOSED' || evt.status === 'CONFIRMED';
-              const isCancelled = evt.status === 'CANCELLED';
+              const evtStatus = (evt.status || '').toUpperCase();
+              const isContacted = evtStatus === 'CONTACTED';
+              const isConfirmed = evtStatus === 'CONFIRMED';
+              const isClosed = evtStatus === 'CLOSED';
+              const isCancelled = evtStatus === 'CANCELLED';
 
               return (
                 <div
@@ -713,18 +716,20 @@ export default function AdminCalendarPage() {
                           borderRadius: '20px',
                           fontSize: '0.78rem',
                           fontWeight: 800,
-                          backgroundColor: isClosed ? '#DCFCE7' : isContacted ? '#E0F2FE' : isCancelled ? '#FEE2E2' : '#FEF9C3',
-                          color: isClosed ? '#15803D' : isContacted ? '#0369A1' : isCancelled ? '#DC2626' : '#B45309',
-                          border: `1px solid ${isClosed ? '#86EFAC' : isContacted ? '#BAE6FD' : isCancelled ? '#FECACA' : '#FDE68A'}`,
+                          backgroundColor: isClosed ? '#DCFCE7' : isConfirmed ? '#E0E7FF' : isContacted ? '#E0F2FE' : isCancelled ? '#FEE2E2' : '#FEF9C3',
+                          color: isClosed ? '#15803D' : isConfirmed ? '#3730A3' : isContacted ? '#0369A1' : isCancelled ? '#DC2626' : '#B45309',
+                          border: `1px solid ${isClosed ? '#86EFAC' : isConfirmed ? '#C7D2FE' : isContacted ? '#BAE6FD' : isCancelled ? '#FECACA' : '#FDE68A'}`,
                         }}
                       >
                         {isClosed
-                          ? locale === 'ar' ? '✓ ساري / مؤكد' : 'Confirmed'
+                          ? locale === 'ar' ? '🏁 مكتمل نهائياً' : '🏁 Closed'
+                          : isConfirmed
+                          ? locale === 'ar' ? '✓ مؤكد (مبلغ معلق)' : '✓ Confirmed'
                           : isContacted
                           ? locale === 'ar' ? '📞 تم التواصل' : 'Contacted'
                           : isCancelled
                           ? locale === 'ar' ? '✕ ملغي' : 'Cancelled'
-                          : locale === 'ar' ? '⏳ قيد المراجعة' : 'Pending'}
+                          : locale === 'ar' ? '⏳ قيد الانتظار' : 'Pending'}
                       </span>
                     </div>
 

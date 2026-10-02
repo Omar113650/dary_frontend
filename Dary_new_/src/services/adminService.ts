@@ -280,32 +280,176 @@ export class AdminService {
   }
 
   /**
+   * Helper to extract booking items array from any response format
+   */
+  private static extractBookingsArray(raw: any): AdminBookingItem[] {
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw?.data?.bookings)) return raw.data.bookings;
+    if (Array.isArray(raw?.data?.items)) return raw.data.items;
+    if (Array.isArray(raw?.data?.data)) return raw.data.data;
+    if (Array.isArray(raw?.data)) return raw.data;
+    if (Array.isArray(raw?.bookings)) return raw.bookings;
+    if (Array.isArray(raw?.items)) return raw.items;
+    return [];
+  }
+
+  /**
+   * Helper to calculate booking price if totalPrice is missing
+   */
+  private static computeBookingPrice(b: any): number {
+    if (typeof b?.totalPrice === 'number' && !Number.isNaN(b.totalPrice)) {
+      return b.totalPrice;
+    }
+    const pricePerBed = Number(b?.room?.pricePerBed || b?.room?.monthlyRent || b?.property?.startingPrice || b?.property?.price || 0);
+    const beds = Number(b?.bedsRequested || 1);
+    const months = Number(
+      b?.monthsCount ||
+        (b?.startDate && b?.endDate
+          ? Math.max(1, Math.round((new Date(b.endDate).getTime() - new Date(b.startDate).getTime()) / (1000 * 60 * 60 * 24 * 30)))
+          : 1)
+    );
+    return pricePerBed * beds * months;
+  }
+
+  /**
    * GET /dashboard/analytics?range=7d
+   * Falls back to computing analytics metrics from properties, users, and bookings if endpoint errors (e.g. 500)
    */
   static async getAnalytics(range: string = '7d'): Promise<any> {
-    const res = await ApiClient.get<any>(`/dashboard/analytics?range=${encodeURIComponent(range)}`);
-    return res?.data?.data ?? res?.data ?? res;
+    try {
+      const res = await ApiClient.get<any>(`/dashboard/analytics?range=${encodeURIComponent(range)}`);
+      return res?.data?.data ?? res?.data ?? res;
+    } catch {
+      try {
+        const [propsRes, usersRes, bookingsRes] = await Promise.allSettled([
+          this.getProperties({ limit: 200 }),
+          this.getUsers({ limit: 200 }),
+          this.getBookings({ limit: 500 }),
+        ]);
+
+        const propsList =
+          propsRes.status === 'fulfilled'
+            ? (Array.isArray(propsRes.value)
+                ? propsRes.value
+                : propsRes.value?.properties || propsRes.value?.items || propsRes.value?.data || [])
+            : [];
+        const usersList =
+          usersRes.status === 'fulfilled'
+            ? (Array.isArray(usersRes.value)
+                ? usersRes.value
+                : usersRes.value?.users || usersRes.value?.items || usersRes.value?.data || [])
+            : [];
+        const bookingsList =
+          bookingsRes.status === 'fulfilled' ? this.extractBookingsArray(bookingsRes.value) : [];
+
+        let totalBeds = 0;
+        let occupiedBeds = 0;
+        if (Array.isArray(propsList)) {
+          for (const p of propsList) {
+            const rooms = p?.rooms_ || p?.rooms;
+            if (Array.isArray(rooms)) {
+              for (const r of rooms) {
+                const tb = Number(r?.totalBeds || 0);
+                const ab = Number(r?.availableBeds ?? tb);
+                totalBeds += tb;
+                occupiedBeds += Math.max(0, tb - ab);
+              }
+            }
+          }
+        }
+        const occupancyRate = totalBeds > 0 ? Math.round((occupiedBeds / totalBeds) * 100) : 0;
+
+        const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+        const recentUsersCount = Array.isArray(usersList)
+          ? usersList.filter((u: any) => u?.createdAt && new Date(u.createdAt).getTime() >= sevenDaysAgo).length
+          : 0;
+        const activeUsersCount = Array.isArray(usersList)
+          ? usersList.filter((u: any) => String(u?.status || 'ACTIVE').toUpperCase() === 'ACTIVE').length
+          : 0;
+
+        return {
+          occupancyRate,
+          dailyActiveUsers: activeUsersCount,
+          bookingVolume: bookingsList.length,
+          userGrowth: recentUsersCount || (Array.isArray(usersList) ? usersList.length : 0),
+          newUsers: recentUsersCount,
+          period: range,
+        };
+      } catch {
+        return {
+          occupancyRate: 0,
+          dailyActiveUsers: 0,
+          bookingVolume: 0,
+          userGrowth: 0,
+          period: range,
+        };
+      }
+    }
   }
 
   /**
    * GET /dashboard/bookings/status
+   * Falls back to aggregating status counts from /dashboard/bookings or /booking if endpoint returns 500
    */
   static async getBookingsStatus(): Promise<any> {
-    const res = await ApiClient.get<any>('/dashboard/bookings/status');
-    return res?.data?.status ?? res?.data?.data?.status ?? res?.data ?? res;
+    try {
+      const res = await ApiClient.get<any>('/dashboard/bookings/status');
+      return res?.data?.status ?? res?.data?.data?.status ?? res?.data ?? res;
+    } catch {
+      try {
+        const raw = await this.getBookings({ limit: 500 });
+        const list = this.extractBookingsArray(raw);
+        const counts = {
+          total: list.length,
+          pending: 0,
+          contacted: 0,
+          confirmed: 0,
+          closed: 0,
+          cancelled: 0,
+        };
+        for (const b of list) {
+          const st = String(b?.status || '').toUpperCase();
+          if (st === 'PENDING') counts.pending++;
+          else if (st === 'CONTACTED') counts.contacted++;
+          else if (st === 'CONFIRMED') counts.confirmed++;
+          else if (st === 'CLOSED') counts.closed++;
+          else if (st === 'CANCELLED') counts.cancelled++;
+        }
+        return counts;
+      } catch {
+        return { total: 0, pending: 0, contacted: 0, confirmed: 0, closed: 0, cancelled: 0 };
+      }
+    }
   }
 
   /**
    * GET /dashboard/bookings/revenue
+   * Falls back to computing totalRevenue (CLOSED only) & pendingRevenue (PENDING, CONTACTED, CONFIRMED)
    */
   static async getBookingsRevenue(): Promise<any> {
-    const res = await ApiClient.get<any>('/dashboard/bookings/revenue');
-    return res?.data?.data ?? res?.data ?? res;
+    try {
+      const res = await ApiClient.get<any>('/dashboard/bookings/revenue');
+      return res?.data?.data ?? res?.data ?? res;
+    } catch {
+      try {
+        const raw = await this.getBookings({ limit: 500 });
+        const list = this.extractBookingsArray(raw);
+        const totalRevenue = list
+          .filter((b) => String(b?.status || '').toUpperCase() === 'CLOSED')
+          .reduce((sum, b) => sum + this.computeBookingPrice(b), 0);
+        const pendingRevenue = list
+          .filter((b) => ['PENDING', 'CONTACTED', 'CONFIRMED'].includes(String(b?.status || '').toUpperCase()))
+          .reduce((sum, b) => sum + this.computeBookingPrice(b), 0);
+        return { totalRevenue, pendingRevenue, currency: 'ج.م' };
+      } catch {
+        return { totalRevenue: 0, pendingRevenue: 0, currency: 'ج.م' };
+      }
+    }
   }
 
   /**
    * GET /dashboard/bookings
-   * Supports offset/cursor pagination, status, search, and sorting
+   * Supports offset/cursor pagination, status, search, and sorting (with fallback to /booking)
    */
   static async getBookings(params?: AdminBookingsQueryParams): Promise<any> {
     const query = new URLSearchParams();
@@ -323,8 +467,13 @@ export class AdminService {
     if (params?.tenantId) query.append('tenantId', params.tenantId);
     if (params?.assignedAdminId) query.append('assignedAdminId', params.assignedAdminId);
     const queryStr = query.toString() ? `?${query.toString()}` : '';
-    const res = await ApiClient.get<any>(`/dashboard/bookings${queryStr}`);
-    return res?.data ?? res;
+    try {
+      const res = await ApiClient.get<any>(`/dashboard/bookings${queryStr}`);
+      return res?.data ?? res;
+    } catch {
+      const res = await ApiClient.get<any>(`/booking${queryStr}`);
+      return res?.data ?? res;
+    }
   }
 
   /**
@@ -563,15 +712,40 @@ export class AdminService {
 
   /**
    * PATCH /booking/:id/status
-   * Changes booking status (CONTACTED, CLOSED, CANCELLED)
+   * Changes booking status (PENDING, CONTACTED, CONFIRMED, CLOSED, CANCELLED)
    */
-  static async updateBookingStatus(id: string, status: 'CONTACTED' | 'CLOSED' | 'CANCELLED', note?: string): Promise<any> {
+  static async updateBookingStatus(
+    id: string,
+    status: 'PENDING' | 'CONTACTED' | 'CONFIRMED' | 'CLOSED' | 'CANCELLED',
+    note?: string
+  ): Promise<any> {
+    const payload: { status: string; note?: string } = { status };
+    if (note && note.trim()) {
+      payload.note = note.trim();
+    }
     try {
-      const res = await ApiClient.patch<any>(`/booking/${id}/status`, { status, note });
+      const res = await ApiClient.patch<any>(`/booking/${id}/status`, payload);
       return res?.data || res;
     } catch (e: any) {
       if (e?.status === 404 || e?.statusCode === 404) {
-        const res = await ApiClient.patch<any>(`/bookings/${id}/status`, { status, note });
+        const res = await ApiClient.patch<any>(`/bookings/${id}/status`, payload);
+        return res?.data || res;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * PATCH /contract/:contractId/activate
+   * Activates a signed contract and automatically transitions booking to CLOSED
+   */
+  static async activateContract(contractId: string): Promise<any> {
+    try {
+      const res = await ApiClient.patch<any>(`/contract/${contractId}/activate`);
+      return res?.data || res;
+    } catch (e: any) {
+      if (e?.status === 404 || e?.statusCode === 404) {
+        const res = await ApiClient.patch<any>(`/contracts/${contractId}/activate`);
         return res?.data || res;
       }
       throw e;

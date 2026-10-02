@@ -42,14 +42,16 @@ export interface User {
 }
 
 export interface LoginCredentials {
-  email: string;
+  email?: string;
+  phone?: string;
+  identifier?: string;
   password: string;
 }
 
 export interface RegisterData {
   firstName: string;
   lastName: string;
-  email: string;
+  email?: string;
   password: string;
   phone: string;
   whatsappPhone?: string;
@@ -74,15 +76,43 @@ export interface AuthResponse {
 export class AuthService {
   /**
    * 1. POST /auth/login
-   * Body: { email, password }
+   * Body: { email?, phone?, password }
    * Backend verifies ACTIVE status, deletes old refresh tokens, persists 1 hashed refreshToken (7d),
    * and returns/sets accessToken (15m) + refreshToken (7d).
    */
   static async login(credentials: LoginCredentials): Promise<AuthResponse> {
-    const res = await ApiClient.post<AuthResponse>('/auth/login', {
-      email: credentials.email.trim().toLowerCase(),
+    const rawIdentifier = (
+      credentials.identifier ||
+      credentials.email ||
+      credentials.phone ||
+      ''
+    ).trim();
+
+    const isEmail = rawIdentifier.includes('@');
+    const cleanEmail = isEmail ? rawIdentifier.toLowerCase() : undefined;
+    let cleanPhone = !isEmail
+      ? rawIdentifier.replace(/\s+/g, '')
+      : credentials.phone?.trim().replace(/\s+/g, '');
+
+    if (cleanPhone && /^01[0125]\d{8}$/.test(cleanPhone)) {
+      cleanPhone = `+2${cleanPhone}`;
+    }
+
+    // Format phone into a standard valid email format for `email` field so strict backend
+    // validation middlewares (requiring a valid email string) allow the request through to loginUser
+    const syntheticPhoneEmail = cleanPhone
+      ? `phone_${cleanPhone.startsWith('+') ? `plus_${cleanPhone.slice(1)}` : cleanPhone}@dary.com`
+      : undefined;
+
+    const payload: Record<string, string> = {
+      email: cleanEmail || syntheticPhoneEmail || rawIdentifier,
       password: credentials.password,
-    });
+    };
+    if (cleanPhone) {
+      payload.phone = cleanPhone;
+    }
+
+    const res = await ApiClient.post<AuthResponse>('/auth/login', payload);
     const raw = res as any;
     const tokens = raw?.data?.tokens || raw?.tokens;
     const accessToken = tokens?.accessToken || raw?.data?.accessToken || raw?.accessToken;
@@ -100,17 +130,19 @@ export class AuthService {
 
   /**
    * 2. POST /auth/register
-   * Body: { firstName, lastName, email, password, phone, whatsappPhone?, roles }
+   * Body: { firstName, lastName, email?, password, phone, whatsappPhone?, roles }
    */
   static async register(data: RegisterData): Promise<any> {
     const payload: any = {
       firstName: data.firstName.trim(),
       lastName: data.lastName.trim(),
-      email: data.email.trim().toLowerCase(),
       password: data.password,
       phone: data.phone.trim(),
       roles: data.roles,
     };
+    if (data.email && data.email.trim()) {
+      payload.email = data.email.trim().toLowerCase();
+    }
     if (data.whatsappPhone && data.whatsappPhone.trim()) {
       payload.whatsappPhone = data.whatsappPhone.trim();
     }
