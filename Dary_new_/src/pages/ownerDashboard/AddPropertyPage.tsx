@@ -3,6 +3,14 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { OwnerService } from '../../services/ownerService';
 import { useQueryClient } from '../../lib/queryClient';
+import InteractiveMap from '../../components/common/InteractiveMap';
+import {
+  LocationService,
+  resolveCoordinates,
+  isCoordinateValidForContext,
+  isMeaningfulStreetAddress,
+  formatCleanAddress,
+} from '../../services/locationService';
 
 interface RoomConfigItem {
   roomType: 'SINGLE' | 'DOUBLE' | 'TRIPLE' | 'QUAD';
@@ -48,6 +56,8 @@ export default function AddPropertyPage() {
   const [address, setAddress] = useState('');
   const [nearestUniversity, setNearestUniversity] = useState('');
   const [distanceToUniversity, setDistanceToUniversity] = useState<number | ''>('');
+  const [latitude, setLatitude] = useState<number | ''>('');
+  const [longitude, setLongitude] = useState<number | ''>('');
 
   // Features & Pricing
   const [startingPrice, setStartingPrice] = useState<number | ''>('');
@@ -200,14 +210,43 @@ export default function AddPropertyPage() {
       formData.append('targetTenantType', targetTenantType);
       formData.append('genderAllowed', genderAllowed);
 
+      const locCtx = {
+        address,
+        district,
+        city,
+        governorate,
+        nearestUniversity,
+        title,
+      };
+
+      // Ensure both latitude and longitude are resolved and valid for the chosen city/university
+      let finalLat = latitude !== '' && !isNaN(Number(latitude)) ? Number(latitude) : null;
+      let finalLng = longitude !== '' && !isNaN(Number(longitude)) ? Number(longitude) : null;
+
+      if (finalLat === null || finalLng === null || !isCoordinateValidForContext(finalLat, finalLng, locCtx)) {
+        const geocoded = await LocationService.geocodeAddress(locCtx);
+        const fallback = resolveCoordinates(locCtx);
+        finalLat = geocoded?.latitude ?? fallback.latitude;
+        finalLng = geocoded?.longitude ?? fallback.longitude;
+        setLatitude(finalLat);
+        setLongitude(finalLng);
+      }
+
+      const cleanFinalAddress = isMeaningfulStreetAddress(address, locCtx)
+        ? address.trim()
+        : formatCleanAddress(locCtx, null, 'ar');
+
       if (governorate.trim()) formData.append('governorate', governorate.trim());
       if (city.trim()) formData.append('city', city.trim());
       if (district.trim()) formData.append('district', district.trim());
-      if (address.trim()) formData.append('address', address.trim());
+      if (cleanFinalAddress) formData.append('address', cleanFinalAddress);
       if (nearestUniversity.trim()) formData.append('nearestUniversity', nearestUniversity.trim());
       if (distanceToUniversity !== '' && !isNaN(Number(distanceToUniversity))) {
         formData.append('distanceToUniversity', String(distanceToUniversity));
       }
+
+      formData.append('latitude', String(finalLat));
+      formData.append('longitude', String(finalLng));
 
       // Calculate startingPrice if not entered
       const finalStartingPrice =
@@ -516,6 +555,69 @@ export default function AddPropertyPage() {
                 style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '0.95rem', outline: 'none' }}
               />
             </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--dary-navy)' }}>
+                {locale === 'ar' ? 'خط العرض (Latitude - اختياري)' : 'Latitude (Optional)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value !== '' ? Number(e.target.value) : '')}
+                placeholder="30.0444"
+                style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '0.95rem', outline: 'none', direction: 'ltr' }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.4rem', color: 'var(--dary-navy)' }}>
+                {locale === 'ar' ? 'خط الطول (Longitude - اختياري)' : 'Longitude (Optional)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value !== '' ? Number(e.target.value) : '')}
+                placeholder="31.2357"
+                style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: '10px', border: '1px solid #CBD5E1', fontSize: '0.95rem', outline: 'none', direction: 'ltr' }}
+              />
+            </div>
+          </div>
+
+          {/* Interactive Map Picker */}
+          <div style={{ marginTop: '1.25rem' }}>
+            <InteractiveMap
+              latitude={latitude}
+              longitude={longitude}
+              locationContext={{
+                address,
+                district,
+                city,
+                governorate,
+                nearestUniversity,
+                title,
+              }}
+              title={title || (locale === 'ar' ? 'تحديد موقع العقار على الخريطة' : 'Pin Property on Map')}
+              subtitle={[address, district, city, governorate].filter(Boolean).join('، ')}
+              height="340px"
+              editable={true}
+              showNearby={true}
+              syncProfileOnDetect={true}
+              locale={locale}
+              onLocationChange={(lat, lng, rev) => {
+                setLatitude(lat);
+                setLongitude(lng);
+                if (rev?.address) setAddress(rev.address);
+                if (rev?.district) setDistrict(rev.district);
+                if (rev?.city) setCity(rev.city);
+                if (rev?.governorate) setGovernorate(rev.governorate);
+                if (rev?.nearestUniversity) setNearestUniversity(rev.nearestUniversity);
+                if (rev?.distanceToUniversityKm !== undefined) {
+                  setDistanceToUniversity(rev.distanceToUniversityKm);
+                }
+              }}
+            />
           </div>
         </div>
 

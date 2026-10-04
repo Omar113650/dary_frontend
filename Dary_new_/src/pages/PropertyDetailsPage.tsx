@@ -1,16 +1,22 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useParams, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
-import { propertyService, getCachedProperty } from '../services/propertyService';
+import { propertyService, getCachedProperty, normalizeProperty, cacheProperty } from '../services/propertyService';
 import { TenantService } from '../services/tenantService';
 import type { RentalBooking } from '../services/tenantService';
 import { ReportService } from '../services/reportService';
 import { ReviewService } from '../services/reviewService';
 import type { ReviewItem } from '../services/reviewService';
 import { useAuth } from '../context/AuthContext';
-import { ApiClient } from '../services/apiClient';
 import { BookingService } from '../services/bookingService';
 import type { Property } from '../types/property';
+import InteractiveMap from '../components/common/InteractiveMap';
+import {
+  formatCleanAddress,
+  normalizeUniversityName,
+  LocationService,
+  type ReverseGeocodeResult,
+} from '../services/locationService';
 
 const recordedRecentlyViewedIds = new Set<string>();
 
@@ -494,7 +500,7 @@ export default function PropertyDetailsPage() {
   const passedProperty = (location.state as any)?.property as Property | undefined;
   const initialProperty =
     passedProperty && passedProperty.id === id
-      ? passedProperty
+      ? normalizeProperty(passedProperty)
       : id
       ? getCachedProperty(id)
       : null;
@@ -502,6 +508,10 @@ export default function PropertyDetailsPage() {
   const [property, setProperty] = useState<Property | null>(initialProperty);
   const [loading, setLoading] = useState<boolean>(!initialProperty);
   const [error, setError] = useState<string | null>(null);
+  const [resolvedMapAddress, setResolvedMapAddress] = useState<string>('');
+  const [resolvedRev, setResolvedRev] = useState<ReverseGeocodeResult | null>(null);
+  const [mapEditMode, setMapEditMode] = useState<boolean>(false);
+  const [detectingBoxGps, setDetectingBoxGps] = useState<boolean>(false);
 
   const propertyRef = useRef<Property | null>(property);
   propertyRef.current = property;
@@ -606,43 +616,18 @@ export default function PropertyDetailsPage() {
   const [liveBookings, setLiveBookings] = useState<any[]>([]);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !isAuthenticated || (!isAdmin && !isThisOwnerProperty)) return;
     const propertyId = id;
     let isCancelled = false;
 
     async function fetchPropertyLiveBookings() {
-      // Candidate endpoints to fetch live bookings for this specific property
-      const candidates = [
-        () => BookingService.getOwnerBookings(propertyId),
-        () => ApiClient.get<any>(`/properties/${propertyId}/bookings`),
-        () => ApiClient.get<any>(`/property/${propertyId}/bookings`),
-        () => ApiClient.get<any>(`/booking/property/${propertyId}`),
-        () => ApiClient.get<any>(`/bookings/property/${propertyId}`),
-        () => ApiClient.get<any>(`/booking?propertyId=${propertyId}&limit=100`),
-        () => ApiClient.get<any>(`/dashboard/booking/calendar?propertyId=${propertyId}&limit=100`),
-      ];
-
-      for (const call of candidates) {
-        try {
-          const res = await call();
-          const list =
-            Array.isArray(res) ? res :
-            Array.isArray(res?.data?.bookings) ? res.data.bookings :
-            Array.isArray(res?.data?.data) ? res.data.data :
-            Array.isArray(res?.data) ? res.data :
-            Array.isArray(res?.bookings) ? res.bookings :
-            Array.isArray(res?.events) ? res.events :
-            [];
-
-          if (list.length > 0) {
-            if (!isCancelled) {
-              setLiveBookings(list);
-            }
-            return;
-          }
-        } catch {
-          // silently continue to next candidate
+      try {
+        const list = await BookingService.getOwnerBookings(propertyId);
+        if (Array.isArray(list) && list.length > 0 && !isCancelled) {
+          setLiveBookings(list);
         }
+      } catch {
+        // Ignore error silently
       }
     }
 
@@ -650,7 +635,7 @@ export default function PropertyDetailsPage() {
     return () => {
       isCancelled = true;
     };
-  }, [id]);
+  }, [id, isAuthenticated, isAdmin, isThisOwnerProperty]);
 
   // Earliest date when a fully-booked property or room is expected to become vacant
   const earliestVacancyDate = useMemo(() => {
@@ -1246,9 +1231,25 @@ export default function PropertyDetailsPage() {
       : property.title?.[locale] || property.title?.ar || property.title?.en || (locale === 'ar' ? 'عقار سكني' : 'Property Listing');
 
   const displayLocation =
-    typeof property.location === 'string'
+    resolvedRev && (resolvedRev.district || resolvedRev.city)
+      ? [
+          resolvedRev.district,
+          resolvedRev.city && resolvedRev.city !== resolvedRev.district ? resolvedRev.city : '',
+          resolvedRev.governorate && resolvedRev.governorate !== resolvedRev.city
+            ? locale === 'ar'
+              ? `محافظة ${resolvedRev.governorate.replace(/^محافظة\s+/, '')}`
+              : resolvedRev.governorate
+            : '',
+        ]
+          .filter(Boolean)
+          .join(locale === 'ar' ? '، ' : ', ')
+      : typeof property.location === 'string'
       ? property.location
-      : property.location?.[locale] || property.location?.ar || property.location?.en || property.city || (locale === 'ar' ? 'الموقع غير محدد' : 'Unspecified Location');
+      : property.location?.[locale] ||
+        property.location?.ar ||
+        property.location?.en ||
+        property.city ||
+        (locale === 'ar' ? 'الموقع غير محدد' : 'Unspecified Location');
 
   const displayType =
     typeof property.type === 'string'
@@ -1838,41 +1839,256 @@ export default function PropertyDetailsPage() {
             </div>
 
             {/* Detailed Location & Proximity Box */}
-            {(property.address || property.nearestUniversity) && (
-              <div
-                style={{
-                  backgroundColor: '#F8FAFC',
-                  border: '1px solid #E2E8F0',
-                  borderRadius: '16px',
-                  padding: '1.15rem 1.25rem',
-                  marginBottom: '1.75rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.65rem',
-                }}
-              >
-                {property.address && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: 'var(--color-navy)' }}>
-                    <span style={{ fontSize: '1.1rem' }}>📍</span>
-                    <span style={{ fontWeight: 700 }}>{locale === 'ar' ? 'العنوان التفصيلي:' : 'Detailed Address:'}</span>
-                    <span style={{ color: 'var(--color-text-secondary)' }}>{property.address}</span>
-                  </div>
-                )}
+            {(() => {
+              const effectiveAddress =
+                resolvedMapAddress ||
+                resolvedRev?.address ||
+                formatCleanAddress(
+                  {
+                    address: property.address,
+                    district: property.district,
+                    city: property.city,
+                    governorate: property.governorate,
+                    nearestUniversity: property.nearestUniversity,
+                    location: property.location,
+                    title: property.title,
+                  },
+                  null,
+                  locale
+                ) ||
+                property.address;
 
-                {property.nearestUniversity && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem', color: '#1E40AF' }}>
-                    <span style={{ fontSize: '1.1rem' }}>🎓</span>
-                    <span style={{ fontWeight: 700 }}>{locale === 'ar' ? 'الجامعة الأقرب:' : 'Nearest University:'}</span>
-                    <span style={{ fontWeight: 600 }}>{property.nearestUniversity}</span>
-                    {property.distanceToUniversity !== undefined && (
-                      <span style={{ backgroundColor: '#DBEAFE', color: '#1E40AF', padding: '2px 8px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 700 }}>
-                        {property.distanceToUniversity} {locale === 'ar' ? 'كم' : 'km'}
+              const normUniv = normalizeUniversityName(
+                resolvedRev?.nearestUniversity || property.nearestUniversity,
+                property.latitude,
+                property.longitude,
+                locale
+              );
+              const effectiveUnivName = resolvedRev?.nearestUniversity || normUniv.name || property.nearestUniversity;
+              const effectiveUnivDist =
+                resolvedRev?.distanceToUniversityKm !== undefined
+                  ? resolvedRev.distanceToUniversityKm
+                  : normUniv.distanceKm !== undefined
+                  ? normUniv.distanceKm
+                  : property.distanceToUniversity;
+
+              if (!effectiveAddress && !effectiveUnivName) return null;
+
+              const handleQuickGpsFill = async () => {
+                setDetectingBoxGps(true);
+                try {
+                  const coords = await LocationService.detectAndSyncProfileLocation(isAuthenticated);
+                  const rev = await LocationService.reverseGeocode(coords.latitude, coords.longitude, locale);
+                  if (rev) {
+                    setResolvedRev(rev);
+                    if (rev.address) setResolvedMapAddress(rev.address);
+                  }
+                  setProperty((prev) => {
+                    if (!prev) return prev;
+                    const updated: Property = {
+                      ...prev,
+                      latitude: coords.latitude,
+                      longitude: coords.longitude,
+                      address: rev?.address || prev.address,
+                      district: rev?.district || prev.district,
+                      city: rev?.city || prev.city,
+                      governorate: rev?.governorate || prev.governorate,
+                      nearestUniversity: rev?.nearestUniversity || prev.nearestUniversity,
+                      distanceToUniversity: rev?.distanceToUniversityKm ?? prev.distanceToUniversity,
+                    };
+                    cacheProperty(updated);
+                    return updated;
+                  });
+                  if ((isThisOwnerProperty || isAdmin) && property.id) {
+                    propertyService
+                      .updateProperty(property.id, {
+                        latitude: coords.latitude,
+                        longitude: coords.longitude,
+                        ...(rev?.address ? { address: rev.address } : {}),
+                        ...(rev?.district ? { district: rev.district } : {}),
+                        ...(rev?.governorate ? { governorate: rev.governorate } : {}),
+                        ...(rev?.nearestUniversity ? { nearestUniversity: rev.nearestUniversity } : {}),
+                        ...(rev?.distanceToUniversityKm !== undefined
+                          ? { distanceToUniversity: rev.distanceToUniversityKm }
+                          : {}),
+                      })
+                      .catch(() => {});
+                  }
+                } catch {
+                  setMapEditMode(true);
+                } finally {
+                  setDetectingBoxGps(false);
+                }
+              };
+
+              return (
+                <div
+                  style={{
+                    backgroundColor: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '16px',
+                    padding: '1.15rem 1.25rem',
+                    marginBottom: '1.75rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.65rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.92rem', color: 'var(--color-navy)', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '1.1rem' }}>📍</span>
+                      <span style={{ fontWeight: 800 }}>{locale === 'ar' ? 'العنوان التفصيلي:' : 'Detailed Address:'}</span>
+                      <span style={{ color: '#0F172A', fontWeight: 700 }}>
+                        {effectiveAddress}
                       </span>
+                    </div>
+
+                    {(isThisOwnerProperty || isAdmin) && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={handleQuickGpsFill}
+                          disabled={detectingBoxGps}
+                          style={{
+                            padding: '0.35rem 0.75rem',
+                            borderRadius: '8px',
+                            border: '1px solid #2F6BFF',
+                            backgroundColor: '#2F6BFF',
+                            color: '#FFFFFF',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: detectingBoxGps ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <span>🧭</span>
+                          <span>
+                            {detectingBoxGps
+                              ? locale === 'ar'
+                                ? 'جاري جلب العنوان من GPS...'
+                                : 'Detecting GPS Address...'
+                              : locale === 'ar'
+                              ? 'حط عنواني الحالي (GPS)'
+                              : 'Use My GPS Address'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setMapEditMode((prev) => !prev)}
+                          style={{
+                            padding: '0.35rem 0.75rem',
+                            borderRadius: '8px',
+                            border: mapEditMode ? '1px solid #16A34A' : '1px solid #BFDBFE',
+                            backgroundColor: mapEditMode ? '#DCFCE7' : '#EFF6FF',
+                            color: mapEditMode ? '#15803D' : '#1D4ED8',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <span>{mapEditMode ? '✓' : '🎯'}</span>
+                          <span>
+                            {mapEditMode
+                              ? locale === 'ar'
+                                ? 'تم تفعيل ضبط الخريطة (اضغط على الخريطة لتعديل الموقع)'
+                                : 'Map Pin Mode Active'
+                              : locale === 'ar'
+                              ? 'ضبط العنوان على الخريطة'
+                              : 'Adjust on Map'}
+                          </span>
+                        </button>
+                      </div>
                     )}
                   </div>
-                )}
-              </div>
-            )}
+
+                  {effectiveUnivName && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', fontSize: '0.9rem', color: '#1E40AF', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '1.1rem' }}>🎓</span>
+                      <span style={{ fontWeight: 700 }}>{locale === 'ar' ? 'الجامعة الأقرب:' : 'Nearest University:'}</span>
+                      <span style={{ fontWeight: 800, color: '#0B2A4A' }}>{effectiveUnivName}</span>
+                      {effectiveUnivDist !== undefined && (
+                        <span style={{ backgroundColor: '#DBEAFE', color: '#1E40AF', padding: '2px 10px', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 800 }}>
+                          {effectiveUnivDist} {locale === 'ar' ? 'كم' : 'km'}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* ── Interactive Map & Nearby Places (/api/nearby) ─────────────── */}
+            <div style={{ marginBottom: '1.75rem' }}>
+              <InteractiveMap
+                latitude={property.latitude}
+                longitude={property.longitude}
+                locationContext={{
+                  id: property.id,
+                  address: property.address,
+                  district: property.district,
+                  city: property.city,
+                  governorate: property.governorate,
+                  nearestUniversity: property.nearestUniversity,
+                  location: property.location,
+                  title: property.title,
+                }}
+                title={displayTitle}
+                subtitle={resolvedMapAddress || displayLocation}
+                height="360px"
+                editable={mapEditMode || isThisOwnerProperty || isAdmin}
+                showNearby={true}
+                syncProfileOnDetect={isAuthenticated}
+                locale={locale}
+                onAddressResolved={(cleanAddr, rev) => {
+                  if (cleanAddr) setResolvedMapAddress(cleanAddr);
+                  if (rev) setResolvedRev(rev);
+                }}
+                onLocationChange={(lat, lng, rev) => {
+                  const newAddress = rev?.address || resolvedMapAddress || property.address;
+                  if (rev) setResolvedRev(rev);
+                  setProperty((prev) => {
+                    if (!prev) return prev;
+                    const updated: Property = {
+                      ...prev,
+                      latitude: lat,
+                      longitude: lng,
+                      address: newAddress || prev.address,
+                      district: rev?.district || prev.district,
+                      city: rev?.city || prev.city,
+                      governorate: rev?.governorate || prev.governorate,
+                      nearestUniversity: rev?.nearestUniversity || prev.nearestUniversity,
+                      distanceToUniversity: rev?.distanceToUniversityKm ?? prev.distanceToUniversity,
+                    };
+                    cacheProperty(updated);
+                    return updated;
+                  });
+                  if (rev?.address) {
+                    setResolvedMapAddress(rev.address);
+                  }
+                  if ((isThisOwnerProperty || isAdmin) && property.id) {
+                    propertyService
+                      .updateProperty(property.id, {
+                        latitude: lat,
+                        longitude: lng,
+                        ...(rev?.address ? { address: rev.address } : {}),
+                        ...(rev?.district ? { district: rev.district } : {}),
+                        ...(rev?.governorate ? { governorate: rev.governorate } : {}),
+                        ...(rev?.nearestUniversity ? { nearestUniversity: rev.nearestUniversity } : {}),
+                        ...(rev?.distanceToUniversityKm !== undefined
+                          ? { distanceToUniversity: rev.distanceToUniversityKm }
+                          : {}),
+                      })
+                      .catch(() => {});
+                  }
+                }}
+              />
+            </div>
 
             {/* ── Key Specifications Grid (6 Tiles) ─────────────────────────── */}
             <div style={{ marginBottom: '1.75rem' }}>

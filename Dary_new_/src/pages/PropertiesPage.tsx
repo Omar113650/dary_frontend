@@ -1,11 +1,21 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
+import { useAuth } from '../context/AuthContext';
 import { propertyService } from '../services/propertyService';
 import { fetchGlobalActiveBookings } from '../services/occupancyService';
 import type { Property } from '../types/property';
 import PropertyCard from '../components/PropertyCard/PropertyCard';
 import AnimatedCounter from '../components/common/AnimatedCounter';
+import InteractiveMap from '../components/common/InteractiveMap';
+import {
+  LocationService,
+  resolveCoordinates,
+  calculateDistanceKm,
+  DEFAULT_CAIRO_LAT,
+  DEFAULT_CAIRO_LNG,
+} from '../services/locationService';
+import type { Coordinates } from '../services/locationService';
 import './PropertiesPage.css';
 
 interface PriceRangeOption {
@@ -53,6 +63,7 @@ const bedroomOptions = [
 
 export default function PropertiesPage() {
   const { t, locale } = useLocale();
+  const { isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Filter States
@@ -91,10 +102,12 @@ export default function PropertiesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Proactively fetch global active bookings so property cards reflect live vacancy schedules
+  // Proactively fetch global active bookings (admin only) so property cards reflect live vacancy schedules
   useEffect(() => {
-    fetchGlobalActiveBookings().catch(() => {});
-  }, []);
+    if (isAdmin) {
+      fetchGlobalActiveBookings().catch(() => {});
+    }
+  }, [isAdmin]);
 
   // Debounce search input (400ms)
   useEffect(() => {
@@ -173,7 +186,60 @@ export default function PropertiesPage() {
     };
   }, [loadProperties]);
 
-  // Client-side Sorting
+  // Client-side Sorting & Map View State
+  const [showMap, setShowMap] = useState(false);
+  const [userCoords, setUserCoords] = useState<Coordinates | null>(() =>
+    LocationService.getCachedUserLocation()
+  );
+  const [detectingNearMe, setDetectingNearMe] = useState(false);
+  const [geocodeTick, setGeocodeTick] = useState(0);
+
+  // Dynamically geocode any property from the backend that does not yet have explicit latitude/longitude
+  useEffect(() => {
+    let cancelled = false;
+    const missing = properties.filter(
+      (p) =>
+        (p.latitude === undefined || p.latitude === null || Number.isNaN(Number(p.latitude))) &&
+        Boolean(p.address || p.district || p.nearestUniversity || p.city || p.governorate)
+    );
+    if (missing.length === 0) return;
+
+    (async () => {
+      for (const prop of missing) {
+        if (cancelled) break;
+        const res = await LocationService.geocodeAddress({
+          address: prop.address,
+          district: prop.district,
+          nearestUniversity: prop.nearestUniversity,
+          city: prop.city,
+          governorate: prop.governorate,
+          location: prop.location,
+        });
+        if (!cancelled && res) {
+          setGeocodeTick((t) => t + 1);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [properties]);
+
+  const handleSortNearMe = async () => {
+    setDetectingNearMe(true);
+    try {
+      const coords = await LocationService.detectAndSyncProfileLocation(true);
+      setUserCoords(coords);
+      setSortBy('nearest');
+      setShowMap(true);
+    } catch {
+      setShowMap(true);
+    } finally {
+      setDetectingNearMe(false);
+    }
+  };
+
   const sortedProperties = useMemo(() => {
     const list = [...properties];
     if (sortBy === 'price_asc') {
@@ -182,8 +248,20 @@ export default function PropertiesPage() {
     if (sortBy === 'price_desc') {
       return list.sort((a, b) => b.price - a.price);
     }
+    if (sortBy === 'nearest') {
+      const refLat = userCoords?.latitude ?? DEFAULT_CAIRO_LAT;
+      const refLng = userCoords?.longitude ?? DEFAULT_CAIRO_LNG;
+      return list.sort((a, b) => {
+        const cA = resolveCoordinates(a);
+        const cB = resolveCoordinates(b);
+        return (
+          calculateDistanceKm(refLat, refLng, cA.latitude, cA.longitude) -
+          calculateDistanceKm(refLat, refLng, cB.latitude, cB.longitude)
+        );
+      });
+    }
     return list;
-  }, [properties, sortBy]);
+  }, [properties, sortBy, userCoords, geocodeTick]);
 
   // Check if any filter is active
   const hasActiveFilters = Boolean(
@@ -366,8 +444,8 @@ export default function PropertiesPage() {
         </div>
 
         {/* Results Metadata & Sorting Row */}
-        <div className="properties-meta-row">
-          <div className="properties-count-wrap">
+        <div className="properties-meta-row" style={{ flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div className="properties-count-wrap" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
             {!loading && !error && (
               <span className="properties-count">
                 <strong>
@@ -376,6 +454,65 @@ export default function PropertiesPage() {
                 {t.properties_results_count}
               </span>
             )}
+
+            <button
+              type="button"
+              onClick={() => setShowMap((prev) => !prev)}
+              style={{
+                padding: '0.45rem 0.9rem',
+                borderRadius: '10px',
+                border: showMap ? '1px solid #2F6BFF' : '1px solid #CBD5E1',
+                backgroundColor: showMap ? '#EFF6FF' : '#FFFFFF',
+                color: showMap ? '#2F6BFF' : '#0B2A4A',
+                fontWeight: 700,
+                fontSize: '0.84rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>🗺️</span>
+              <span>
+                {showMap
+                  ? locale === 'ar'
+                    ? 'إخفاء الخريطة'
+                    : 'Hide Map'
+                  : locale === 'ar'
+                  ? 'عرض العقارات على الخريطة'
+                  : 'Show on Map'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSortNearMe}
+              disabled={detectingNearMe}
+              style={{
+                padding: '0.45rem 0.9rem',
+                borderRadius: '10px',
+                border: sortBy === 'nearest' ? '1px solid #10B981' : '1px solid #CBD5E1',
+                backgroundColor: sortBy === 'nearest' ? '#ECFDF5' : '#FFFFFF',
+                color: sortBy === 'nearest' ? '#065F46' : '#0B2A4A',
+                fontWeight: 700,
+                fontSize: '0.84rem',
+                cursor: detectingNearMe ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>📍</span>
+              <span>
+                {detectingNearMe
+                  ? locale === 'ar'
+                    ? 'جاري تحديد موقعك...'
+                    : 'Detecting GPS...'
+                  : locale === 'ar'
+                  ? 'الأقرب لموقعي (GPS)'
+                  : 'Nearest to Me (GPS)'}
+              </span>
+            </button>
           </div>
 
           <div className="properties-sort-wrap">
@@ -389,11 +526,71 @@ export default function PropertiesPage() {
               onChange={(e) => setSortBy(e.target.value)}
             >
               <option value="recommended">{t.properties_sort_recommended}</option>
+              <option value="nearest">{locale === 'ar' ? 'الأقرب لموقعي الجغرافي' : 'Nearest to My Location'}</option>
               <option value="price_asc">{t.properties_sort_price_asc}</option>
               <option value="price_desc">{t.properties_sort_price_desc}</option>
             </select>
           </div>
         </div>
+
+        {/* Collapsible Interactive Map showing all properties */}
+        {showMap && (
+          <div style={{ marginBottom: '2rem' }}>
+            <InteractiveMap
+              latitude={userCoords?.latitude ?? (sortedProperties[0] ? resolveCoordinates(sortedProperties[0]).latitude : DEFAULT_CAIRO_LAT)}
+              longitude={userCoords?.longitude ?? (sortedProperties[0] ? resolveCoordinates(sortedProperties[0]).longitude : DEFAULT_CAIRO_LNG)}
+              locationContext={
+                !userCoords && city !== 'all'
+                  ? { city }
+                  : sortedProperties[0]
+                  ? {
+                      address: sortedProperties[0].address,
+                      district: sortedProperties[0].district,
+                      city: sortedProperties[0].city,
+                      governorate: sortedProperties[0].governorate,
+                      nearestUniversity: sortedProperties[0].nearestUniversity,
+                    }
+                  : undefined
+              }
+              title={locale === 'ar' ? '🗺️ خريطة السكن الطلابي والأماكن القريبة' : '🗺️ Student Housing Map & Nearby'}
+              subtitle={
+                userCoords
+                  ? locale === 'ar'
+                    ? 'مرتبة حسب الأقرب لموقعك الحالي'
+                    : 'Sorted by proximity to your GPS location'
+                  : city !== 'all'
+                  ? city
+                  : locale === 'ar'
+                  ? 'مواقع العقارات المتاحة والأماكن القريبة'
+                  : 'Available Property Locations & Nearby Places'
+              }
+              height="400px"
+              showNearby={true}
+              syncProfileOnDetect={true}
+              locale={locale}
+              onProfileSynced={(lat, lng) => {
+                setUserCoords({ latitude: lat, longitude: lng });
+                setSortBy('nearest');
+              }}
+              markers={sortedProperties.map((p) => {
+                const c = resolveCoordinates(p);
+                const tTitle =
+                  typeof p.title === 'object' ? p.title[locale] || p.title.ar || p.title.en : String(p.title);
+                const tLoc =
+                  typeof p.location === 'object' ? p.location[locale] || p.location.ar || p.location.en : String(p.location);
+                return {
+                  id: p.id,
+                  latitude: c.latitude,
+                  longitude: c.longitude,
+                  title: tTitle,
+                  subtitle: tLoc,
+                  priceText: `${Number(p.price || 0).toLocaleString()} ${p.currency}`,
+                  href: `/properties/${p.id}`,
+                };
+              })}
+            />
+          </div>
+        )}
 
         {/* State 1: Loading Skeleton Grid */}
         {loading && (

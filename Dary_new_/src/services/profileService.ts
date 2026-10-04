@@ -41,28 +41,24 @@ export class ProfileService {
   }
 
   /**
-   * Updates user profile via PUT /profile (with fallback to PUT /profile/me and PATCH /profile).
+   * Updates user profile via PUT /profile/me.
    * Matches backend upsertProfileSchema.
    */
   static async updateProfile(data: UpsertProfilePayload | Record<string, any>): Promise<any> {
-    try {
-      const res = await ApiClient.put<any>('/profile', data);
-      return res?.data || res;
-    } catch (err: any) {
-      if (err?.status === 404 || err?.statusCode === 404) {
-        try {
-          const res = await ApiClient.put<any>('/profile/me', data);
-          return res?.data || res;
-        } catch (err2: any) {
-          if (err2?.status === 404 || err2?.statusCode === 404) {
-            const res = await ApiClient.patch<any>('/profile', data);
-            return res?.data || res;
-          }
-          throw err2;
-        }
-      }
-      throw err;
-    }
+    const res = await ApiClient.put<any>('/profile/me', data);
+    return res?.data || res;
+  }
+
+  /**
+   * Updates only user's GPS coordinates (latitude & longitude) on their profile.
+   * Matches backend upsertProfileService (requires both latitude and longitude together).
+   */
+  static async updateLocation(latitude: number, longitude: number): Promise<any> {
+    const payload = {
+      latitude: Number(latitude),
+      longitude: Number(longitude),
+    };
+    return this.updateProfile(payload);
   }
 
   /**

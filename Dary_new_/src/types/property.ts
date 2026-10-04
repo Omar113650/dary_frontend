@@ -41,6 +41,8 @@ export interface Property {
   city?: string;
   district?: string;
   address?: string;
+  latitude?: number;
+  longitude?: number;
   nearestUniversity?: string;
   distanceToUniversity?: number;
   isFurnished?: boolean;

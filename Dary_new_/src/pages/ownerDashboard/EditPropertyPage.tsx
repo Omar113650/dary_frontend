@@ -2,6 +2,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { propertyService } from '../../services/propertyService';
+import InteractiveMap from '../../components/common/InteractiveMap';
+import {
+  LocationService,
+  resolveCoordinates,
+  isCoordinateValidForContext,
+  isMeaningfulStreetAddress,
+  formatCleanAddress,
+} from '../../services/locationService';
 
 const COMMON_AMENITIES = [
   'واي فاي (WiFi)',
@@ -44,6 +52,8 @@ export default function EditPropertyPage() {
   const [address, setAddress] = useState('');
   const [nearestUniversity, setNearestUniversity] = useState('');
   const [distanceToUniversity, setDistanceToUniversity] = useState<number | ''>('');
+  const [latitude, setLatitude] = useState<number | ''>('');
+  const [longitude, setLongitude] = useState<number | ''>('');
 
   // Features & Pricing
   const [startingPrice, setStartingPrice] = useState<number | ''>('');
@@ -103,6 +113,8 @@ export default function EditPropertyPage() {
       setAddress(prop.address || '');
       setNearestUniversity(prop.nearestUniversity || '');
       setDistanceToUniversity(prop.distanceToUniversity !== undefined ? Number(prop.distanceToUniversity) : '');
+      setLatitude(prop.latitude !== undefined ? Number(prop.latitude) : '');
+      setLongitude(prop.longitude !== undefined ? Number(prop.longitude) : '');
 
       setStartingPrice(prop.price ? Number(prop.price) : '');
       setIsFurnished(prop.isFurnished !== false);
@@ -151,6 +163,20 @@ export default function EditPropertyPage() {
 
     setSubmitting(true);
     try {
+      const locCtx = {
+        id,
+        address,
+        district,
+        city,
+        governorate,
+        nearestUniversity,
+        title,
+      };
+
+      const cleanFinalAddress = isMeaningfulStreetAddress(address, locCtx)
+        ? address.trim()
+        : formatCleanAddress(locCtx, null, 'ar');
+
       const payload: Record<string, any> = {
         title: title.trim(),
         description: description.trim(),
@@ -161,7 +187,7 @@ export default function EditPropertyPage() {
         governorate: governorate.trim(),
         city: city.trim(),
         district: district.trim(),
-        address: address.trim(),
+        address: cleanFinalAddress,
         nearestUniversity: nearestUniversity.trim(),
         startingPrice: Number(startingPrice),
         isFurnished,
@@ -172,6 +198,21 @@ export default function EditPropertyPage() {
       };
 
       if (distanceToUniversity !== '') payload.distanceToUniversity = Number(distanceToUniversity);
+
+      let finalLat = latitude !== '' && !Number.isNaN(Number(latitude)) ? Number(latitude) : null;
+      let finalLng = longitude !== '' && !Number.isNaN(Number(longitude)) ? Number(longitude) : null;
+
+      if (finalLat === null || finalLng === null || !isCoordinateValidForContext(finalLat, finalLng, locCtx)) {
+        const geocoded = await LocationService.geocodeAddress(locCtx);
+        const fallback = resolveCoordinates(locCtx);
+        finalLat = geocoded?.latitude ?? fallback.latitude;
+        finalLng = geocoded?.longitude ?? fallback.longitude;
+        setLatitude(finalLat);
+        setLongitude(finalLng);
+      }
+
+      payload.latitude = finalLat;
+      payload.longitude = finalLng;
       if (rules.trim()) payload.rules = rules.trim();
       if (deposit !== '') payload.deposit = Number(deposit);
       if (floor !== '') payload.floor = Number(floor);
@@ -504,6 +545,64 @@ export default function EditPropertyPage() {
                 style={inputStyle}
               />
             </div>
+            <div>
+              <label style={labelStyle}>{locale === 'ar' ? 'خط العرض (Latitude - اختياري)' : 'Latitude (Optional)'}</label>
+              <input
+                type="number"
+                step="any"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="30.0444"
+                style={{ ...inputStyle, direction: 'ltr' }}
+              />
+            </div>
+            <div>
+              <label style={labelStyle}>{locale === 'ar' ? 'خط الطول (Longitude - اختياري)' : 'Longitude (Optional)'}</label>
+              <input
+                type="number"
+                step="any"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value === '' ? '' : Number(e.target.value))}
+                placeholder="31.2357"
+                style={{ ...inputStyle, direction: 'ltr' }}
+              />
+            </div>
+          </div>
+
+          {/* Interactive Map Picker */}
+          <div style={{ marginTop: '1.25rem' }}>
+            <InteractiveMap
+              latitude={latitude}
+              longitude={longitude}
+              locationContext={{
+                id,
+                address,
+                district,
+                city,
+                governorate,
+                nearestUniversity,
+                title,
+              }}
+              title={title || (locale === 'ar' ? 'موقع العقار على الخريطة' : 'Property Location on Map')}
+              subtitle={[address, district, city, governorate].filter(Boolean).join('، ')}
+              height="340px"
+              editable={true}
+              showNearby={true}
+              syncProfileOnDetect={true}
+              locale={locale}
+              onLocationChange={(lat, lng, rev) => {
+                setLatitude(lat);
+                setLongitude(lng);
+                if (rev?.address) setAddress(rev.address);
+                if (rev?.district) setDistrict(rev.district);
+                if (rev?.city) setCity(rev.city);
+                if (rev?.governorate) setGovernorate(rev.governorate);
+                if (rev?.nearestUniversity) setNearestUniversity(rev.nearestUniversity);
+                if (rev?.distanceToUniversityKm !== undefined) {
+                  setDistanceToUniversity(rev.distanceToUniversityKm);
+                }
+              }}
+            />
           </div>
         </div>
 

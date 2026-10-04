@@ -1,5 +1,14 @@
 import { ApiClient } from './apiClient';
 import type { Property, PropertyResponse } from '../types/property';
+import {
+  resolveCoordinates,
+  isCoordinateValidForContext,
+  isMeaningfulStreetAddress,
+  formatCleanAddress,
+  matchKnownEgyptLocation,
+  normalizeUniversityName,
+  normalizeArabicForSearch,
+} from './locationService';
 export type { PropertyResponse };
 
 export interface PropertyFilterParams {
@@ -38,7 +47,7 @@ export function getCachedProperty(id: string): Property | null {
     try {
       const stored = sessionStorage.getItem(`dary_prop_${id}`);
       if (stored) {
-        const parsed = JSON.parse(stored);
+        const parsed = normalizeProperty(JSON.parse(stored));
         propertyMemoryCache.set(id, parsed);
         return parsed;
       }
@@ -65,26 +74,110 @@ export function normalizeProperty(raw: any): Property {
       ? { ar: raw.title.ar || raw.title.en || '', en: raw.title.en || raw.title.ar || '' }
       : { ar: String(raw.title || ''), en: String(raw.title || '') };
 
-  const governorate = raw.governorate || '';
-  const city = raw.city || '';
-  const district = raw.district || '';
-  const address = raw.address || '';
-  const nearestUniversity = raw.nearestUniversity || '';
-  const distanceToUniversity =
+  const rawGovernorate = raw.governorate || '';
+  const rawCity = raw.city || '';
+  const rawDistrict = raw.district || '';
+  const rawAddress = raw.address || '';
+  const rawNearestUniv = raw.nearestUniversity || '';
+  const rawDistToUniv =
     raw.distanceToUniversity !== undefined && raw.distanceToUniversity !== ''
       ? Number(raw.distanceToUniversity)
       : undefined;
 
+  const initialLocationContext = {
+    id,
+    address: rawAddress,
+    district: rawDistrict,
+    city: rawCity,
+    governorate: rawGovernorate,
+    nearestUniversity: rawNearestUniv,
+    title,
+  };
+
+  // Detect if title/address specifies a specific city (e.g. "سكن طلابي ف طنطا") that contradicts placeholder governorate/city ("الجيزه")
+  const matchedLoc = matchKnownEgyptLocation(initialLocationContext);
+  const hasGovContradiction =
+    matchedLoc &&
+    !matchedLoc.isGenericFallback &&
+    matchedLoc.governorateAr &&
+    rawGovernorate &&
+    normalizeArabicForSearch(rawGovernorate) !== normalizeArabicForSearch(matchedLoc.governorateAr);
+
+  const governorate = hasGovContradiction
+    ? matchedLoc!.governorateAr || rawGovernorate
+    : rawGovernorate || matchedLoc?.governorateAr || '';
+  const city = hasGovContradiction
+    ? matchedLoc!.cityAr || rawCity
+    : rawCity || matchedLoc?.cityAr || '';
+  const isVagueDistrict =
+    !rawDistrict ||
+    normalizeArabicForSearch(rawDistrict) === 'شارع مصر' ||
+    /^(?:شارع|ش)\s*[0-9٠-٩]{1,2}$/.test(normalizeArabicForSearch(rawDistrict));
+  const district = !isVagueDistrict && !hasGovContradiction
+    ? rawDistrict
+    : matchedLoc?.districtAr || '';
+
   let locAr = '';
   let locEn = '';
-  if (typeof raw.location === 'object' && raw.location !== null) {
+  if (typeof raw.location === 'object' && raw.location !== null && !hasGovContradiction && !isVagueDistrict) {
     locAr = raw.location.ar || (typeof raw.location.city === 'object' ? raw.location.city.ar : raw.location.city) || '';
     locEn = raw.location.en || (typeof raw.location.city === 'object' ? raw.location.city.en : raw.location.city) || '';
   } else {
-    const locParts = [city, district, governorate].filter((val, idx, arr) => Boolean(val) && arr.indexOf(val) === idx);
+    const locParts = [district, city, governorate].filter((val, idx, arr) => Boolean(val) && arr.indexOf(val) === idx);
     locAr = locParts.join('، ') || String(raw.location || '');
     locEn = locParts.join(', ') || String(raw.location || '');
   }
+
+  const locationContext = {
+    id,
+    address: rawAddress,
+    district,
+    city,
+    governorate,
+    nearestUniversity: rawNearestUniv,
+    location: { ar: locAr, en: locEn },
+    title,
+  };
+
+  // Validate explicit coordinates against the property's actual city/governorate/university
+  const rawLat =
+    raw.latitude !== undefined && raw.latitude !== null && raw.latitude !== ''
+      ? Number(raw.latitude)
+      : raw.lat !== undefined && raw.lat !== null && raw.lat !== ''
+      ? Number(raw.lat)
+      : undefined;
+  const rawLng =
+    raw.longitude !== undefined && raw.longitude !== null && raw.longitude !== ''
+      ? Number(raw.longitude)
+      : raw.lng !== undefined && raw.lng !== null && raw.lng !== ''
+      ? Number(raw.lng)
+      : undefined;
+
+  const hasValidExplicitCoords = isCoordinateValidForContext(rawLat, rawLng, locationContext);
+  const resolvedCoords = resolveCoordinates({
+    ...locationContext,
+    latitude: hasValidExplicitCoords ? rawLat : undefined,
+    longitude: hasValidExplicitCoords ? rawLng : undefined,
+  });
+
+  const latitude = hasValidExplicitCoords ? rawLat : resolvedCoords.latitude;
+  const longitude = hasValidExplicitCoords ? rawLng : resolvedCoords.longitude;
+
+  const normalizedUniv = normalizeUniversityName(rawNearestUniv, latitude, longitude, 'ar');
+  const nearestUniversity = normalizedUniv.name || rawNearestUniv;
+  const distanceToUniversity =
+    hasGovContradiction && normalizedUniv.distanceKm !== undefined
+      ? normalizedUniv.distanceKm
+      : rawDistToUniv ?? normalizedUniv.distanceKm;
+
+  // Clean up address if rawAddress is random placeholder text (e.g., "شارع 2", "شارع مصر", "تارا رات")
+  const address = isMeaningfulStreetAddress(rawAddress, locationContext)
+    ? rawAddress
+    : formatCleanAddress(
+        { ...locationContext, nearestUniversity },
+        null,
+        'ar'
+      );
 
   const rawType = raw.propertyType || raw.type || '';
   const typeMap: Record<string, { ar: string; en: string }> = {
@@ -304,6 +397,8 @@ export function normalizeProperty(raw: any): Property {
     city,
     district,
     address,
+    latitude,
+    longitude,
     nearestUniversity,
     distanceToUniversity,
     isFurnished,

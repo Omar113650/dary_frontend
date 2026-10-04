@@ -1,5 +1,4 @@
 import { ApiClient } from './apiClient';
-import { BookingService } from './bookingService';
 import type { Property } from '../types/property';
 
 // ── In-Memory & Session Storage Booking Cache ───────────────────────────────
@@ -37,52 +36,72 @@ export function cachePropertyBookings(propertyId: string, bookings: any[]): void
 }
 
 /**
- * Proactively fetch all active bookings across the platform so that regular users
- * exploring properties in PropertiesPage and HomePage can see exact booking dates.
+ * Proactively fetch all active bookings across the platform (Admin only).
+ * Skips network requests completely for guests and non-admin users to avoid 401/403 errors.
  */
 export async function fetchGlobalActiveBookings(): Promise<void> {
   if (hasFetchedGlobalBookings) return;
+
+  // Guard: Only authenticated admins have permission for /dashboard/bookings or /booking
+  const token = ApiClient.getAccessToken();
+  if (!token || ApiClient.isAccessTokenExpired(token)) {
+    return;
+  }
+
+  let isAdminUser = false;
+  if (typeof window !== 'undefined') {
+    try {
+      const cached = localStorage.getItem('dary_user');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        const u = parsed?.user || parsed?.profile?.user || parsed;
+        const roleStr = String(u?.role || parsed?.role || '').toLowerCase();
+        const rolesArr = u?.roles || parsed?.roles || u?.userRoles || parsed?.userRoles;
+        if (roleStr === 'admin' || roleStr === 'super_admin' || roleStr === 'superadmin') {
+          isAdminUser = true;
+        } else if (Array.isArray(rolesArr)) {
+          isAdminUser = rolesArr.some((r: any) => {
+            const name = String(typeof r === 'string' ? r : r?.role?.name || r?.name || '').toLowerCase();
+            return name === 'admin' || name === 'super_admin' || name === 'superadmin';
+          });
+        }
+      }
+    } catch {}
+  }
+
+  if (!isAdminUser) {
+    return;
+  }
+
   hasFetchedGlobalBookings = true;
 
-  const candidateFetchers = [
-    () => ApiClient.get<any>('/dashboard/bookings?limit=100'),
-    () => BookingService.getAllBookings({ limit: 100 }),
-    () => ApiClient.get<any>('/booking?limit=100'),
-    () => ApiClient.get<any>('/bookings?limit=100'),
-    () => ApiClient.get<any>('/dashboard/booking/calendar?limit=100'),
-  ];
+  try {
+    const res = await ApiClient.get<any>('/dashboard/bookings?limit=100');
+    const list: any[] =
+      (Array.isArray(res?.data?.bookings) ? res.data.bookings : null) ||
+      (Array.isArray(res?.data?.data) ? res.data.data : null) ||
+      (Array.isArray(res?.data) ? res.data : null) ||
+      (Array.isArray(res?.bookings) ? res.bookings : null) ||
+      (Array.isArray(res?.items) ? res.items : null) ||
+      (Array.isArray(res) ? res : []);
 
-  for (const fetcher of candidateFetchers) {
-    try {
-      const res = await fetcher();
-      const list: any[] =
-        (Array.isArray(res?.data?.bookings) ? res.data.bookings : null) ||
-        (Array.isArray(res?.data?.data) ? res.data.data : null) ||
-        (Array.isArray(res?.data) ? res.data : null) ||
-        (Array.isArray(res?.bookings) ? res.bookings : null) ||
-        (Array.isArray(res?.items) ? res.items : null) ||
-        (Array.isArray(res) ? res : []);
-
-      if (list.length > 0) {
-        // Group by propertyId
-        const grouped = new Map<string, any[]>();
-        for (const bk of list) {
-          const pId = String(bk.propertyId || bk.property_id || bk.property?.id || '');
-          if (pId) {
-            const arr = grouped.get(pId) || [];
-            arr.push(bk);
-            grouped.set(pId, arr);
-          }
+    if (list.length > 0) {
+      const grouped = new Map<string, any[]>();
+      for (const bk of list) {
+        const pId = String(bk.propertyId || bk.property_id || bk.property?.id || '');
+        if (pId) {
+          const arr = grouped.get(pId) || [];
+          arr.push(bk);
+          grouped.set(pId, arr);
         }
-
-        grouped.forEach((bks, pId) => {
-          cachePropertyBookings(pId, bks);
-        });
-        return;
       }
-    } catch {
-      // Continue to next candidate
+
+      grouped.forEach((bks, pId) => {
+        cachePropertyBookings(pId, bks);
+      });
     }
+  } catch {
+    // Ignore error silently
   }
 }
 

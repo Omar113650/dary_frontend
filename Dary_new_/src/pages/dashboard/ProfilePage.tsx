@@ -5,6 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useLocale } from '../../utils/LocaleContext';
 import { ProfileService } from '../../services/profileService';
 import { AuthService } from '../../services/authService';
+import InteractiveMap from '../../components/common/InteractiveMap';
 
 export default function ProfilePage() {
   const { user, refreshUser, logout, isAdmin } = useAuth();
@@ -50,6 +51,8 @@ export default function ProfilePage() {
     gender: '',
     birthDate: '',
     address: '',
+    latitude: '' as string | number,
+    longitude: '' as string | number,
     bio: '',
     avatar: '',
   });
@@ -59,8 +62,8 @@ export default function ProfilePage() {
     setError(null);
     try {
       const data = await ProfileService.getMyProfile();
-      // Defensive field mapping
-      const p = data?.profile || {};
+      // Defensive field mapping (getMyProfileService spreads profile at top-level and nests user under data.user)
+      const p = data?.profile || data || {};
       const u = data?.user || data || {};
 
       let formattedBirthDate = '';
@@ -85,6 +88,8 @@ export default function ProfilePage() {
         gender: (p.gender || u.gender || '').toUpperCase(),
         birthDate: formattedBirthDate,
         address: p.address || u.address || '',
+        latitude: p.latitude !== undefined && p.latitude !== null ? p.latitude : (u.latitude ?? ''),
+        longitude: p.longitude !== undefined && p.longitude !== null ? p.longitude : (u.longitude ?? ''),
         bio: p.bio || u.bio || '',
         avatar: u.avatar || user?.avatar || '',
       });
@@ -168,11 +173,32 @@ export default function ProfilePage() {
     e.preventDefault();
     if (isSaving) return;
 
+    const hasLat =
+      formData.latitude !== '' &&
+      formData.latitude !== null &&
+      formData.latitude !== undefined &&
+      !Number.isNaN(Number(formData.latitude));
+    const hasLng =
+      formData.longitude !== '' &&
+      formData.longitude !== null &&
+      formData.longitude !== undefined &&
+      !Number.isNaN(Number(formData.longitude));
+
+    // Matches backend upsertProfileService: both latitude and longitude must be provided together if either is present
+    if ((hasLat && !hasLng) || (!hasLat && hasLng)) {
+      setError(
+        locale === 'ar'
+          ? 'يرجى إدخال خط العرض (Latitude) وخط الطول (Longitude) معاً، أو الضغط على زر تحديد موقعي الحالي (GPS).'
+          : 'Both latitude and longitude are required together.'
+      );
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     setSaveSuccess(false);
 
-    // Payload mapped strictly to backend upsertProfileSchema
+    // Payload mapped strictly to backend upsertProfileService
     const updatePayload: Record<string, any> = {};
     if (formData.university && formData.university.trim().length >= 2) {
       updatePayload.university = formData.university.trim();
@@ -191,6 +217,10 @@ export default function ProfilePage() {
     }
     if (formData.address && formData.address.trim().length >= 5) {
       updatePayload.address = formData.address.trim();
+    }
+    if (hasLat && hasLng) {
+      updatePayload.latitude = Number(formData.latitude);
+      updatePayload.longitude = Number(formData.longitude);
     }
     if (formData.gender && ['MALE', 'FEMALE'].includes(formData.gender.toUpperCase())) {
       updatePayload.gender = formData.gender.toUpperCase();
@@ -670,6 +700,92 @@ export default function ProfilePage() {
                 }}
               />
             </div>
+
+            {/* Latitude & Longitude (Optional / Auto-filled via GPS or Map) */}
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'خط العرض (Latitude - اختياري)' : 'Latitude (Optional)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                name="latitude"
+                value={formData.latitude}
+                onChange={handleFieldChange}
+                placeholder="30.0444"
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                  direction: 'ltr',
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ display: 'block', fontSize: '0.85rem', fontWeight: 600, color: 'var(--dary-navy)', marginBottom: '0.4rem' }}>
+                {locale === 'ar' ? 'خط الطول (Longitude - اختياري)' : 'Longitude (Optional)'}
+              </label>
+              <input
+                type="number"
+                step="any"
+                name="longitude"
+                value={formData.longitude}
+                onChange={handleFieldChange}
+                placeholder="31.2357"
+                style={{
+                  width: '100%',
+                  padding: '0.7rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--dary-border)',
+                  fontSize: '0.9rem',
+                  direction: 'ltr',
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Interactive Map & Browser Geolocation API Sync */}
+          <div style={{ marginBottom: '1.75rem' }}>
+            <InteractiveMap
+              latitude={formData.latitude}
+              longitude={formData.longitude}
+              locationContext={{
+                address: formData.address,
+                city: formData.city,
+                university: formData.university,
+                governorate: formData.country,
+              }}
+              title={locale === 'ar' ? '📍 موقعي الجغرافي والأماكن القريبة مني' : '📍 My GPS Location & Nearby Places'}
+              subtitle={formData.address || formData.city || formData.university || ''}
+              height="340px"
+              editable={true}
+              showNearby={true}
+              syncProfileOnDetect={true}
+              autoDetectOnMount={true}
+              locale={locale}
+              onLocationChange={(lat, lng, rev) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  latitude: lat,
+                  longitude: lng,
+                  address: prev.address || rev?.address || prev.address,
+                  city: prev.city || rev?.city || prev.city,
+                }));
+              }}
+              onProfileSynced={(lat, lng, rev) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  latitude: lat,
+                  longitude: lng,
+                  address: prev.address || rev?.address || prev.address,
+                  city: prev.city || rev?.city || prev.city,
+                }));
+                refreshUser().catch(() => {});
+              }}
+            />
           </div>
 
           {/* Bio */}

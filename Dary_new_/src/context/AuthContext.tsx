@@ -136,11 +136,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = useCallback(async () => {
     let token = ApiClient.getAccessToken();
     const refreshToken = ApiClient.getRefreshToken();
-    const isExplicitlyLoggedOut =
-      typeof window !== 'undefined' && localStorage.getItem('dary_logged_out') === 'true';
 
-    // If no local tokens AND user explicitly logged out, skip network call
-    if (!token && !refreshToken && isExplicitlyLoggedOut) {
+    // If no local tokens exist, user is a guest — skip network call to avoid 401
+    if (!token && !refreshToken) {
       setUser(null);
       setRole(null);
       saveUserLocally(null);
