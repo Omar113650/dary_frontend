@@ -1,4 +1,5 @@
 import { ApiClient } from './apiClient';
+import { isPropertyDeletedOrArchived } from './propertyService';
 
 export interface OwnerPropertyStatusItem {
   status: string;
@@ -227,7 +228,7 @@ export class OwnerService {
       (Array.isArray(res?.data) ? res.data : null) ||
       (Array.isArray(res?.properties) ? res.properties : null) ||
       (Array.isArray(res) ? res : []);
-    return data;
+    return data.filter((item: any) => !isPropertyDeletedOrArchived(item));
   }
 
   /**

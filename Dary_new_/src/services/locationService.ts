@@ -22,6 +22,20 @@ export interface ReverseGeocodeResult {
   distanceToUniversityKm?: number;
 }
 
+export interface AddressSuggestion {
+  id: string;
+  title: string;
+  subtitle: string;
+  fullAddress: string;
+  latitude: number;
+  longitude: number;
+  governorate: string;
+  city: string;
+  district: string;
+  nearestUniversity: string;
+  distanceToUniversityKm: number;
+}
+
 export interface NearbyPlace {
   id: string;
   name: string;
@@ -1924,6 +1938,275 @@ export class LocationService {
     }
 
     return null;
+  }
+
+  /**
+   * 3b. Live Address Autocomplete Suggestions across all Egyptian governorates, cities, villages, streets & universities.
+   * Allows an owner who is NOT at the apartment to type any address/street/village/link and pick the exact spot.
+   */
+  static async searchAddressSuggestions(
+    rawQuery: string,
+    locale: 'ar' | 'en' = 'ar'
+  ): Promise<AddressSuggestion[]> {
+    const q = (rawQuery || '').trim();
+    if (q.length < 2) return [];
+
+    const results: AddressSuggestion[] = [];
+    const seenCoords = new Set<string>();
+
+    const addSuggestion = (item: {
+      id: string;
+      title: string;
+      subtitle: string;
+      fullAddress: string;
+      lat: number;
+      lng: number;
+      governorate?: string;
+      city?: string;
+      district?: string;
+    }) => {
+      if (!Number.isFinite(item.lat) || !Number.isFinite(item.lng)) return;
+      if (item.lat < 21.5 || item.lat > 32.0 || item.lng < 24.5 || item.lng > 37.0) return;
+      const coordKey = `${item.lat.toFixed(3)}:${item.lng.toFixed(3)}`;
+      if (seenCoords.has(coordKey)) return;
+      seenCoords.add(coordKey);
+
+      const nearest = findNearestEgyptUniversity(item.lat, item.lng, locale);
+      results.push({
+        id: item.id,
+        title: item.title,
+        subtitle: item.subtitle,
+        fullAddress: item.fullAddress,
+        latitude: Number(item.lat.toFixed(6)),
+        longitude: Number(item.lng.toFixed(6)),
+        governorate: (item.governorate || nearest.governorateAr || '').replace(/^محافظة\s+/, '').trim(),
+        city: (item.city || nearest.cityAr || '').trim(),
+        district: (item.district || '').trim(),
+        nearestUniversity: nearest.name,
+        distanceToUniversityKm: nearest.distanceKm,
+      });
+    };
+
+    // 1. Direct coordinates or Google Maps URL
+    const direct = extractCoordinatesFromText(q);
+    if (direct) {
+      const rev = await this.reverseGeocode(direct.latitude, direct.longitude, locale);
+      addSuggestion({
+        id: 'direct-coords',
+        title: rev?.address || `${direct.latitude.toFixed(5)}, ${direct.longitude.toFixed(5)}`,
+        subtitle: rev ? `${rev.city}، محافظة ${rev.governorate}` : 'إحداثيات مباشرة / رابط خريطة',
+        fullAddress: rev?.address || `${direct.latitude.toFixed(5)}, ${direct.longitude.toFixed(5)}`,
+        lat: direct.latitude,
+        lng: direct.longitude,
+        governorate: rev?.governorate,
+        city: rev?.city,
+        district: rev?.district,
+      });
+    }
+
+    // 2. Instant local matches from verified Egyptian locations & universities
+    const normQ = normalizeArabicForSearch(q);
+    if (normQ.length >= 2) {
+      for (let i = 0; i < EGYPT_LOCATION_COORDS.length; i++) {
+        const loc = EGYPT_LOCATION_COORDS[i];
+        if (loc.isGenericFallback) continue;
+        const hay = normalizeArabicForSearch(
+          `${loc.keywords.join(' ')} ${loc.labelAr} ${loc.labelEn} ${loc.districtAr || ''} ${loc.cityAr || ''} ${loc.governorateAr || ''}`
+        );
+        if (hay.includes(normQ)) {
+          addSuggestion({
+            id: `known-loc-${i}`,
+            title: locale === 'ar' ? loc.labelAr : loc.labelEn,
+            subtitle: `${loc.cityAr || ''}، محافظة ${loc.governorateAr || ''}`,
+            fullAddress: locale === 'ar' ? loc.labelAr : loc.labelEn,
+            lat: loc.lat,
+            lng: loc.lng,
+            governorate: loc.governorateAr,
+            city: loc.cityAr,
+            district: loc.districtAr || loc.labelAr.split('،')[0],
+          });
+          if (results.length >= 4) break;
+        }
+      }
+    }
+
+    // 3. Live query to OpenStreetMap Nominatim + ArcGIS in parallel
+    const [nomRes, arcRes] = await Promise.allSettled([
+      fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=6&countrycodes=eg&accept-language=${locale},ar,en&q=${encodeURIComponent(
+          q
+        )}`,
+        { headers: { Accept: 'application/json' } }
+      ).then((r) => (r.ok ? r.json() : [])),
+      fetch(
+        `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(
+          q
+        )}&countryCode=EGY&f=json&outFields=Match_addr,PlaceName,StName,Nbrhd,District,City,Subregion,Region&langCode=ar&maxLocations=5`
+      ).then((r) => (r.ok ? r.json() : null)),
+    ]);
+
+    if (nomRes.status === 'fulfilled' && Array.isArray(nomRes.value)) {
+      for (let i = 0; i < nomRes.value.length; i++) {
+        const hit = nomRes.value[i];
+        const lat = Number(hit.lat);
+        const lng = Number(hit.lon);
+        const addr = hit.address || {};
+        const gov = cleanOsmDistrictOrCityName(addr.state || '').replace(/^محافظة\s+/, '').trim();
+        const city = cleanOsmDistrictOrCityName(
+          addr.city || addr.town || addr.village || addr.municipality || addr.county || addr.state_district || ''
+        )
+          .replace(/\s*\(قسم\s*\d+\)/g, '')
+          .trim();
+        const dist = cleanOsmDistrictOrCityName(
+          addr.suburb || addr.neighbourhood || addr.quarter || addr.city_district || addr.hamlet || ''
+        );
+        const road = addr.road || addr.street || addr.pedestrian || '';
+        const placeName = hit.name || road || dist || city || (hit.display_name || '').split('،')[0] || q;
+        const fullParts = [placeName, road && road !== placeName ? road : '', dist, city, gov ? `محافظة ${gov}` : '']
+          .filter(Boolean)
+          .filter((v, idx, arr) => arr.indexOf(v) === idx);
+        const fullAddr = fullParts.join('، ');
+
+        addSuggestion({
+          id: `nom-${hit.place_id || i}`,
+          title: [placeName, dist && dist !== placeName ? dist : ''].filter(Boolean).join(' - '),
+          subtitle: [city, gov ? `محافظة ${gov}` : ''].filter(Boolean).join('، '),
+          fullAddress: fullAddr || hit.display_name || placeName,
+          lat,
+          lng,
+          governorate: gov,
+          city: city || gov,
+          district: dist || road,
+        });
+      }
+    }
+
+    if (arcRes.status === 'fulfilled' && Array.isArray(arcRes.value?.candidates)) {
+      for (let i = 0; i < arcRes.value.candidates.length; i++) {
+        const cand = arcRes.value.candidates[i];
+        if (Number(cand?.score || 0) < 75) continue;
+        const lat = Number(cand?.location?.y);
+        const lng = Number(cand?.location?.x);
+        const attr = cand?.attributes || {};
+        const gov = String(attr.Region || '').replace(/^محافظة\s+/, '').trim();
+        const city = cleanOsmDistrictOrCityName(String(attr.City || attr.Subregion || ''));
+        const dist = cleanOsmDistrictOrCityName(String(attr.Nbrhd || attr.District || attr.StName || ''));
+        const matchAddr = String(cand.address || attr.Match_addr || '').trim();
+        if (!matchAddr) continue;
+
+        addSuggestion({
+          id: `arc-${i}`,
+          title: attr.PlaceName || attr.StName || matchAddr.split('،')[0] || matchAddr.split(',')[0],
+          subtitle: [dist, city, gov ? `محافظة ${gov}` : ''].filter(Boolean).join('، '),
+          fullAddress: matchAddr,
+          lat,
+          lng,
+          governorate: gov,
+          city: city || gov,
+          district: dist,
+        });
+      }
+    }
+
+    return results.slice(0, 7);
+  }
+
+  /**
+   * 3c. Resolves a freeform address query or partial form fields WITHOUT being blocked by stale coordinates or previous city/governorate.
+   * Returns exact coordinates + full reverse-geocoded breakdown to auto-fill all 8 location inputs.
+   */
+  static async resolveFreeformAddress(
+    input: {
+      freeformQuery?: string;
+      address?: string;
+      district?: string;
+      city?: string;
+      governorate?: string;
+      nearestUniversity?: string;
+    },
+    locale: 'ar' | 'en' = 'ar'
+  ): Promise<{
+    latitude: number;
+    longitude: number;
+    governorate: string;
+    city: string;
+    district: string;
+    address: string;
+    nearestUniversity: string;
+    distanceToUniversityKm: number;
+    reverseResult: ReverseGeocodeResult | null;
+  } | null> {
+    const primaryText = (input.freeformQuery || '').trim();
+    const combinedFields = [input.address, input.district, input.city, input.governorate, input.nearestUniversity]
+      .map((s) => (s || '').trim())
+      .filter(Boolean)
+      .join('، ');
+
+    const queryToSearch = primaryText || combinedFields;
+    if (!queryToSearch) return null;
+
+    // 1. Check direct coordinates or Google Maps link
+    const direct = extractCoordinatesFromText(queryToSearch);
+    if (direct) {
+      const rev = await this.reverseGeocode(direct.latitude, direct.longitude, locale);
+      const nearest = findNearestEgyptUniversity(direct.latitude, direct.longitude, locale);
+      return {
+        latitude: direct.latitude,
+        longitude: direct.longitude,
+        governorate: rev?.governorate || nearest.governorateAr,
+        city: rev?.city || nearest.cityAr,
+        district: rev?.district || rev?.street || '',
+        address: rev?.address || `${direct.latitude.toFixed(5)}, ${direct.longitude.toFixed(5)}`,
+        nearestUniversity: rev?.nearestUniversity || nearest.name,
+        distanceToUniversityKm: rev?.distanceToUniversityKm ?? nearest.distanceKm,
+        reverseResult: rev,
+      };
+    }
+
+    // 2. Search suggestions using our unbiased Egypt-wide search
+    const suggestions = await this.searchAddressSuggestions(queryToSearch, locale);
+    if (suggestions.length > 0) {
+      const best = suggestions[0];
+      const rev = await this.reverseGeocode(best.latitude, best.longitude, locale);
+      return {
+        latitude: best.latitude,
+        longitude: best.longitude,
+        governorate: rev?.governorate || best.governorate,
+        city: rev?.city || best.city,
+        district: rev?.district || best.district || rev?.street || '',
+        address: rev?.address || best.fullAddress,
+        nearestUniversity: rev?.nearestUniversity || best.nearestUniversity,
+        distanceToUniversityKm: rev?.distanceToUniversityKm ?? best.distanceToUniversityKm,
+        reverseResult: rev,
+      };
+    }
+
+    // 3. Fallback to geocodeAddress without stale constraints
+    const freshItem = primaryText
+      ? { address: primaryText }
+      : {
+          address: input.address,
+          district: input.district,
+          city: input.city,
+          governorate: input.governorate,
+          nearestUniversity: input.nearestUniversity,
+        };
+    const geocoded = await this.geocodeAddress(freshItem);
+    const coords = geocoded || resolveCoordinates(freshItem);
+    const rev = await this.reverseGeocode(coords.latitude, coords.longitude, locale);
+    const nearest = findNearestEgyptUniversity(coords.latitude, coords.longitude, locale);
+
+    return {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      governorate: rev?.governorate || input.governorate || nearest.governorateAr,
+      city: rev?.city || input.city || nearest.cityAr,
+      district: rev?.district || input.district || rev?.street || '',
+      address: rev?.address || input.address || primaryText,
+      nearestUniversity: rev?.nearestUniversity || nearest.name,
+      distanceToUniversityKm: rev?.distanceToUniversityKm ?? nearest.distanceKm,
+      reverseResult: rev,
+    };
   }
 
   /**

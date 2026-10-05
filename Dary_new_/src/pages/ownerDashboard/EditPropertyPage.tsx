@@ -9,6 +9,7 @@ import {
   isCoordinateValidForContext,
   isMeaningfulStreetAddress,
   formatCleanAddress,
+  type AddressSuggestion,
 } from '../../services/locationService';
 
 const COMMON_AMENITIES = [
@@ -54,6 +55,154 @@ export default function EditPropertyPage() {
   const [distanceToUniversity, setDistanceToUniversity] = useState<number | ''>('');
   const [latitude, setLatitude] = useState<number | ''>('');
   const [longitude, setLongitude] = useState<number | ''>('');
+
+  // Smart Address Lookup & Auto-fill
+  const [smartAddressQuery, setSmartAddressQuery] = useState('');
+  const [smartSuggestions, setSmartSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showSmartSuggestions, setShowSmartSuggestions] = useState(false);
+  const [resolvingAddress, setResolvingAddress] = useState(false);
+  const [addressResolveMsg, setAddressResolveMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  useEffect(() => {
+    const q = smartAddressQuery.trim();
+    if (q.length < 2) {
+      setSmartSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const list = await LocationService.searchAddressSuggestions(q, locale);
+        if (!cancelled) {
+          setSmartSuggestions(list);
+        }
+      } catch {
+        // ignore
+      }
+    }, 320);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [smartAddressQuery, locale]);
+
+  const applyResolvedLocation = async (
+    lat: number,
+    lng: number,
+    initialData?: {
+      address?: string;
+      district?: string;
+      city?: string;
+      governorate?: string;
+      nearestUniversity?: string;
+      distanceToUniversityKm?: number;
+    }
+  ) => {
+    const cleanLat = Number(lat.toFixed(6));
+    const cleanLng = Number(lng.toFixed(6));
+    setLatitude(cleanLat);
+    setLongitude(cleanLng);
+
+    if (initialData?.governorate) setGovernorate(initialData.governorate);
+    if (initialData?.city) setCity(initialData.city);
+    if (initialData?.district) setDistrict(initialData.district);
+    if (initialData?.address) setAddress(initialData.address);
+    if (initialData?.nearestUniversity) setNearestUniversity(initialData.nearestUniversity);
+    if (initialData?.distanceToUniversityKm !== undefined) {
+      setDistanceToUniversity(initialData.distanceToUniversityKm);
+    }
+
+    try {
+      const rev = await LocationService.reverseGeocode(cleanLat, cleanLng, locale);
+      if (rev) {
+        if (rev.governorate) setGovernorate(rev.governorate);
+        if (rev.city) setCity(rev.city);
+        if (rev.district) setDistrict(rev.district);
+        if (rev.address || rev.displayName) {
+          setAddress(rev.address || rev.displayName || initialData?.address || '');
+        }
+        if (rev.nearestUniversity) setNearestUniversity(rev.nearestUniversity);
+        if (rev.distanceToUniversityKm !== undefined) {
+          setDistanceToUniversity(rev.distanceToUniversityKm);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectSmartSuggestion = async (item: AddressSuggestion) => {
+    setShowSmartSuggestions(false);
+    setSmartAddressQuery(item.displayName);
+    setResolvingAddress(true);
+    setAddressResolveMsg(null);
+    try {
+      await applyResolvedLocation(item.latitude, item.longitude, {
+        address: item.address || item.displayName,
+        district: item.district,
+        city: item.city,
+        governorate: item.governorate,
+        nearestUniversity: item.nearestUniversity,
+        distanceToUniversityKm: item.distanceToUniversityKm,
+      });
+      setAddressResolveMsg({
+        type: 'success',
+        text:
+          locale === 'ar'
+            ? `✅ تم تحديد الموقع على الخريطة وملء جميع الحقول تلقائياً: ${item.displayName}`
+            : `✅ Pinned on GPS and auto-filled all fields: ${item.displayName}`,
+      });
+    } finally {
+      setResolvingAddress(false);
+    }
+  };
+
+  const handleResolveAddressToGps = async (useFormFieldsOnly = false) => {
+    setShowSmartSuggestions(false);
+    setResolvingAddress(true);
+    setAddressResolveMsg(null);
+    try {
+      const resolved = await LocationService.resolveFreeformAddress(
+        {
+          freeformQuery: useFormFieldsOnly ? '' : smartAddressQuery,
+          address,
+          district,
+          city,
+          governorate,
+          nearestUniversity,
+        },
+        locale
+      );
+
+      if (resolved) {
+        await applyResolvedLocation(resolved.latitude, resolved.longitude, {
+          address: resolved.address,
+          district: resolved.district,
+          city: resolved.city,
+          governorate: resolved.governorate,
+          nearestUniversity: resolved.nearestUniversity,
+          distanceToUniversityKm: resolved.distanceToUniversityKm,
+        });
+        setAddressResolveMsg({
+          type: 'success',
+          text:
+            locale === 'ar'
+              ? `✅ تم تحديد العنوان على الـ GPS وملء جميع الخانات تلقائياً: ${resolved.address}`
+              : `✅ Located on GPS & auto-filled all fields: ${resolved.address}`,
+        });
+      } else {
+        setAddressResolveMsg({
+          type: 'error',
+          text:
+            locale === 'ar'
+              ? 'تعذر العثور على هذا العنوان بدقة. جرب كتابة اسم الشارع + المدينة أو المحافظة.'
+              : 'Could not resolve this address. Try typing street name + city or governorate.',
+        });
+      }
+    } finally {
+      setResolvingAddress(false);
+    }
+  };
 
   // Features & Pricing
   const [startingPrice, setStartingPrice] = useState<number | ''>('');
@@ -477,6 +626,165 @@ export default function EditPropertyPage() {
             <span>{locale === 'ar' ? '2. الموقع الجغرافي' : '2. Location'}</span>
           </h2>
 
+          {/* Smart Address Lookup Box (when owner is NOT physically at the apartment) */}
+          <div
+            style={{
+              backgroundColor: '#F0F7FF',
+              border: '1.5px solid #BFDBFE',
+              borderRadius: '14px',
+              padding: '1rem 1.15rem',
+              marginBottom: '1.35rem',
+            }}
+          >
+            <div style={{ fontWeight: 800, fontSize: '0.9rem', color: '#0B2A4A', marginBottom: '0.35rem', display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <span>🏠</span>
+              <span>
+                {locale === 'ar'
+                  ? 'لتحديد موقع الشقة بالعنوان: اكتب عنوان الشقة هنا وهنحدد موقعها على الـ GPS ونملأ جميع الخانات تلقائياً:'
+                  : 'Type the apartment address below to locate it on GPS & auto-fill all fields:'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap', position: 'relative' }}>
+              <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+                <input
+                  type="text"
+                  value={smartAddressQuery}
+                  onChange={(e) => {
+                    setSmartAddressQuery(e.target.value);
+                    setShowSmartSuggestions(true);
+                  }}
+                  onFocus={() => {
+                    if (smartSuggestions.length > 0) setShowSmartSuggestions(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleResolveAddressToGps(false);
+                    } else if (e.key === 'Escape') {
+                      setShowSmartSuggestions(false);
+                    }
+                  }}
+                  placeholder={
+                    locale === 'ar'
+                      ? '🔍 اكتب عنوان الشقة (مثال: شارع الجلاء طنطا، أو حي الجامعة المنصورة، أو الصق رابط Google Maps)...'
+                      : '🔍 Type apartment address, street, city, or paste Google Maps link...'
+                  }
+                  style={{
+                    width: '100%',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: '10px',
+                    border: '1.5px solid #93C5FD',
+                    fontSize: '0.88rem',
+                    backgroundColor: '#FFFFFF',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+
+                {showSmartSuggestions && smartSuggestions.length > 0 && (
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 'calc(100% + 6px)',
+                      left: 0,
+                      right: 0,
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid #93C5FD',
+                      borderRadius: '12px',
+                      boxShadow: '0 12px 28px rgba(11, 42, 74, 0.16)',
+                      zIndex: 9999,
+                      maxHeight: '260px',
+                      overflowY: 'auto',
+                      padding: '0.35rem',
+                    }}
+                  >
+                    {smartSuggestions.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => handleSelectSmartSuggestion(item)}
+                        style={{
+                          width: '100%',
+                          textAlign: 'start',
+                          padding: '0.55rem 0.75rem',
+                          border: 'none',
+                          backgroundColor: 'transparent',
+                          borderRadius: '8px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '2px',
+                          borderBottom: '1px solid #F1F5F9',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#EFF6FF';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                        }}
+                      >
+                        <div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#0B2A4A' }}>
+                          📍 {item.title}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#475569' }}>
+                          {item.subtitle}
+                          {item.nearestUniversity ? ` • 🎓 أقرب جامعة: ${item.nearestUniversity} (${item.distanceToUniversityKm} كم)` : ''}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleResolveAddressToGps(false)}
+                disabled={resolvingAddress}
+                style={{
+                  padding: '0.65rem 1.1rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#0B2A4A',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '0.84rem',
+                  fontWeight: 800,
+                  cursor: resolvingAddress ? 'not-allowed' : 'pointer',
+                  whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>🎯</span>
+                <span>
+                  {resolvingAddress
+                    ? locale === 'ar'
+                      ? 'جاري التحديد وملء الخانات...'
+                      : 'Locating & filling...'
+                    : locale === 'ar'
+                    ? 'حدد على الـ GPS واملأ الخانات تلقائياً'
+                    : 'Pin on GPS & Auto-fill All Fields'}
+                </span>
+              </button>
+            </div>
+
+            {addressResolveMsg && (
+              <div
+                style={{
+                  marginTop: '0.6rem',
+                  padding: '0.5rem 0.85rem',
+                  borderRadius: '8px',
+                  backgroundColor: addressResolveMsg.type === 'success' ? '#DCFCE7' : '#FEE2E2',
+                  color: addressResolveMsg.type === 'success' ? '#166534' : '#991B1B',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                }}
+              >
+                {addressResolveMsg.text}
+              </div>
+            )}
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
             <div>
               <label style={labelStyle}>{locale === 'ar' ? 'المحافظة *' : 'Governorate *'}</label>
@@ -510,13 +818,46 @@ export default function EditPropertyPage() {
                 style={inputStyle}
               />
             </div>
-            <div>
-              <label style={labelStyle}>{locale === 'ar' ? 'العنوان التفصيلي' : 'Full Address'}</label>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>{locale === 'ar' ? 'العنوان التفصيلي' : 'Full Address'}</label>
+                <button
+                  type="button"
+                  onClick={() => handleResolveAddressToGps(true)}
+                  disabled={resolvingAddress}
+                  style={{
+                    padding: '0.35rem 0.75rem',
+                    borderRadius: '8px',
+                    backgroundColor: '#EFF6FF',
+                    color: '#1D4ED8',
+                    border: '1px solid #93C5FD',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    cursor: resolvingAddress ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>🎯</span>
+                  <span>
+                    {locale === 'ar'
+                      ? 'حدد هذا العنوان على الـ GPS واملأ باقي الخانات تلقائياً'
+                      : 'Locate this address on GPS & auto-fill fields'}
+                  </span>
+                </button>
+              </div>
               <input
                 type="text"
                 value={address}
                 onChange={(e) => setAddress(e.target.value)}
-                placeholder={locale === 'ar' ? 'الشارع والمبنى ورقم الشقة' : 'Street, building, apt number'}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleResolveAddressToGps(true);
+                  }
+                }}
+                placeholder={locale === 'ar' ? 'الشارع والمبنى ورقم الشقة (أو اكتب العنوان واضغط زر التحديد بالـ GPS ⬆️)' : 'Street, building, apt number'}
                 style={inputStyle}
               />
             </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useLocale } from '../utils/LocaleContext';
 import { useAuth } from '../context/AuthContext';
-import { propertyService } from '../services/propertyService';
+import { propertyService, matchesPropertyFilters, type PropertyFilterParams } from '../services/propertyService';
 import { fetchGlobalActiveBookings } from '../services/occupancyService';
 import type { Property } from '../types/property';
 import PropertyCard from '../components/PropertyCard/PropertyCard';
@@ -12,6 +12,7 @@ import {
   LocationService,
   resolveCoordinates,
   calculateDistanceKm,
+  normalizeArabicForSearch,
   DEFAULT_CAIRO_LAT,
   DEFAULT_CAIRO_LNG,
 } from '../services/locationService';
@@ -27,22 +28,51 @@ interface PriceRangeOption {
 
 const priceRanges: PriceRangeOption[] = [
   { value: '', label: { ar: 'جميع الأسعار', en: 'All Prices' }, min: undefined, max: undefined },
-  { value: 'under-1500', label: { ar: 'أقل من 1,500 ج.م', en: 'Under 1,500 EGP' }, min: undefined, max: 1500 },
-  { value: '1500-3000', label: { ar: '1,500 - 3,000 ج.م', en: '1,500 - 3,000 EGP' }, min: 1500, max: 3000 },
+  { value: 'under-1000', label: { ar: 'أقل من 1,000 ج.م', en: 'Under 1,000 EGP' }, min: undefined, max: 1000 },
+  { value: '1000-2000', label: { ar: '1,000 - 2,000 ج.م', en: '1,000 - 2,000 EGP' }, min: 1000, max: 2000 },
+  { value: '2000-3000', label: { ar: '2,000 - 3,000 ج.م', en: '2,000 - 3,000 EGP' }, min: 2000, max: 3000 },
   { value: '3000-5000', label: { ar: '3,000 - 5,000 ج.م', en: '3,000 - 5,000 EGP' }, min: 3000, max: 5000 },
   { value: 'over-5000', label: { ar: 'أكثر من 5,000 ج.م', en: 'Over 5,000 EGP' }, min: 5000, max: undefined },
+  { value: 'custom', label: { ar: 'تحديد ميزانية مخصصة...', en: 'Custom Price Range...' }, min: undefined, max: undefined },
 ];
 
-const cityOptions = [
-  { value: '', label: { ar: 'جميع المحافظات / المدن', en: 'All Locations' } },
-  { value: 'cairo', label: { ar: 'القاهرة (جامعة القاهرة / عين شمس)', en: 'Cairo' } },
-  { value: 'giza', label: { ar: 'الجيزة / الدقي', en: 'Giza / Dokki' } },
-  { value: 'mansoura', label: { ar: 'المنصورة (جامعة المنصورة)', en: 'Mansoura' } },
-  { value: 'alexandria', label: { ar: 'الإسكندرية (جامعة الإسكندرية)', en: 'Alexandria' } },
-  { value: 'tanta', label: { ar: 'طنطا (جامعة طنطا)', en: 'Tanta' } },
-  { value: 'zagazig', label: { ar: 'الزقازيق', en: 'Zagazig' } },
+const baseCityOptions = [
+  { value: '', label: { ar: 'جميع المحافظات والمدن', en: 'All Governorates & Cities' } },
+  { value: 'cairo', label: { ar: 'القاهرة الكبرى (مدينة نصر / العباسية / المعادي)', en: 'Cairo (Nasr City / Maadi)' } },
+  { value: 'new_cairo', label: { ar: 'القاهرة الجديدة / التجمع الخامس / الرحاب', en: 'New Cairo / Fifth Settlement' } },
+  { value: 'giza', label: { ar: 'الجيزة (الدقي / المهندسين / فيصل / الهرم)', en: 'Giza (Dokki / Mohandessin)' } },
+  { value: 'october', label: { ar: '6 أكتوبر والشيخ زايد', en: '6th of October & Sheikh Zayed' } },
+  { value: 'mansoura', label: { ar: 'المنصورة / الدقهلية', en: 'Mansoura / Dakahlia' } },
+  { value: 'tanta', label: { ar: 'طنطا / الغربية', en: 'Tanta / Gharbia' } },
+  { value: 'alexandria', label: { ar: 'الإسكندرية', en: 'Alexandria' } },
+  { value: 'zagazig', label: { ar: 'الزقازيق / الشرقية', en: 'Zagazig / Sharqia' } },
+  { value: 'kafr_el_sheikh', label: { ar: 'كفر الشيخ', en: 'Kafr El Sheikh' } },
+  { value: 'benha', label: { ar: 'بنها / القليوبية', en: 'Benha / Qalyubia' } },
+  { value: 'menoufia', label: { ar: 'شبين الكوم / المنوفية', en: 'Menoufia / Shebin El Kom' } },
+  { value: 'damietta', label: { ar: 'دمياط / دمياط الجديدة', en: 'Damietta' } },
+  { value: 'ismailia', label: { ar: 'الإسماعيلية / قناة السويس', en: 'Ismailia' } },
   { value: 'assiut', label: { ar: 'أسيوط', en: 'Assiut' } },
-  { value: 'october', label: { ar: '6 أكتوبر (جامعة MSA / MUST)', en: '6th of October' } },
+  { value: 'fayoum', label: { ar: 'الفيوم / بني سويف', en: 'Fayoum / Beni Suef' } },
+  { value: 'minya', label: { ar: 'المنيا', en: 'Minya' } },
+  { value: 'sohag', label: { ar: 'سوهاج / قنا / أسوان', en: 'Sohag / Qena / Aswan' } },
+];
+
+const baseUniversityOptions = [
+  { value: '', label: { ar: 'جميع الجامعات', en: 'All Universities' } },
+  { value: 'جامعة القاهرة', label: { ar: 'جامعة القاهرة', en: 'Cairo University' } },
+  { value: 'جامعة عين شمس', label: { ar: 'جامعة عين شمس', en: 'Ain Shams University' } },
+  { value: 'جامعة المنصورة', label: { ar: 'جامعة المنصورة', en: 'Mansoura University' } },
+  { value: 'جامعة طنطا', label: { ar: 'جامعة طنطا', en: 'Tanta University' } },
+  { value: 'جامعة الإسكندرية', label: { ar: 'جامعة الإسكندرية', en: 'Alexandria University' } },
+  { value: 'جامعة الزقازيق', label: { ar: 'جامعة الزقازيق', en: 'Zagazig University' } },
+  { value: 'جامعة الأزهر', label: { ar: 'جامعة الأزهر', en: 'Al-Azhar University' } },
+  { value: 'جامعة حلوان', label: { ar: 'جامعة حلوان', en: 'Helwan University' } },
+  { value: 'جامعة كفر الشيخ', label: { ar: 'جامعة كفر الشيخ', en: 'Kafr El Sheikh University' } },
+  { value: 'جامعة بنها', label: { ar: 'جامعة بنها', en: 'Benha University' } },
+  { value: 'جامعة المنوفية', label: { ar: 'جامعة المنوفية', en: 'Menoufia University' } },
+  { value: 'جامعة أسيوط', label: { ar: 'جامعة أسيوط', en: 'Assiut University' } },
+  { value: 'جامعة 6 أكتوبر', label: { ar: 'جامعة 6 أكتوبر / MSA / MUST', en: '6th of October / MSA / MUST' } },
+  { value: 'الجامعة الأمريكية', label: { ar: 'الجامعة الأمريكية / الألمانية (AUC / GUC)', en: 'AUC / GUC / FUE' } },
 ];
 
 const typeOptions = [
@@ -50,15 +80,44 @@ const typeOptions = [
   { value: 'shared_apartment', label: { ar: 'شقة مشتركة (Shared Apartment)', en: 'Shared Apartment' } },
   { value: 'private_room', label: { ar: 'غرفة خاصة (Private Room)', en: 'Private Room' } },
   { value: 'shared_room', label: { ar: 'غرفة مشتركة (Shared Room)', en: 'Shared Room' } },
-  { value: 'studio', label: { ar: 'استوديو (Studio)', en: 'Studio' } },
+  { value: 'studio', label: { ar: 'استوديو مستقل (Studio)', en: 'Studio' } },
   { value: 'entire_apartment', label: { ar: 'شقة كاملة (Entire Apartment)', en: 'Entire Apartment' } },
 ];
 
+const roomTypeOptions = [
+  { value: '', label: { ar: 'جميع أنواع الغرف', en: 'All Room Types' } },
+  { value: 'SINGLE', label: { ar: '🛏️ غرفة فردية (سرير واحد)', en: '🛏️ Single Room (1 Bed)' } },
+  { value: 'DOUBLE', label: { ar: '🛏️ غرفة ثنائية (سريران)', en: '🛏️ Double Room (2 Beds)' } },
+  { value: 'TRIPLE', label: { ar: '🛏️ غرفة ثلاثية (3 أسِرّة)', en: '🛏️ Triple Room (3 Beds)' } },
+  { value: 'QUAD', label: { ar: '🛏️ غرفة رباعية (4 أسِرّة)', en: '🛏️ Quad Room (4 Beds)' } },
+];
+
+const genderOptions = [
+  { value: '', label: { ar: 'مخصص لـ: الكل (شباب وبنات)', en: 'Gender: All (Male & Female)' } },
+  { value: 'male_only', label: { ar: '👨‍🎓 سكن شباب فقط', en: '👨‍🎓 Male Students Only' } },
+  { value: 'female_only', label: { ar: '👩‍🎓 سكن بنات فقط', en: '👩‍🎓 Female Students Only' } },
+];
+
+const classOptions = [
+  { value: '', label: { ar: 'فئة السكن: جميع الفئات', en: 'Class: All Classes' } },
+  { value: 'STANDARD', label: { ar: 'قياسي / اقتصادي (Standard)', en: 'Standard / Economy' } },
+  { value: 'LUXURY', label: { ar: '⭐ فاخر / مميز (Luxury)', en: '⭐ Luxury / Premium' } },
+];
+
 const bedroomOptions = [
-  { value: '', label: { ar: 'أي عدد غرف', en: 'Any Rooms' } },
-  { value: '1', label: { ar: 'غرفة واحدة', en: '1 Room' } },
-  { value: '2', label: { ar: 'غرفتان', en: '2 Rooms' } },
-  { value: '3', label: { ar: '3 غرف أو أكثر', en: '3+ Rooms' } },
+  { value: '', label: { ar: 'عدد الغرف: أي عدد', en: 'Rooms: Any Count' } },
+  { value: '1', label: { ar: 'غرفة واحدة (1)', en: '1 Room' } },
+  { value: '2', label: { ar: 'غرفتان (2)', en: '2 Rooms' } },
+  { value: '3', label: { ar: '3 غرف', en: '3 Rooms' } },
+  { value: '4', label: { ar: '4 غرف أو أكثر', en: '4+ Rooms' } },
+];
+
+const distanceOptions = [
+  { value: '', label: { ar: 'المسافة للجامعة: أي مسافة', en: 'Distance to Univ: Any' } },
+  { value: '1', label: { ar: '🚶 أقل من 1 كم (دقائق مشياً)', en: '🚶 Within 1 km (Walking)' } },
+  { value: '2', label: { ar: 'أقل من 2 كم عن الجامعة', en: 'Within 2 km' } },
+  { value: '5', label: { ar: 'أقل من 5 كم عن الجامعة', en: 'Within 5 km' } },
+  { value: '10', label: { ar: 'أقل من 10 كم عن الجامعة', en: 'Within 10 km' } },
 ];
 
 export default function PropertiesPage() {
@@ -66,14 +125,29 @@ export default function PropertiesPage() {
   const { isAdmin } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // Filter States
+  // Primary Filter States
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
   const [debouncedSearch, setDebouncedSearch] = useState(searchTerm);
   const [city, setCity] = useState(searchParams.get('city') || '');
+  const [university, setUniversity] = useState(searchParams.get('university') || '');
   const [propertyType, setPropertyType] = useState(searchParams.get('propertyType') || '');
+  const [genderAllowed, setGenderAllowed] = useState(searchParams.get('genderAllowed') || '');
   const [priceRange, setPriceRange] = useState(searchParams.get('priceRange') || '');
-  const [bedrooms, setBedrooms] = useState(searchParams.get('bedrooms') || '');
-  const [sortBy, setSortBy] = useState('recommended');
+  const [customMinPrice, setCustomMinPrice] = useState(searchParams.get('minPrice') || '');
+  const [customMaxPrice, setCustomMaxPrice] = useState(searchParams.get('maxPrice') || '');
+
+  // Secondary / Precision Filter States
+  const [roomType, setRoomType] = useState(searchParams.get('roomType') || '');
+  const [bedrooms, setBedrooms] = useState(searchParams.get('bedrooms') || searchParams.get('rooms') || '');
+  const [propertyClass, setPropertyClass] = useState(searchParams.get('propertyClass') || '');
+  const [maxDistance, setMaxDistance] = useState(searchParams.get('maxDistance') || '');
+  const [availableOnly, setAvailableOnly] = useState(searchParams.get('availableOnly') === 'true');
+  const [isFurnished, setIsFurnished] = useState(searchParams.get('isFurnished') === 'true');
+  const [internetIncluded, setInternetIncluded] = useState(searchParams.get('internetIncluded') === 'true');
+  const [billsIncluded, setBillsIncluded] = useState(searchParams.get('billsIncluded') === 'true');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const [sortBy, setSortBy] = useState(searchParams.get('sort') || 'recommended');
 
   // Mobile Filter Drawer State
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
@@ -97,8 +171,8 @@ export default function PropertiesPage() {
     }
   }, [mobileDrawerOpen]);
 
-  // Data & Lifecycle States
-  const [properties, setProperties] = useState<Property[]>([]);
+  // Data & Lifecycle States (allProperties holds the full normalized list from the backend)
+  const [allProperties, setAllProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -109,11 +183,11 @@ export default function PropertiesPage() {
     }
   }, [isAdmin]);
 
-  // Debounce search input (400ms)
+  // Debounce search input (250ms for snappy feedback)
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(searchTerm);
-    }, 400);
+    }, 250);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -122,35 +196,57 @@ export default function PropertiesPage() {
     const params: Record<string, string> = {};
     if (debouncedSearch) params.search = debouncedSearch;
     if (city) params.city = city;
+    if (university) params.university = university;
     if (propertyType) params.propertyType = propertyType;
+    if (genderAllowed) params.genderAllowed = genderAllowed;
     if (priceRange) params.priceRange = priceRange;
-    if (bedrooms) params.bedrooms = bedrooms;
+    if (priceRange === 'custom' && customMinPrice) params.minPrice = customMinPrice;
+    if (priceRange === 'custom' && customMaxPrice) params.maxPrice = customMaxPrice;
+    if (roomType) params.roomType = roomType;
+    if (bedrooms) params.rooms = bedrooms;
+    if (propertyClass) params.propertyClass = propertyClass;
+    if (maxDistance) params.maxDistance = maxDistance;
+    if (availableOnly) params.availableOnly = 'true';
+    if (isFurnished) params.isFurnished = 'true';
+    if (internetIncluded) params.internetIncluded = 'true';
+    if (billsIncluded) params.billsIncluded = 'true';
+    if (sortBy && sortBy !== 'recommended') params.sort = sortBy;
     setSearchParams(params, { replace: true });
-  }, [debouncedSearch, city, propertyType, priceRange, bedrooms, setSearchParams]);
+  }, [
+    debouncedSearch,
+    city,
+    university,
+    propertyType,
+    genderAllowed,
+    priceRange,
+    customMinPrice,
+    customMaxPrice,
+    roomType,
+    bedrooms,
+    propertyClass,
+    maxDistance,
+    availableOnly,
+    isFurnished,
+    internetIncluded,
+    billsIncluded,
+    sortBy,
+    setSearchParams,
+  ]);
 
   // Reload counter for manual retries
   const [reloadTrigger, setReloadTrigger] = useState(0);
 
-  // Fetch properties from real API via propertyService with race-condition handling
+  // Fetch full public dataset from backend once (and on reloadTrigger) so filtering is instant and 100% accurate
   useEffect(() => {
     let ignore = false;
     setLoading(true);
     setError(null);
 
-    const activePrice = priceRanges.find((p) => p.value === priceRange);
-
     propertyService
-      .getProperties({
-        search: debouncedSearch || undefined,
-        city: city || undefined,
-        propertyType: propertyType || undefined,
-        minPrice: activePrice?.min,
-        maxPrice: activePrice?.max,
-        bedrooms: bedrooms ? parseInt(bedrooms, 10) : undefined,
-      })
+      .getProperties({ limit: 100 })
       .then((data) => {
         if (!ignore) {
-          setProperties(data);
+          setAllProperties(data);
           setLoading(false);
         }
       })
@@ -158,7 +254,7 @@ export default function PropertiesPage() {
         if (!ignore) {
           console.error('Failed to load properties from API:', err);
           setError(t.properties_error_desc);
-          setProperties([]);
+          setAllProperties([]);
           setLoading(false);
         }
       });
@@ -166,7 +262,7 @@ export default function PropertiesPage() {
     return () => {
       ignore = true;
     };
-  }, [debouncedSearch, city, propertyType, priceRange, bedrooms, reloadTrigger, t.properties_error_desc]);
+  }, [reloadTrigger, t.properties_error_desc]);
 
   const loadProperties = useCallback(() => {
     setReloadTrigger((prev) => prev + 1);
@@ -186,6 +282,109 @@ export default function PropertiesPage() {
     };
   }, [loadProperties]);
 
+  // Dynamically enrich city options with any custom cities/governorates from the database + property counts
+  const cityOptions = useMemo(() => {
+    const withCounts = baseCityOptions.map((opt) => {
+      if (!opt.value) return { ...opt, count: allProperties.length };
+      const count = allProperties.filter((p) => matchesPropertyFilters(p, { city: opt.value })).length;
+      return { ...opt, count };
+    });
+
+    // Discover any unique city/governorate in allProperties not covered by base options
+    const dynamicCities = new Map<string, number>();
+    for (const p of allProperties) {
+      const c = (p.city || p.governorate || '').trim();
+      if (!c) continue;
+      const alreadyMatched = baseCityOptions.some(
+        (opt) => opt.value && matchesPropertyFilters(p, { city: opt.value })
+      );
+      if (!alreadyMatched) {
+        dynamicCities.set(c, (dynamicCities.get(c) || 0) + 1);
+      }
+    }
+
+    const extraOptions = Array.from(dynamicCities.entries()).map(([cName, count]) => ({
+      value: cName,
+      label: { ar: cName, en: cName },
+      count,
+    }));
+
+    return [...withCounts, ...extraOptions];
+  }, [allProperties]);
+
+  // Dynamically enrich university options with any university present in allProperties
+  const universityOptions = useMemo(() => {
+    const seen = new Set(baseUniversityOptions.map((u) => normalizeArabicForSearch(u.value)));
+    const extra: Array<{ value: string; label: { ar: string; en: string } }> = [];
+
+    for (const p of allProperties) {
+      const u = (p.nearestUniversity || '').trim();
+      if (!u) continue;
+      const norm = normalizeArabicForSearch(u);
+      if (norm && !seen.has(norm)) {
+        seen.add(norm);
+        extra.push({ value: u, label: { ar: u, en: u } });
+      }
+    }
+    return [...baseUniversityOptions, ...extra];
+  }, [allProperties]);
+
+  // Build active filter object and filter allProperties instantaneously
+  const activeFilterParams: PropertyFilterParams = useMemo(() => {
+    const activePrice = priceRanges.find((p) => p.value === priceRange);
+    const minP =
+      priceRange === 'custom'
+        ? customMinPrice !== '' && !Number.isNaN(Number(customMinPrice))
+          ? Number(customMinPrice)
+          : undefined
+        : activePrice?.min;
+    const maxP =
+      priceRange === 'custom'
+        ? customMaxPrice !== '' && !Number.isNaN(Number(customMaxPrice))
+          ? Number(customMaxPrice)
+          : undefined
+        : activePrice?.max;
+
+    return {
+      search: debouncedSearch || undefined,
+      city: city || undefined,
+      university: university || undefined,
+      propertyType: propertyType || undefined,
+      roomType: roomType || undefined,
+      genderAllowed: genderAllowed || undefined,
+      propertyClass: propertyClass || undefined,
+      minPrice: minP,
+      maxPrice: maxP,
+      rooms: bedrooms ? parseInt(bedrooms, 10) : undefined,
+      maxDistanceToUniversity: maxDistance ? parseFloat(maxDistance) : undefined,
+      availableOnly: availableOnly ? true : undefined,
+      isFurnished: isFurnished ? true : undefined,
+      internetIncluded: internetIncluded ? true : undefined,
+      billsIncluded: billsIncluded ? true : undefined,
+    };
+  }, [
+    debouncedSearch,
+    city,
+    university,
+    propertyType,
+    roomType,
+    genderAllowed,
+    propertyClass,
+    priceRange,
+    customMinPrice,
+    customMaxPrice,
+    bedrooms,
+    maxDistance,
+    availableOnly,
+    isFurnished,
+    internetIncluded,
+    billsIncluded,
+  ]);
+
+  const properties = useMemo(() => {
+    return allProperties.filter((prop) => matchesPropertyFilters(prop, activeFilterParams));
+  }, [allProperties, activeFilterParams]);
+
   // Client-side Sorting & Map View State
   const [showMap, setShowMap] = useState(false);
   const [userCoords, setUserCoords] = useState<Coordinates | null>(() =>
@@ -197,7 +396,7 @@ export default function PropertiesPage() {
   // Dynamically geocode any property from the backend that does not yet have explicit latitude/longitude
   useEffect(() => {
     let cancelled = false;
-    const missing = properties.filter(
+    const missing = allProperties.filter(
       (p) =>
         (p.latitude === undefined || p.latitude === null || Number.isNaN(Number(p.latitude))) &&
         Boolean(p.address || p.district || p.nearestUniversity || p.city || p.governorate)
@@ -224,7 +423,7 @@ export default function PropertiesPage() {
     return () => {
       cancelled = true;
     };
-  }, [properties]);
+  }, [allProperties]);
 
   const handleSortNearMe = async () => {
     setDetectingNearMe(true);
@@ -243,10 +442,26 @@ export default function PropertiesPage() {
   const sortedProperties = useMemo(() => {
     const list = [...properties];
     if (sortBy === 'price_asc') {
-      return list.sort((a, b) => a.price - b.price);
+      return list.sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
     }
     if (sortBy === 'price_desc') {
-      return list.sort((a, b) => b.price - a.price);
+      return list.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+    }
+    if (sortBy === 'newest') {
+      return list.sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      );
+    }
+    if (sortBy === 'popular') {
+      return list.sort(
+        (a, b) => Number((b as any).viewsCount || 0) - Number((a as any).viewsCount || 0)
+      );
+    }
+    if (sortBy === 'university_distance') {
+      return list.sort(
+        (a, b) =>
+          Number(a.distanceToUniversity ?? 999) - Number(b.distanceToUniversity ?? 999)
+      );
     }
     if (sortBy === 'nearest') {
       const refLat = userCoords?.latitude ?? DEFAULT_CAIRO_LAT;
@@ -264,25 +479,43 @@ export default function PropertiesPage() {
   }, [properties, sortBy, userCoords, geocodeTick]);
 
   // Check if any filter is active
-  const hasActiveFilters = Boolean(
-    searchTerm || city || propertyType || priceRange || bedrooms
-  );
-
   const activeFilterCount = [
-    Boolean(searchTerm),
+    Boolean(searchTerm.trim()),
     Boolean(city),
+    Boolean(university),
     Boolean(propertyType),
+    Boolean(genderAllowed),
     Boolean(priceRange),
+    Boolean(roomType),
     Boolean(bedrooms),
+    Boolean(propertyClass),
+    Boolean(maxDistance),
+    availableOnly,
+    isFurnished,
+    internetIncluded,
+    billsIncluded,
   ].filter(Boolean).length;
+
+  const hasActiveFilters = activeFilterCount > 0;
 
   const handleResetFilters = () => {
     setSearchTerm('');
     setDebouncedSearch('');
     setCity('');
+    setUniversity('');
     setPropertyType('');
+    setGenderAllowed('');
     setPriceRange('');
+    setCustomMinPrice('');
+    setCustomMaxPrice('');
+    setRoomType('');
     setBedrooms('');
+    setPropertyClass('');
+    setMaxDistance('');
+    setAvailableOnly(false);
+    setIsFurnished(false);
+    setInternetIncluded(false);
+    setBillsIncluded(false);
     setMobileDrawerOpen(false);
   };
 
@@ -295,152 +528,442 @@ export default function PropertiesPage() {
           <p className="properties-subtitle">{t.properties_subtitle}</p>
         </header>
 
-        {/* Desktop Filter Bar */}
-        <div className="properties-filter-bar">
-          {/* Keyword Search */}
-          <div className="filter-input-wrap">
-            <svg
-              className="filter-icon"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
+        {/* Main Filter Container */}
+        <div
+          style={{
+            background: '#FFFFFF',
+            padding: '1.15rem 1.25rem',
+            borderRadius: '18px',
+            border: '1px solid rgba(11, 42, 74, 0.08)',
+            boxShadow: '0 6px 24px rgba(11, 42, 74, 0.04)',
+            marginBottom: '1.5rem',
+          }}
+        >
+          {/* Row 1: Primary Filters */}
+          <div className="properties-filter-bar" style={{ marginBottom: 0, padding: 0, border: 'none', boxShadow: 'none' }}>
+            {/* Keyword Search */}
+            <div className="filter-input-wrap" style={{ flex: '1.8 1 250px' }}>
+              <svg
+                className="filter-icon"
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <circle cx="11" cy="11" r="8" />
+                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+              </svg>
+              <input
+                type="text"
+                className="filter-input"
+                placeholder={
+                  locale === 'ar'
+                    ? 'ابحث بالاسم، المدينة، الحي، الجامعة أو المرافق...'
+                    : 'Search by title, city, district, university, or amenity...'
+                }
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                aria-label={t.properties_filter_search_placeholder}
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="filter-clear-input"
+                  onClick={() => setSearchTerm('')}
+                  aria-label="Clear search"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+
+            {/* Location Dropdown (Governorate / City with live counts) */}
+            <div className="filter-select-wrap" style={{ flex: '1.1 1 175px' }}>
+              <select
+                className="filter-select"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                aria-label={t.properties_filter_location}
+              >
+                {cityOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value
+                      ? `${opt.label[locale]}${opt.count > 0 ? ` (${opt.count})` : ''}`
+                      : `📍 ${t.properties_filter_location}: ${opt.label[locale]}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Nearest University Dropdown */}
+            <div className="filter-select-wrap" style={{ flex: '1.1 1 170px' }}>
+              <select
+                className="filter-select"
+                value={university}
+                onChange={(e) => setUniversity(e.target.value)}
+                aria-label={locale === 'ar' ? 'الجامعة الأقرب' : 'Nearest University'}
+              >
+                {universityOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value
+                      ? `🎓 ${opt.label[locale]}`
+                      : locale === 'ar'
+                      ? '🎓 الجامعة: جميع الجامعات'
+                      : '🎓 University: All'}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Property Type Dropdown */}
+            <div className="filter-select-wrap" style={{ flex: '1 1 160px' }}>
+              <select
+                className="filter-select"
+                value={propertyType}
+                onChange={(e) => setPropertyType(e.target.value)}
+                aria-label={t.properties_filter_type}
+              >
+                {typeOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value ? opt.label[locale] : `🏢 ${t.properties_filter_type}: ${opt.label[locale]}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Gender Allowed Dropdown */}
+            <div className="filter-select-wrap" style={{ flex: '1 1 155px' }}>
+              <select
+                className="filter-select"
+                value={genderAllowed}
+                onChange={(e) => setGenderAllowed(e.target.value)}
+                aria-label={locale === 'ar' ? 'السكن مخصص لـ' : 'Gender Allowed'}
+              >
+                {genderOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label[locale]}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Price Range Dropdown */}
+            <div className="filter-select-wrap" style={{ flex: '1 1 155px' }}>
+              <select
+                className="filter-select"
+                value={priceRange}
+                onChange={(e) => setPriceRange(e.target.value)}
+                aria-label={t.properties_filter_price}
+              >
+                {priceRanges.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.value ? opt.label[locale] : `💰 ${t.properties_filter_price}: ${opt.label[locale]}`}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Mobile Filter Toggle Button */}
+            <button
+              type="button"
+              className="mobile-filter-trigger"
+              onClick={() => setMobileDrawerOpen(true)}
+              aria-label={t.properties_mobile_filters_btn}
             >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              className="filter-input"
-              placeholder={t.properties_filter_search_placeholder}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              aria-label={t.properties_filter_search_placeholder}
-            />
-            {searchTerm && (
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="4" y1="21" x2="4" y2="14" />
+                <line x1="4" y1="10" x2="4" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="12" />
+                <line x1="12" y1="8" x2="12" y2="3" />
+                <line x1="20" y1="21" x2="20" y2="16" />
+                <line x1="20" y1="12" x2="20" y2="3" />
+                <line x1="1" y1="14" x2="7" y2="14" />
+                <line x1="9" y1="8" x2="15" y2="8" />
+                <line x1="17" y1="16" x2="23" y2="16" />
+              </svg>
+              <span>{t.properties_mobile_filters_btn}</span>
+              {activeFilterCount > 0 && (
+                <span className="mobile-filter-badge">{activeFilterCount}</span>
+              )}
+            </button>
+          </div>
+
+          {/* Custom Price Range Inputs (when "custom" is selected) */}
+          {priceRange === 'custom' && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+                marginTop: '0.85rem',
+                padding: '0.75rem 1rem',
+                backgroundColor: '#F8FAFC',
+                borderRadius: '12px',
+                border: '1px solid #E2E8F0',
+              }}
+            >
+              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0B2A4A' }}>
+                💰 {locale === 'ar' ? 'تحديد السعر الشهري (ج.م):' : 'Monthly Budget (EGP):'}
+              </span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                placeholder={locale === 'ar' ? 'الحد الأدنى (مثلاً 1200)' : 'Min price (e.g. 1200)'}
+                value={customMinPrice}
+                onChange={(e) => setCustomMinPrice(e.target.value)}
+                style={{
+                  height: '38px',
+                  padding: '0 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '0.85rem',
+                  width: '175px',
+                }}
+              />
+              <span style={{ color: '#64748B', fontWeight: 600 }}>—</span>
+              <input
+                type="number"
+                min={0}
+                step={100}
+                placeholder={locale === 'ar' ? 'الحد الأقصى (مثلاً 3500)' : 'Max price (e.g. 3500)'}
+                value={customMaxPrice}
+                onChange={(e) => setCustomMaxPrice(e.target.value)}
+                style={{
+                  height: '38px',
+                  padding: '0 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid #CBD5E1',
+                  fontSize: '0.85rem',
+                  width: '175px',
+                }}
+              />
+            </div>
+          )}
+
+          {/* Row 2: Quick Filter Chips + Advanced Filters Toggle */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.6rem',
+              marginTop: '0.9rem',
+              paddingTop: '0.85rem',
+              borderTop: '1px solid #F1F5F9',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {/* Quick Chip: Available Now */}
               <button
                 type="button"
-                className="filter-clear-input"
-                onClick={() => setSearchTerm('')}
-                aria-label="Clear search"
+                onClick={() => setAvailableOnly((prev) => !prev)}
+                style={{
+                  padding: '0.38rem 0.8rem',
+                  borderRadius: '999px',
+                  border: availableOnly ? '1px solid #10B981' : '1px solid #E2E8F0',
+                  backgroundColor: availableOnly ? '#ECFDF5' : '#F8FAFC',
+                  color: availableOnly ? '#047857' : '#475569',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
               >
-                ✕
+                🟢 {locale === 'ar' ? 'متاح للحجز الفوري فقط' : 'Available Now Only'}
+              </button>
+
+              {/* Quick Chip: Furnished */}
+              <button
+                type="button"
+                onClick={() => setIsFurnished((prev) => !prev)}
+                style={{
+                  padding: '0.38rem 0.8rem',
+                  borderRadius: '999px',
+                  border: isFurnished ? '1px solid #2F6BFF' : '1px solid #E2E8F0',
+                  backgroundColor: isFurnished ? '#EFF6FF' : '#F8FAFC',
+                  color: isFurnished ? '#1D4ED8' : '#475569',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                🛋️ {locale === 'ar' ? 'مفروش بالكامل' : 'Fully Furnished'}
+              </button>
+
+              {/* Quick Chip: Internet Included */}
+              <button
+                type="button"
+                onClick={() => setInternetIncluded((prev) => !prev)}
+                style={{
+                  padding: '0.38rem 0.8rem',
+                  borderRadius: '999px',
+                  border: internetIncluded ? '1px solid #2F6BFF' : '1px solid #E2E8F0',
+                  backgroundColor: internetIncluded ? '#EFF6FF' : '#F8FAFC',
+                  color: internetIncluded ? '#1D4ED8' : '#475569',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                📶 {locale === 'ar' ? 'شامل الإنترنت (Wi-Fi)' : 'Wi-Fi Included'}
+              </button>
+
+              {/* Quick Chip: Bills Included */}
+              <button
+                type="button"
+                onClick={() => setBillsIncluded((prev) => !prev)}
+                style={{
+                  padding: '0.38rem 0.8rem',
+                  borderRadius: '999px',
+                  border: billsIncluded ? '1px solid #2F6BFF' : '1px solid #E2E8F0',
+                  backgroundColor: billsIncluded ? '#EFF6FF' : '#F8FAFC',
+                  color: billsIncluded ? '#1D4ED8' : '#475569',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                💡 {locale === 'ar' ? 'شامل الفواتير (كهرباء/مياه)' : 'Bills Included'}
+              </button>
+
+              {/* Toggle More Precision Filters */}
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFilters((prev) => !prev)}
+                style={{
+                  padding: '0.38rem 0.85rem',
+                  borderRadius: '999px',
+                  border:
+                    showAdvancedFilters || roomType || bedrooms || propertyClass || maxDistance
+                      ? '1px solid #0B2A4A'
+                      : '1px solid #CBD5E1',
+                  backgroundColor:
+                    showAdvancedFilters || roomType || bedrooms || propertyClass || maxDistance
+                      ? '#0B2A4A'
+                      : '#FFFFFF',
+                  color:
+                    showAdvancedFilters || roomType || bedrooms || propertyClass || maxDistance
+                      ? '#FFFFFF'
+                      : '#0B2A4A',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ⚙️ {locale === 'ar' ? 'فلاتر متقدمة (الغرف / الفئة / المسافة)' : 'Advanced Filters'}{' '}
+                {showAdvancedFilters ? '▲' : '▼'}
+              </button>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className="filter-reset-btn"
+                onClick={handleResetFilters}
+                style={{ height: '34px', fontSize: '0.8rem', paddingInline: '0.9rem' }}
+              >
+                ✕ {t.properties_reset_filters} ({activeFilterCount})
               </button>
             )}
           </div>
 
-          {/* Location Dropdown */}
-          <div className="filter-select-wrap">
-            <select
-              className="filter-select"
-              value={city}
-              onChange={(e) => setCity(e.target.value)}
-              aria-label={t.properties_filter_location}
+          {/* Collapsible Advanced Precision Row */}
+          {(showAdvancedFilters || Boolean(roomType || bedrooms || propertyClass || maxDistance)) && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                gap: '0.75rem',
+                marginTop: '0.85rem',
+                paddingTop: '0.85rem',
+                borderTop: '1px dashed #E2E8F0',
+              }}
             >
-              {cityOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value ? opt.label[locale] : `${t.properties_filter_location}: ${opt.label[locale]}`}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Room Type (SINGLE / DOUBLE / TRIPLE / QUAD) */}
+              <div className="filter-select-wrap">
+                <select
+                  className="filter-select"
+                  value={roomType}
+                  onChange={(e) => setRoomType(e.target.value)}
+                  aria-label={locale === 'ar' ? 'نوع الغرفة' : 'Room Type'}
+                >
+                  {roomTypeOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Property Type Dropdown */}
-          <div className="filter-select-wrap">
-            <select
-              className="filter-select"
-              value={propertyType}
-              onChange={(e) => setPropertyType(e.target.value)}
-              aria-label={t.properties_filter_type}
-            >
-              {typeOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value ? opt.label[locale] : `${t.properties_filter_type}: ${opt.label[locale]}`}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Bedrooms / Rooms Count */}
+              <div className="filter-select-wrap">
+                <select
+                  className="filter-select"
+                  value={bedrooms}
+                  onChange={(e) => setBedrooms(e.target.value)}
+                  aria-label={t.properties_filter_bedrooms}
+                >
+                  {bedroomOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Price Range Dropdown */}
-          <div className="filter-select-wrap">
-            <select
-              className="filter-select"
-              value={priceRange}
-              onChange={(e) => setPriceRange(e.target.value)}
-              aria-label={t.properties_filter_price}
-            >
-              {priceRanges.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value ? opt.label[locale] : `${t.properties_filter_price}: ${opt.label[locale]}`}
-                </option>
-              ))}
-            </select>
-          </div>
+              {/* Property Class (STANDARD / LUXURY) */}
+              <div className="filter-select-wrap">
+                <select
+                  className="filter-select"
+                  value={propertyClass}
+                  onChange={(e) => setPropertyClass(e.target.value)}
+                  aria-label={locale === 'ar' ? 'فئة السكن' : 'Property Class'}
+                >
+                  {classOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-          {/* Bedrooms Dropdown */}
-          <div className="filter-select-wrap">
-            <select
-              className="filter-select"
-              value={bedrooms}
-              onChange={(e) => setBedrooms(e.target.value)}
-              aria-label={t.properties_filter_bedrooms}
-            >
-              {bedroomOptions.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.value ? opt.label[locale] : `${t.properties_filter_bedrooms}: ${opt.label[locale]}`}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Reset Filters button (Desktop) */}
-          {hasActiveFilters && (
-            <button
-              type="button"
-              className="filter-reset-btn"
-              onClick={handleResetFilters}
-            >
-              {t.properties_reset_filters}
-            </button>
+              {/* Max Distance to University */}
+              <div className="filter-select-wrap">
+                <select
+                  className="filter-select"
+                  value={maxDistance}
+                  onChange={(e) => setMaxDistance(e.target.value)}
+                  aria-label={locale === 'ar' ? 'المسافة للجامعة' : 'Distance to University'}
+                >
+                  {distanceOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
           )}
-
-          {/* Mobile Filter Toggle Button */}
-          <button
-            type="button"
-            className="mobile-filter-trigger"
-            onClick={() => setMobileDrawerOpen(true)}
-            aria-label={t.properties_mobile_filters_btn}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="21" x2="4" y2="14" />
-              <line x1="4" y1="10" x2="4" y2="3" />
-              <line x1="12" y1="21" x2="12" y2="12" />
-              <line x1="12" y1="8" x2="12" y2="3" />
-              <line x1="20" y1="21" x2="20" y2="16" />
-              <line x1="20" y1="12" x2="20" y2="3" />
-              <line x1="1" y1="14" x2="7" y2="14" />
-              <line x1="9" y1="8" x2="15" y2="8" />
-              <line x1="17" y1="16" x2="23" y2="16" />
-            </svg>
-            <span>{t.properties_mobile_filters_btn}</span>
-            {activeFilterCount > 0 && (
-              <span className="mobile-filter-badge">{activeFilterCount}</span>
-            )}
-          </button>
         </div>
 
         {/* Results Metadata & Sorting Row */}
@@ -449,7 +972,7 @@ export default function PropertiesPage() {
             {!loading && !error && (
               <span className="properties-count">
                 <strong>
-                  <AnimatedCounter value={sortedProperties.length} duration={900} />
+                  <AnimatedCounter value={sortedProperties.length} duration={600} />
                 </strong>{' '}
                 {t.properties_results_count}
               </span>
@@ -526,7 +1049,10 @@ export default function PropertiesPage() {
               onChange={(e) => setSortBy(e.target.value)}
             >
               <option value="recommended">{t.properties_sort_recommended}</option>
+              <option value="newest">{locale === 'ar' ? 'الأحدث إضافة' : 'Newest First'}</option>
+              <option value="popular">{locale === 'ar' ? 'الأكثر مشاهدة وطلباً' : 'Most Viewed'}</option>
               <option value="nearest">{locale === 'ar' ? 'الأقرب لموقعي الجغرافي' : 'Nearest to My Location'}</option>
+              <option value="university_distance">{locale === 'ar' ? 'الأقرب للجامعة' : 'Closest to University'}</option>
               <option value="price_asc">{t.properties_sort_price_asc}</option>
               <option value="price_desc">{t.properties_sort_price_desc}</option>
             </select>
@@ -540,7 +1066,7 @@ export default function PropertiesPage() {
               latitude={userCoords?.latitude ?? (sortedProperties[0] ? resolveCoordinates(sortedProperties[0]).latitude : DEFAULT_CAIRO_LAT)}
               longitude={userCoords?.longitude ?? (sortedProperties[0] ? resolveCoordinates(sortedProperties[0]).longitude : DEFAULT_CAIRO_LNG)}
               locationContext={
-                !userCoords && city !== 'all'
+                !userCoords && city !== 'all' && city !== ''
                   ? { city }
                   : sortedProperties[0]
                   ? {
@@ -558,7 +1084,7 @@ export default function PropertiesPage() {
                   ? locale === 'ar'
                     ? 'مرتبة حسب الأقرب لموقعك الحالي'
                     : 'Sorted by proximity to your GPS location'
-                  : city !== 'all'
+                  : city && city !== 'all'
                   ? city
                   : locale === 'ar'
                   ? 'مواقع العقارات المتاحة والأماكن القريبة'
@@ -716,6 +1242,24 @@ export default function PropertiesPage() {
                 >
                   {cityOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]} {opt.value && opt.count > 0 ? `(${opt.count})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Nearest University */}
+              <div className="mobile-drawer-group">
+                <label className="mobile-drawer-label">
+                  {locale === 'ar' ? 'الجامعة الأقرب' : 'Nearest University'}
+                </label>
+                <select
+                  className="mobile-drawer-select"
+                  value={university}
+                  onChange={(e) => setUniversity(e.target.value)}
+                >
+                  {universityOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
                       {opt.label[locale]}
                     </option>
                   ))}
@@ -731,6 +1275,42 @@ export default function PropertiesPage() {
                   onChange={(e) => setPropertyType(e.target.value)}
                 >
                   {typeOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Gender Allowed */}
+              <div className="mobile-drawer-group">
+                <label className="mobile-drawer-label">
+                  {locale === 'ar' ? 'مخصص لـ' : 'Gender Allowed'}
+                </label>
+                <select
+                  className="mobile-drawer-select"
+                  value={genderAllowed}
+                  onChange={(e) => setGenderAllowed(e.target.value)}
+                >
+                  {genderOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Room Type */}
+              <div className="mobile-drawer-group">
+                <label className="mobile-drawer-label">
+                  {locale === 'ar' ? 'نوع الغرفة' : 'Room Type'}
+                </label>
+                <select
+                  className="mobile-drawer-select"
+                  value={roomType}
+                  onChange={(e) => setRoomType(e.target.value)}
+                >
+                  {roomTypeOptions.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label[locale]}
                     </option>
@@ -769,6 +1349,24 @@ export default function PropertiesPage() {
                   ))}
                 </select>
               </div>
+
+              {/* Property Class */}
+              <div className="mobile-drawer-group">
+                <label className="mobile-drawer-label">
+                  {locale === 'ar' ? 'فئة السكن' : 'Property Class'}
+                </label>
+                <select
+                  className="mobile-drawer-select"
+                  value={propertyClass}
+                  onChange={(e) => setPropertyClass(e.target.value)}
+                >
+                  {classOptions.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label[locale]}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="mobile-drawer-footer">
@@ -793,3 +1391,4 @@ export default function PropertiesPage() {
     </main>
   );
 }
+

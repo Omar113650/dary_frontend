@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
 import { useAuth } from '../../context/AuthContext';
-import type { NotificationItem } from '../../services/notificationService';
+import { NotificationService, type NotificationItem } from '../../services/notificationService';
 import {
   useNotifications,
   useMarkNotificationRead,
@@ -10,6 +10,7 @@ import {
   useDeleteNotification,
   useDeleteAllReadNotifications,
 } from '../../hooks/useDashboardQueries';
+import { useQueryClient } from '../../lib/queryClient';
 import Pagination from '../../components/common/Pagination';
 
 type StatusFilter = 'ALL' | 'UNREAD' | 'READ';
@@ -18,6 +19,7 @@ type CategoryFilter = 'ALL' | 'BOOKING' | 'PROPERTY' | 'SUPPORT' | 'CONTRACT' | 
 export default function NotificationsPage() {
   const { locale } = useLocale();
   const { role } = useAuth();
+  const queryClient = useQueryClient();
 
   // Live Auto-polling Notifications query (polls every 15s in background)
   const {
@@ -34,6 +36,8 @@ export default function NotificationsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [showConfirmDeleteRead, setShowConfirmDeleteRead] = useState(false);
+  const [showConfirmDeleteAll, setShowConfirmDeleteAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Mutations
@@ -295,13 +299,21 @@ export default function NotificationsPage() {
   }
 
   // Handlers
+  function syncNotificationCaches(nextList: NotificationItem[]) {
+    const nextUnread = nextList.filter((n) => !n.isRead && !n.read).length;
+    queryClient.setQueryData(['notifications', 'unreadCount'], nextUnread);
+    queryClient.setQueryData(['notifications', 1, 50, undefined, undefined], nextList);
+  }
+
   async function handleMarkAsRead(id: string) {
     setMarkingId(id);
+    setNotifications((prev) => {
+      const next = prev.map((n) => (n.id === id ? { ...n, isRead: true, read: true } : n));
+      syncNotificationCaches(next);
+      return next;
+    });
     try {
       await markReadMutation.mutateAsync(id);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, isRead: true, read: true } : n))
-      );
     } catch (err: any) {
       console.error('[NotificationsPage] Mark as read error:', err);
     } finally {
@@ -311,11 +323,13 @@ export default function NotificationsPage() {
 
   async function handleMarkAllAsRead() {
     setActionMessage(null);
+    setNotifications((prev) => {
+      const next = prev.map((n) => ({ ...n, isRead: true, read: true }));
+      syncNotificationCaches(next);
+      return next;
+    });
     try {
       await markAllReadMutation.mutateAsync();
-      setNotifications((prev) =>
-        prev.map((n) => ({ ...n, isRead: true, read: true }))
-      );
       setActionMessage({
         type: 'success',
         text: locale === 'ar' ? 'تم تحديد جميع الإشعارات كمقروءة بنجاح.' : 'All notifications marked as read.',
@@ -331,12 +345,16 @@ export default function NotificationsPage() {
 
   async function handleDelete(id: string) {
     setDeletingId(id);
+    setNotifications((prev) => {
+      const next = prev.filter((n) => n.id !== id);
+      syncNotificationCaches(next);
+      return next;
+    });
     try {
       await deleteMutation.mutateAsync(id);
-      setNotifications((prev) => prev.filter((n) => n.id !== id));
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? 'تم حذف الإشعار بنجاح.' : 'Notification deleted successfully.',
+        text: locale === 'ar' ? 'تم حذف الإشعار وتحديث العداد بنجاح.' : 'Notification deleted successfully.',
       });
     } catch (err: any) {
       console.error('[NotificationsPage] Delete error:', err);
@@ -352,9 +370,14 @@ export default function NotificationsPage() {
   async function handleConfirmDeleteAllRead() {
     setShowConfirmDeleteRead(false);
     setActionMessage(null);
+    const readIds = notifications.filter((n) => n.isRead || n.read).map((n) => n.id);
+    setNotifications((prev) => {
+      const next = prev.filter((n) => !n.isRead && !n.read);
+      syncNotificationCaches(next);
+      return next;
+    });
     try {
-      await deleteAllReadMutation.mutateAsync();
-      setNotifications((prev) => prev.filter((n) => !n.isRead && !n.read));
+      await deleteAllReadMutation.mutateAsync(readIds);
       setActionMessage({
         type: 'success',
         text: locale === 'ar' ? 'تم حذف جميع الإشعارات المقروءة.' : 'All read notifications have been deleted.',
@@ -368,9 +391,41 @@ export default function NotificationsPage() {
     }
   }
 
+  async function handleConfirmDeleteAll() {
+    setShowConfirmDeleteAll(false);
+    setActionMessage(null);
+    setDeletingAll(true);
+    const allIds = notifications.map((n) => n.id);
+    setNotifications([]);
+    syncNotificationCaches([]);
+    try {
+      await NotificationService.deleteAllNotifications(allIds);
+      queryClient.invalidateQueries({ queryKey: ['notifications'] });
+      setActionMessage({
+        type: 'success',
+        text: locale === 'ar' ? 'تم حذف جميع الإشعارات وتصفير العداد بنجاح.' : 'All notifications deleted successfully.',
+      });
+    } catch (err: any) {
+      console.error('[NotificationsPage] Delete all error:', err);
+      setActionMessage({
+        type: 'error',
+        text: err?.message || (locale === 'ar' ? 'فشل حذف الإشعارات' : 'Failed to delete notifications'),
+      });
+    } finally {
+      setDeletingAll(false);
+    }
+  }
+
   // Filter calculations
   const unreadCount = useMemo(() => notifications.filter((n) => !n.isRead && !n.read).length, [notifications]);
   const readCount = useMemo(() => notifications.filter((n) => n.isRead || n.read).length, [notifications]);
+
+  // Keep global badge count in sync with current notifications state
+  useEffect(() => {
+    if (!loading && rawNotifications !== undefined) {
+      queryClient.setQueryData(['notifications', 'unreadCount'], unreadCount);
+    }
+  }, [unreadCount, loading, rawNotifications, queryClient]);
 
   const filteredNotifications = useMemo(() => {
     return notifications.filter((n) => {
@@ -530,6 +585,31 @@ export default function NotificationsPage() {
               >
                 <span>🗑️</span>
                 <span>{locale === 'ar' ? 'مسح المقروءة' : 'Clear Read'}</span>
+              </button>
+            )}
+
+            {notifications.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowConfirmDeleteAll(true)}
+                disabled={deletingAll}
+                style={{
+                  padding: '0.55rem 1rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#FEF2F2',
+                  color: '#B91C1C',
+                  border: '1px solid #FCA5A5',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <span>{deletingAll ? '⏳' : '🗑️'}</span>
+                <span>{locale === 'ar' ? 'حذف الكل' : 'Delete All'}</span>
               </button>
             )}
 
@@ -1147,6 +1227,101 @@ export default function NotificationsPage() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal for Delete All Notifications */}
+      {showConfirmDeleteAll && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            backdropFilter: 'blur(3px)',
+            padding: '1rem',
+          }}
+          onClick={() => setShowConfirmDeleteAll(false)}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              padding: '1.75rem',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.2)',
+              animation: 'fadeIn 0.2s ease-out',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem', textAlign: 'center' }}>
+              🗑️
+            </div>
+            <h3
+              style={{
+                fontSize: '1.2rem',
+                fontWeight: 800,
+                color: 'var(--dary-navy)',
+                margin: '0 0 0.5rem',
+                textAlign: 'center',
+              }}
+            >
+              {locale === 'ar' ? 'حذف جميع الإشعارات نهائياً؟' : 'Delete all notifications permanently?'}
+            </h3>
+            <p
+              style={{
+                fontSize: '0.875rem',
+                color: '#64748B',
+                lineHeight: 1.5,
+                margin: '0 0 1.5rem',
+                textAlign: 'center',
+              }}
+            >
+              {locale === 'ar'
+                ? `سيتم مسح كافة الإشعارات (${localNotifications.length} إشعار) وتصفير عدّاد الإشعارات فوراً.`
+                : `This will permanently remove all ${localNotifications.length} notifications and reset your unread badge count to 0.`}
+            </p>
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowConfirmDeleteAll(false)}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#F1F5F9',
+                  color: '#475569',
+                  border: 'none',
+                  fontWeight: 700,
+                  fontSize: '0.875rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {locale === 'ar' ? 'إلغاء' : 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteAll}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#DC2626',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontWeight: 700,
+                  fontSize: '0.875rem',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                }}
+              >
+                {locale === 'ar' ? 'نعم، حذف الكل' : 'Yes, Delete All'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

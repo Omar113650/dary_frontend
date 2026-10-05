@@ -12,6 +12,7 @@ import type {
   Coordinates,
   ReverseGeocodeResult,
   RouteDirectionsResult,
+  AddressSuggestion,
 } from '../../services/locationService';
 
 export interface MapMarkerItem {
@@ -160,6 +161,9 @@ export default function InteractiveMap({
   const [resolvedAddressText, setResolvedAddressText] = useState<string>('');
   const [geocodingBusy, setGeocodingBusy] = useState<boolean>(false);
   const [mapSearchQuery, setMapSearchQuery] = useState<string>('');
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
+  const [searchingSuggestions, setSearchingSuggestions] = useState<boolean>(false);
 
   const safeLat = activeCoords.latitude;
   const safeLng = activeCoords.longitude;
@@ -169,13 +173,14 @@ export default function InteractiveMap({
   const layerGroupRef = useRef<any>(null);
   const autoDetectTriggeredRef = useRef(false);
   const manualPinPickRef = useRef(false);
+  const lastCameraCenterRef = useRef<{ lat: number; lng: number } | null>(null);
 
   const [leafletReady, setLeafletReady] = useState(false);
   const [leafletFailed, setLeafletFailed] = useState(false);
 
-  // User GPS & Route Navigation state
+  // User GPS & Route Navigation state (only used in non-editable viewer mode)
   const [userCoords, setUserCoords] = useState<Coordinates | null>(() =>
-    LocationService.getCachedUserLocation()
+    editable ? null : LocationService.getCachedUserLocation()
   );
   const [detectingGps, setDetectingGps] = useState(false);
   const [gpsStatusMsg, setGpsStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -191,17 +196,40 @@ export default function InteractiveMap({
   const [loadingNearby, setLoadingNearby] = useState<boolean>(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  // 1. Sync explicit latitude/longitude props if provided AND valid for this city/governorate
+  // Helper to move map camera cleanly without causing jitter/zoom loops
+  const moveCameraTo = useCallback(
+    (lat: number, lng: number, targetZoom?: number) => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      lastCameraCenterRef.current = { lat, lng };
+      if (mapInstanceRef.current) {
+        const z = targetZoom ?? Math.max(mapInstanceRef.current.getZoom() || zoom, 15);
+        mapInstanceRef.current.setView([lat, lng], z, { animate: false });
+      }
+    },
+    [zoom]
+  );
+
+  // 1. Sync explicit latitude/longitude props if provided AND valid
   useEffect(() => {
     if (hasExplicitCoords) {
-      setActiveCoords({ latitude: numLat, longitude: numLng, isGeocoded: true });
+      setActiveCoords((prev) => {
+        if (Math.abs(prev.latitude - numLat) > 0.00001 || Math.abs(prev.longitude - numLng) > 0.00001) {
+          moveCameraTo(numLat, numLng, 16);
+          return { latitude: numLat, longitude: numLng, isGeocoded: true };
+        }
+        return prev;
+      });
     }
-  }, [hasExplicitCoords, numLat, numLng]);
+  }, [hasExplicitCoords, numLat, numLng, moveCameraTo]);
 
   const lastGeocodedSigRef = useRef<string | null>(null);
 
-  // 2. Dynamic Forward Geocoding when no valid explicit coordinates exist, OR whenever address/city/district/university changes
+  // 2. Dynamic Forward Geocoding (only in viewer mode or when editable has no explicit coords yet)
   useEffect(() => {
+    // In editable mode, do not auto-override while the owner is typing in form inputs;
+    // the owner uses the search bar, suggestions, "Resolve from fields" button, GPS button, or map click/drag.
+    if (editable && (manualPinPickRef.current || hasExplicitCoords)) return;
+
     const contextSignature = [
       fullContext.address,
       fullContext.district,
@@ -209,7 +237,11 @@ export default function InteractiveMap({
       fullContext.university,
       fullContext.city,
       fullContext.governorate,
-      typeof fullContext.title === 'object' ? `${fullContext.title.ar || ''}` : String(fullContext.title || ''),
+      !editable
+        ? typeof fullContext.title === 'object'
+          ? `${fullContext.title.ar || ''}`
+          : String(fullContext.title || '')
+        : '',
     ]
       .map((s) => (s || '').trim())
       .join('|');
@@ -218,28 +250,6 @@ export default function InteractiveMap({
     if (!hasAddressData) return;
 
     const contextChanged = lastGeocodedSigRef.current !== null && lastGeocodedSigRef.current !== contextSignature;
-
-    // If user didn't manually drag the pin for this exact signature, immediately apply synchronous known city/district anchor
-    if (!hasExplicitCoords || contextChanged) {
-      const syncSeed = resolveCoordinates({
-        ...fullContext,
-        latitude: undefined,
-        longitude: undefined,
-      });
-      setActiveCoords((prev) => {
-        if (
-          Math.abs(prev.latitude - syncSeed.latitude) > 0.0001 ||
-          Math.abs(prev.longitude - syncSeed.longitude) > 0.0001
-        ) {
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.setView([syncSeed.latitude, syncSeed.longitude], zoom);
-          }
-          return { latitude: syncSeed.latitude, longitude: syncSeed.longitude, isGeocoded: false };
-        }
-        return prev;
-      });
-    }
-
     if (hasExplicitCoords && !contextChanged) return;
 
     let cancelled = false;
@@ -254,9 +264,7 @@ export default function InteractiveMap({
             longitude: geocoded.longitude,
             isGeocoded: true,
           });
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.setView([geocoded.latitude, geocoded.longitude], zoom);
-          }
+          moveCameraTo(geocoded.latitude, geocoded.longitude, zoom);
           const rev = await LocationService.reverseGeocode(geocoded.latitude, geocoded.longitude, locale);
           if (!cancelled && rev?.address) {
             setResolvedAddressText(rev.address);
@@ -265,14 +273,11 @@ export default function InteractiveMap({
               onAddressResolved(cleanAddr || rev.address, rev);
             }
           }
-          if (!cancelled && editable && onLocationChange) {
-            onLocationChange(geocoded.latitude, geocoded.longitude, rev);
-          }
         }
       } finally {
         if (!cancelled) setGeocodingBusy(false);
       }
-    }, 250);
+    }, 450);
 
     return () => {
       cancelled = true;
@@ -290,6 +295,7 @@ export default function InteractiveMap({
     editable,
     zoom,
     locale,
+    moveCameraTo,
   ]);
 
   // 3. Reverse geocode active coordinates so user sees the real street/area name and nearest university
@@ -306,21 +312,44 @@ export default function InteractiveMap({
           onAddressResolved(cleanAddr, rev);
         }
       }
-    }, 180);
+    }, 250);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [
-    safeLat,
-    safeLng,
-    locale,
-    fullContext.address,
-    fullContext.district,
-    fullContext.city,
-    fullContext.governorate,
-    fullContext.nearestUniversity,
-  ]);
+  }, [safeLat, safeLng, locale]);
+
+  // 3b. Live Autocomplete Suggestions when typing in the map search bar (editable mode)
+  useEffect(() => {
+    if (!editable) return;
+    const q = mapSearchQuery.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      setSearchingSuggestions(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSearchingSuggestions(true);
+    const timer = setTimeout(async () => {
+      try {
+        const list = await LocationService.searchAddressSuggestions(q, locale);
+        if (!cancelled) {
+          setSuggestions(list);
+          setShowSuggestions(list.length > 0);
+        }
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setSearchingSuggestions(false);
+      }
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [mapSearchQuery, editable, locale]);
 
   // Load Leaflet library on mount
   useEffect(() => {
@@ -337,28 +366,33 @@ export default function InteractiveMap({
     };
   }, []);
 
-  // Fetch REAL Nearby Places when coordinates or radius change
-  const fetchNearby = useCallback(async () => {
-    if (!showNearby) return;
-    setLoadingNearby(true);
-    try {
-      const res = await LocationService.getNearbyPlaces(safeLat, safeLng, radiusKm);
-      setNearbyPlaces(res.places || []);
-    } catch {
-      setNearbyPlaces([]);
-    } finally {
-      setLoadingNearby(false);
-    }
-  }, [safeLat, safeLng, radiusKm, showNearby]);
-
+  // Fetch REAL Nearby Places when coordinates or radius change (debounced to prevent lag while dragging pin)
   useEffect(() => {
-    fetchNearby();
-  }, [fetchNearby]);
+    if (!showNearby) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      setLoadingNearby(true);
+      try {
+        const res = await LocationService.getNearbyPlaces(safeLat, safeLng, radiusKm);
+        if (!cancelled) setNearbyPlaces(res.places || []);
+      } catch {
+        if (!cancelled) setNearbyPlaces([]);
+      } finally {
+        if (!cancelled) setLoadingNearby(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [safeLat, safeLng, radiusKm, showNearby]);
 
   // Handle interactive map click or drag -> reverse geocode + notify parent
   const handleInteractivePick = useCallback(
     async (lat: number, lng: number) => {
       manualPinPickRef.current = true;
+      lastCameraCenterRef.current = { lat, lng };
       setActiveCoords({ latitude: lat, longitude: lng, isGeocoded: true });
       const rev = await LocationService.reverseGeocode(lat, lng, locale);
       if (rev?.address) {
@@ -375,73 +409,137 @@ export default function InteractiveMap({
           type: 'success',
           text:
             locale === 'ar'
-              ? `✓ تم تحديث العنوان التفصيلي من الخريطة: ${rev.address}${
+              ? `✓ تم تحديث الموقع وملء الحقول تلقائياً: ${rev.address}${
                   rev.nearestUniversity ? ` (الأقرب: ${rev.nearestUniversity} - ${rev.distanceToUniversityKm} كم)` : ''
                 }`
-              : `✓ Updated detailed address from map: ${rev.address}`,
+              : `✓ Updated location & auto-filled fields: ${rev.address}`,
         });
       }
-      if (syncProfileOnDetect) {
-        LocationService.detectAndSyncProfileLocation(false).catch(() => {});
-      }
     },
-    [locale, onLocationChange, onAddressResolved, syncProfileOnDetect]
+    [locale, onLocationChange, onAddressResolved]
   );
 
-  // Search box handler on editable map to jump to any street/university/city and fill address fields
-  const handleMapSearchSubmit = useCallback(
-    async (e?: React.FormEvent) => {
-      if (e) e.preventDefault();
-      const q = mapSearchQuery.trim();
-      const searchTarget: LocationContextInput = q
-        ? {
-            address: q,
-            district: fullContext.district,
-            city: fullContext.city,
-            governorate: fullContext.governorate,
-            nearestUniversity: fullContext.nearestUniversity,
-            title: fullContext.title,
-          }
-        : fullContext;
+  // Select a suggestion from the live autocomplete dropdown
+  const handleSelectSuggestion = useCallback(
+    async (sug: AddressSuggestion) => {
+      setShowSuggestions(false);
+      setMapSearchQuery(sug.fullAddress);
+      manualPinPickRef.current = true;
+      setActiveCoords({ latitude: sug.latitude, longitude: sug.longitude, isGeocoded: true });
+      moveCameraTo(sug.latitude, sug.longitude, 16);
 
       setGeocodingBusy(true);
       try {
-        const geocoded = await LocationService.geocodeAddress(searchTarget);
-        const targetLat = geocoded?.latitude ?? resolveCoordinates(searchTarget).latitude;
-        const targetLng = geocoded?.longitude ?? resolveCoordinates(searchTarget).longitude;
-
-        manualPinPickRef.current = true;
-        setActiveCoords({ latitude: targetLat, longitude: targetLng, isGeocoded: true });
-        if (mapInstanceRef.current) {
-          mapInstanceRef.current.setView([targetLat, targetLng], 16);
-        }
-
-        const rev = await LocationService.reverseGeocode(targetLat, targetLng, locale);
-        if (rev?.address) {
-          setResolvedAddressText(rev.address);
-        }
+        const rev = await LocationService.reverseGeocode(sug.latitude, sug.longitude, locale);
+        const mergedRev: ReverseGeocodeResult = {
+          displayName: rev?.displayName || sug.fullAddress,
+          address: rev?.address || sug.fullAddress,
+          street: rev?.street || sug.district,
+          building: rev?.building,
+          district: rev?.district || sug.district || sug.title,
+          city: rev?.city || sug.city,
+          governorate: rev?.governorate || sug.governorate,
+          country: locale === 'ar' ? 'مصر' : 'Egypt',
+          nearestUniversity: rev?.nearestUniversity || sug.nearestUniversity,
+          distanceToUniversityKm: rev?.distanceToUniversityKm ?? sug.distanceToUniversityKm,
+        };
+        setResolvedAddressText(mergedRev.address);
         if (onLocationChange) {
-          onLocationChange(targetLat, targetLng, rev);
+          onLocationChange(sug.latitude, sug.longitude, mergedRev);
         }
-        if (onAddressResolved && rev?.address) {
-          onAddressResolved(rev.address, rev);
+        if (onAddressResolved) {
+          onAddressResolved(mergedRev.address, mergedRev);
         }
-        if (rev?.address) {
-          setGpsStatusMsg({
-            type: 'success',
-            text:
-              locale === 'ar'
-                ? `✓ تم فهم العنوان وتحديد الموقع بدقة: ${rev.address}${
-                    rev.nearestUniversity ? ` • الجامعة الأقرب: ${rev.nearestUniversity} (${rev.distanceToUniversityKm} كم)` : ''
-                  }`
-                : `✓ Address resolved & pinned: ${rev.address}`,
-          });
-        }
+        setGpsStatusMsg({
+          type: 'success',
+          text:
+            locale === 'ar'
+              ? `✓ تم تحديد عنوان الشقة على الـ GPS وملء جميع الحقول تلقائياً: ${mergedRev.address}${
+                  mergedRev.nearestUniversity
+                    ? ` • الجامعة الأقرب: ${mergedRev.nearestUniversity} (${mergedRev.distanceToUniversityKm} كم)`
+                    : ''
+                }`
+              : `✓ Apartment address pinned on GPS & all fields auto-filled: ${mergedRev.address}`,
+        });
       } finally {
         setGeocodingBusy(false);
       }
     },
-    [mapSearchQuery, fullContext, locale, onLocationChange, onAddressResolved]
+    [locale, moveCameraTo, onLocationChange, onAddressResolved]
+  );
+
+  // Search box / form fields handler on editable map to jump to any street/university/city and fill address fields
+  const handleMapSearchSubmit = useCallback(
+    async (e?: React.FormEvent, useFormFieldsOnly = false) => {
+      if (e) e.preventDefault();
+      setShowSuggestions(false);
+      const q = useFormFieldsOnly ? '' : mapSearchQuery.trim();
+
+      setGeocodingBusy(true);
+      try {
+        const resolved = await LocationService.resolveFreeformAddress(
+          {
+            freeformQuery: q || undefined,
+            address: fullContext.address,
+            district: fullContext.district,
+            city: fullContext.city,
+            governorate: fullContext.governorate,
+            nearestUniversity: fullContext.nearestUniversity,
+          },
+          locale
+        );
+
+        if (!resolved) {
+          setGpsStatusMsg({
+            type: 'error',
+            text:
+              locale === 'ar'
+                ? 'يرجى كتابة اسم الشارع أو المنطقة أو المدينة في مربع البحث أو في الحقول أولاً.'
+                : 'Please type a street, area, or city in the search box or fields first.',
+          });
+          return;
+        }
+
+        manualPinPickRef.current = true;
+        setActiveCoords({ latitude: resolved.latitude, longitude: resolved.longitude, isGeocoded: true });
+        moveCameraTo(resolved.latitude, resolved.longitude, 16);
+
+        const revPayload: ReverseGeocodeResult = {
+          displayName: resolved.reverseResult?.displayName || resolved.address,
+          address: resolved.address,
+          street: resolved.reverseResult?.street || resolved.district,
+          building: resolved.reverseResult?.building,
+          district: resolved.district,
+          city: resolved.city,
+          governorate: resolved.governorate,
+          country: locale === 'ar' ? 'مصر' : 'Egypt',
+          nearestUniversity: resolved.nearestUniversity,
+          distanceToUniversityKm: resolved.distanceToUniversityKm,
+        };
+
+        setResolvedAddressText(revPayload.address);
+        if (onLocationChange) {
+          onLocationChange(resolved.latitude, resolved.longitude, revPayload);
+        }
+        if (onAddressResolved) {
+          onAddressResolved(revPayload.address, revPayload);
+        }
+        setGpsStatusMsg({
+          type: 'success',
+          text:
+            locale === 'ar'
+              ? `✓ تم تحديد موقع العنوان على الـ GPS وملء جميع الحقول تلقائياً: ${revPayload.address}${
+                  revPayload.nearestUniversity
+                    ? ` • الجامعة الأقرب: ${revPayload.nearestUniversity} (${revPayload.distanceToUniversityKm} كم)`
+                    : ''
+                }`
+              : `✓ Address resolved & all fields populated: ${revPayload.address}`,
+        });
+      } finally {
+        setGeocodingBusy(false);
+      }
+    },
+    [mapSearchQuery, fullContext, locale, moveCameraTo, onLocationChange, onAddressResolved]
   );
 
   // Trigger Browser Geolocation API + save to backend Profile + either pin property location or draw route
@@ -453,12 +551,11 @@ export default function InteractiveMap({
       if (!silent) setGpsStatusMsg(null);
       try {
         const coords = await LocationService.detectAndSyncProfileLocation(syncProfileOnDetect);
-        setUserCoords(coords);
-        setShowRouteSteps(true);
 
         if (shouldPinProperty) {
           manualPinPickRef.current = true;
           setActiveCoords({ latitude: coords.latitude, longitude: coords.longitude, isGeocoded: true });
+          moveCameraTo(coords.latitude, coords.longitude, 16);
           const rev = await LocationService.reverseGeocode(coords.latitude, coords.longitude, locale);
           if (rev?.address) {
             setResolvedAddressText(rev.address);
@@ -472,19 +569,18 @@ export default function InteractiveMap({
           if (onProfileSynced) {
             onProfileSynced(coords.latitude, coords.longitude, rev);
           }
-          if (mapInstanceRef.current) {
-            mapInstanceRef.current.setView([coords.latitude, coords.longitude], 16);
-          }
           if (!silent) {
             setGpsStatusMsg({
               type: 'success',
               text:
                 locale === 'ar'
-                  ? `✓ تم جلب موقعك من الـ GPS وكتابة العنوان التفصيلي بالظبط: ${rev?.address || `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`}`
+                  ? `✓ تم جلب موقعك الحالي من الـ GPS وملء جميع الحقول تلقائياً: ${rev?.address || `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`}`
                   : `✓ GPS location detected and address populated: ${rev?.address || ''}`,
             });
           }
         } else {
+          setUserCoords(coords);
+          setShowRouteSteps(true);
           if (onProfileSynced) {
             onProfileSynced(coords.latitude, coords.longitude, null);
           }
@@ -517,23 +613,23 @@ export default function InteractiveMap({
             type: 'error',
             text: isDenied
               ? locale === 'ar'
-                ? 'تم رفض إذن الـ GPS من المتصفح. يمكنك الضغط مباشرة في أي مكان على الخريطة أو كتابة العنوان في مربع البحث بالأسفل لتحديد الموقع والعنوان فوراً!'
-                : 'GPS permission denied. Click anywhere on the map or use the search bar below to set the exact location!'
+                ? 'تم رفض إذن الـ GPS من المتصفح. يمكنك كتابة العنوان في مربع البحث بالأسفل أو الضغط مباشرة على الخريطة لتحديد الموقع وملء الحقول فوراً!'
+                : 'GPS permission denied. Type the address in the search bar below or click on the map to set the location!'
               : locale === 'ar'
-              ? 'تعذر قراءة الـ GPS تلقائياً. يمكنك الضغط مباشرة على الخريطة أو البحث باسم الشارع لتحديد الموقع والعنوان.'
-              : 'Could not read GPS automatically. Click on the map or search by street name.',
+              ? 'تعذر قراءة الـ GPS تلقائياً. يمكنك كتابة العنوان في مربع البحث أو الضغط على الخريطة لتحديد الموقع وملء الحقول.'
+              : 'Could not read GPS automatically. Search by street name or click on the map.',
           });
         }
       } finally {
         setDetectingGps(false);
       }
     },
-    [syncProfileOnDetect, locale, editable, onLocationChange, onAddressResolved, onProfileSynced, safeLat, safeLng]
+    [syncProfileOnDetect, locale, editable, moveCameraTo, onLocationChange, onAddressResolved, onProfileSynced, safeLat, safeLng]
   );
 
-  // Calculate real street-by-street route whenever userCoords or destination or travelMode changes
+  // Calculate real street-by-street route whenever userCoords or destination or travelMode changes (only in viewer mode)
   useEffect(() => {
-    if (!userCoords || markers.length > 0) {
+    if (editable || !userCoords || markers.length > 0) {
       setRouteData(null);
       return;
     }
@@ -566,7 +662,7 @@ export default function InteractiveMap({
     return () => {
       cancelled = true;
     };
-  }, [userCoords, safeLat, safeLng, travelMode, markers.length]);
+  }, [editable, userCoords, safeLat, safeLng, travelMode, markers.length]);
 
   // Auto-detect GPS on mount if requested and no explicit coordinates are saved yet
   useEffect(() => {
@@ -585,7 +681,7 @@ export default function InteractiveMap({
       const map = L.map(mapContainerRef.current, {
         center: [safeLat, safeLng],
         zoom,
-        scrollWheelZoom: false,
+        scrollWheelZoom: true,
       });
 
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -596,6 +692,7 @@ export default function InteractiveMap({
       const layerGroup = L.layerGroup().addTo(map);
       mapInstanceRef.current = map;
       layerGroupRef.current = layerGroup;
+      lastCameraCenterRef.current = { lat: safeLat, lng: safeLng };
 
       map.on('click', (e: any) => {
         if (!e?.latlng) return;
@@ -642,7 +739,18 @@ export default function InteractiveMap({
     });
   }, [editable, pickOriginMode, handleInteractivePick, locale]);
 
-  // Render Markers, Radius Circle, and Real Street Route on Map
+  // Center map camera ONLY when safeLat / safeLng genuinely moves (never on nearbyPlaces or text changes!)
+  useEffect(() => {
+    if (!leafletReady || !mapInstanceRef.current || markers.length > 0) return;
+    const prev = lastCameraCenterRef.current;
+    if (!prev || Math.abs(prev.lat - safeLat) > 0.0001 || Math.abs(prev.lng - safeLng) > 0.0001) {
+      lastCameraCenterRef.current = { lat: safeLat, lng: safeLng };
+      const currentZoom = mapInstanceRef.current.getZoom() || zoom;
+      mapInstanceRef.current.setView([safeLat, safeLng], currentZoom, { animate: false });
+    }
+  }, [leafletReady, safeLat, safeLng, markers.length, zoom]);
+
+  // Render Markers, Radius Circle, and Real Street Route on Map (without resetting camera zoom!)
   useEffect(() => {
     const L = window.L;
     const map = mapInstanceRef.current;
@@ -699,7 +807,7 @@ export default function InteractiveMap({
         `);
       });
 
-      if (userCoords) {
+      if (!editable && userCoords) {
         bounds.push([userCoords.latitude, userCoords.longitude]);
       }
 
@@ -708,13 +816,9 @@ export default function InteractiveMap({
           map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
         } catch {}
       } else if (bounds.length === 1) {
-        map.setView(bounds[0], zoom);
+        map.setView(bounds[0], zoom, { animate: false });
       }
     } else {
-      if (!userCoords) {
-        map.setView([safeLat, safeLng], map.getZoom() || zoom);
-      }
-
       const mainPinHtml = `
         <div style="
           width: 40px;
@@ -760,8 +864,8 @@ export default function InteractiveMap({
       const popupDirUrl = LocationService.buildGoogleMapsDirectionsUrl(
         safeLat,
         safeLng,
-        userCoords?.latitude,
-        userCoords?.longitude,
+        editable ? null : userCoords?.latitude,
+        editable ? null : userCoords?.longitude,
         travelMode
       );
       mainMarker.bindPopup(`
@@ -769,7 +873,7 @@ export default function InteractiveMap({
           <div style="font-weight: 800; color: #0B2A4A; font-size: 14px;">${popupTitle}</div>
           <div style="font-size: 12px; color: #64748B; margin-top: 3px; margin-bottom: 8px;">📍 ${popupSub}</div>
           <a href="${popupDirUrl}" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 5px 10px; background: #2F6BFF; color: #fff; border-radius: 6px; text-decoration: none; font-size: 11.5px; font-weight: 700;">
-            🗺️ ${locale === 'ar' ? 'الذهاب عبر خرائط جوجل ↗' : 'Google Maps Directions ↗'}
+            🗺️ ${locale === 'ar' ? 'فتح في خرائط جوجل ↗' : 'Open in Google Maps ↗'}
           </a>
         </div>
       `);
@@ -832,11 +936,12 @@ export default function InteractiveMap({
       }
     }
 
-    // User Origin / GPS Marker + Street Route Polyline
-    const distUserToPin = userCoords
-      ? calculateDistanceKm(userCoords.latitude, userCoords.longitude, safeLat, safeLng)
-      : 0;
-    if (userCoords && distUserToPin > 0.03) {
+    // User Origin / GPS Marker + Street Route Polyline (Viewer mode only)
+    const distUserToPin =
+      !editable && userCoords
+        ? calculateDistanceKm(userCoords.latitude, userCoords.longitude, safeLat, safeLng)
+        : 0;
+    if (!editable && userCoords && distUserToPin > 0.03) {
       const userPinHtml = `
         <div style="
           width: 28px;
@@ -895,7 +1000,6 @@ export default function InteractiveMap({
                 [safeLat, safeLng],
               ];
 
-        // Outer road casing for high contrast on map streets
         L.polyline(routePoints, {
           color: '#0B2A4A',
           weight: 8,
@@ -904,8 +1008,7 @@ export default function InteractiveMap({
           lineJoin: 'round',
         }).addTo(layerGroup);
 
-        // Inner vivid route path (blue for driving, emerald/blue for walking)
-        const routeLayer = L.polyline(routePoints, {
+        L.polyline(routePoints, {
           color: travelMode === 'walking' ? '#10B981' : '#2F6BFF',
           weight: 5,
           opacity: 0.95,
@@ -913,16 +1016,6 @@ export default function InteractiveMap({
           lineCap: 'round',
           lineJoin: 'round',
         }).addTo(layerGroup);
-
-        // Only auto-fit bounds to the whole route if user is within the same city/region (<= 20 km),
-        // otherwise keep the map focused on the property's exact street!
-        if (distUserToPin <= 20) {
-          try {
-            map.fitBounds(routeLayer.getBounds(), { padding: [50, 50], maxZoom: 16 });
-          } catch {}
-        } else {
-          map.setView([safeLat, safeLng], zoom);
-        }
       }
     }
   }, [
@@ -947,7 +1040,7 @@ export default function InteractiveMap({
   ]);
 
   const distanceFromUser =
-    userCoords && markers.length === 0
+    !editable && userCoords && markers.length === 0
       ? routeData?.distanceKm ?? calculateDistanceKm(userCoords.latitude, userCoords.longitude, safeLat, safeLng)
       : null;
 
@@ -971,8 +1064,8 @@ export default function InteractiveMap({
   const googleMapsDirectionsUrl = LocationService.buildGoogleMapsDirectionsUrl(
     safeLat,
     safeLng,
-    userCoords?.latitude,
-    userCoords?.longitude,
+    editable ? null : userCoords?.latitude,
+    editable ? null : userCoords?.longitude,
     travelMode
   );
 
@@ -1085,8 +1178,8 @@ export default function InteractiveMap({
                   : 'Detecting GPS & Address...'
                 : editable
                 ? locale === 'ar'
-                  ? 'حط عنواني الحالي (GPS) بالظبط'
-                  : 'Use My Exact GPS Address'
+                  ? 'لو أنت في الشقة حالياً: استخدم موقعي (GPS)'
+                  : 'Use My Current GPS Location'
                 : locale === 'ar'
                 ? 'حدد موقعي وارسم الطريق للشقة'
                 : 'My Location & Draw Route'}
@@ -1145,9 +1238,9 @@ export default function InteractiveMap({
             <span>🗺️</span>
             <span>
               {locale === 'ar'
-                ? userCoords
+                ? !editable && userCoords
                   ? 'ابدأ التحرك على خرائط جوجل ↗'
-                  : 'اتجاهات خرائط جوجل ↗'
+                  : 'عرض على خرائط جوجل ↗'
                 : 'Google Maps Directions ↗'}
             </span>
           </a>
@@ -1158,59 +1251,215 @@ export default function InteractiveMap({
       {editable && (
         <div
           style={{
-            padding: '0.65rem 1.25rem',
+            padding: '0.85rem 1.25rem',
             backgroundColor: '#EFF6FF',
             borderBottom: '1px solid #DBEAFE',
             display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            flexWrap: 'wrap',
+            flexDirection: 'column',
+            gap: '0.55rem',
           }}
         >
-          <input
-            type="text"
-            value={mapSearchQuery}
-            onChange={(e) => setMapSearchQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#0B2A4A' }}>
+              🏠 {locale === 'ar'
+                ? 'مش موجود في الشقة دلوقتي؟ اكتب عنوان الشقة أو اسم الشارع/المنطقة أو الصق رابط Google Maps وهنحددها على الـ GPS ونملأ كل الحقول تلقائياً:'
+                : 'Not at the apartment right now? Type the apartment address, street, or Google Maps link to pin GPS & auto-fill all fields:'}
+            </span>
+            {searchingSuggestions && (
+              <span style={{ fontSize: '0.75rem', color: '#2563EB', fontWeight: 700 }}>
+                ⏳ {locale === 'ar' ? 'جاري البحث عن اقتراحات العنوان...' : 'Searching addresses...'}
+              </span>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', position: 'relative' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: '240px' }}>
+              <input
+                type="text"
+                value={mapSearchQuery}
+                onChange={(e) => {
+                  setMapSearchQuery(e.target.value);
+                  setShowSuggestions(true);
+                }}
+                onFocus={() => {
+                  if (suggestions.length > 0) setShowSuggestions(true);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    setShowSuggestions(false);
+                    handleMapSearchSubmit();
+                  } else if (e.key === 'Escape') {
+                    setShowSuggestions(false);
+                  }
+                }}
+                placeholder={
+                  locale === 'ar'
+                    ? '🔍 اكتب عنوان الشقة (مثال: شارع الجلاء طنطا، أو حي الجامعة المنصورة، أو الصق رابط خرائط جوجل)...'
+                    : '🔍 Type apartment address, street, neighborhood, or paste Google Maps URL...'
+                }
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.9rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid #93C5FD',
+                  fontSize: '0.84rem',
+                  backgroundColor: '#FFFFFF',
+                  outline: 'none',
+                  boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04)',
+                }}
+              />
+
+              {/* Live Address Autocomplete Suggestions Dropdown */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    left: 0,
+                    right: 0,
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid #BFDBFE',
+                    borderRadius: '12px',
+                    boxShadow: '0 12px 28px rgba(11, 42, 74, 0.16)',
+                    zIndex: 9999,
+                    maxHeight: '260px',
+                    overflowY: 'auto',
+                    padding: '0.35rem',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.3rem 0.65rem',
+                      fontSize: '0.73rem',
+                      fontWeight: 700,
+                      color: '#64748B',
+                      borderBottom: '1px solid #F1F5F9',
+                    }}
+                  >
+                    <span>
+                      {locale === 'ar'
+                        ? '📍 اختر العنوان لتحديده على الخريطة وملء جميع الحقول تلقائياً:'
+                        : '📍 Select an address to pin & auto-fill all fields:'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowSuggestions(false)}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748B', fontWeight: 800 }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  {suggestions.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleSelectSuggestion(item)}
+                      style={{
+                        width: '100%',
+                        textAlign: 'start',
+                        padding: '0.55rem 0.75rem',
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '2px',
+                        borderBottom: '1px solid #F8FAFC',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = '#EFF6FF';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      <div style={{ fontSize: '0.84rem', fontWeight: 800, color: '#0B2A4A' }}>
+                        📍 {item.title}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#475569' }}>
+                        {item.subtitle}
+                        {item.nearestUniversity ? ` • 🎓 أقرب جامعة: ${item.nearestUniversity} (${item.distanceToUniversityKm} كم)` : ''}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowSuggestions(false);
                 handleMapSearchSubmit();
+              }}
+              disabled={geocodingBusy}
+              style={{
+                padding: '0.6rem 1rem',
+                borderRadius: '10px',
+                backgroundColor: '#0B2A4A',
+                color: '#FFFFFF',
+                border: 'none',
+                fontSize: '0.82rem',
+                fontWeight: 800,
+                cursor: geocodingBusy ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span>🎯</span>
+              <span>
+                {geocodingBusy
+                  ? locale === 'ar'
+                    ? 'جاري التحديد...'
+                    : 'Locating...'
+                  : locale === 'ar'
+                  ? 'حدد على الـ GPS واملأ الحقول تلقائياً'
+                  : 'Pin on GPS & Auto-fill Fields'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setShowSuggestions(false);
+                handleMapSearchSubmit(undefined, true);
+              }}
+              disabled={geocodingBusy}
+              title={
+                locale === 'ar'
+                  ? 'إذا كتبت العنوان أو المدينة في الحقول بالأعلى، اضغط هنا لتحديد موقعها على الـ GPS واستكمال باقي الحقول تلقائياً'
+                  : 'Resolve location from the form fields above and auto-fill remaining fields'
               }
-            }}
-            placeholder={
-              locale === 'ar'
-                ? '🔍 اكتب العنوان التفصيلي أو اسم الشارع أو الجامعة أو الصق رابط Google Maps لضبط العنوان بالظبط...'
-                : '🔍 Type street, landmark, university, or paste Google Maps link to resolve exact address...'
-            }
-            style={{
-              flex: 1,
-              minWidth: '220px',
-              padding: '0.5rem 0.85rem',
-              borderRadius: '8px',
-              border: '1px solid #93C5FD',
-              fontSize: '0.82rem',
-              backgroundColor: '#FFFFFF',
-              outline: 'none',
-            }}
-          />
-          <button
-            type="button"
-            onClick={() => handleMapSearchSubmit()}
-            disabled={geocodingBusy}
-            style={{
-              padding: '0.5rem 0.9rem',
-              borderRadius: '8px',
-              backgroundColor: '#0B2A4A',
-              color: '#FFFFFF',
-              border: 'none',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              cursor: geocodingBusy ? 'not-allowed' : 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {locale === 'ar' ? '🎯 افهم العنوان وحط الموقع بالظبط' : '🎯 Resolve & Pin Exact Address'}
-          </button>
+              style={{
+                padding: '0.6rem 0.9rem',
+                borderRadius: '10px',
+                backgroundColor: '#FFFFFF',
+                color: '#1D4ED8',
+                border: '1.5px solid #93C5FD',
+                fontSize: '0.8rem',
+                fontWeight: 800,
+                cursor: geocodingBusy ? 'not-allowed' : 'pointer',
+                whiteSpace: 'nowrap',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+              }}
+            >
+              <span>📥</span>
+              <span>
+                {locale === 'ar'
+                  ? 'حدد من الحقول المكتوبة فوق'
+                  : 'Locate from Form Fields'}
+              </span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -1298,7 +1547,7 @@ export default function InteractiveMap({
       </div>
 
       {/* Turn-by-Turn Route & Navigation Panel ("امشي ازاي") */}
-      {markers.length === 0 && userCoords && calculateDistanceKm(userCoords.latitude, userCoords.longitude, safeLat, safeLng) > 0.03 && (routeData || routeLoading) && (
+      {!editable && markers.length === 0 && userCoords && calculateDistanceKm(userCoords.latitude, userCoords.longitude, safeLat, safeLng) > 0.03 && (routeData || routeLoading) && (
         <div
           style={{
             padding: '1.1rem 1.25rem',

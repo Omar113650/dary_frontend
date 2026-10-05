@@ -202,15 +202,21 @@ function hasActiveAuthSession(): boolean {
 
 /** Notifications list with 10s freshness and 15s auto-polling */
 export function useNotifications(page = 1, limit = 50, params?: { isRead?: boolean | string; event?: string }) {
+  const queryClient = useQueryClient();
   return useQuery({
     queryKey: ['notifications', page, limit, params?.isRead, params?.event],
     queryFn: async () => {
       const res = await NotificationService.getNotifications({ page, limit, ...params });
       const items = Array.isArray(res) ? res : res?.items || [];
+      const unread = res?.unreadCount ?? items.filter((n: any) => !n.isRead && !n.read).length;
       // Attach meta and unreadCount as properties to the array for convenience
       (items as any).meta = res?.meta;
-      (items as any).unreadCount = res?.unreadCount ?? 0;
+      (items as any).unreadCount = unread;
       (items as any).total = res?.total ?? items.length;
+      // Keep the global header/sidebar badge count in sync
+      if (page === 1 && !params?.isRead && !params?.event) {
+        queryClient.setQueryData(['notifications', 'unreadCount'], unread);
+      }
       return items;
     },
     enabled: hasActiveAuthSession(),
@@ -224,7 +230,7 @@ export function useUnreadNotificationsCount() {
   return useQuery<number>({
     queryKey: ['notifications', 'unreadCount'],
     queryFn: async () => {
-      const res = await NotificationService.getNotifications({ page: 1, limit: 10 });
+      const res = await NotificationService.getNotifications({ page: 1, limit: 50 });
       return res?.unreadCount ?? 0;
     },
     enabled: hasActiveAuthSession(),
@@ -239,6 +245,9 @@ export function useMarkNotificationRead() {
   return useMutation({
     mutationFn: (id: string) => NotificationService.markAsRead(id),
     onSuccess: () => {
+      queryClient.setQueryData<number>(['notifications', 'unreadCount'], (prev) =>
+        Math.max(0, (prev ?? 1) - 1)
+      );
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
@@ -250,6 +259,7 @@ export function useMarkAllNotificationsRead() {
   return useMutation({
     mutationFn: () => NotificationService.markAllAsRead(),
     onSuccess: () => {
+      queryClient.setQueryData(['notifications', 'unreadCount'], 0);
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
@@ -270,9 +280,10 @@ export function useDeleteNotification() {
 export function useDeleteAllReadNotifications() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => NotificationService.deleteAllRead(),
+    mutationFn: (readIds?: string[]) => NotificationService.deleteAllRead(readIds),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['notifications'] });
     },
   });
 }
+

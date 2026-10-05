@@ -446,9 +446,15 @@ export function useQuery<TData = any, TError = any>(
 
   const hash = hashQueryKey(queryKey);
 
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => client.subscribe(queryKey, onStoreChange),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, hash]
+  );
+
   // Sync with external store for tear-free cache subscription
   const queryState = useSyncExternalStore(
-    (onStoreChange) => client.subscribe(queryKey, onStoreChange),
+    subscribe,
     () => client.getQueryState<TData, TError>(queryKey) || DEFAULT_QUERY_STATE,
     () => client.getQueryState<TData, TError>(queryKey) || DEFAULT_QUERY_STATE
   );

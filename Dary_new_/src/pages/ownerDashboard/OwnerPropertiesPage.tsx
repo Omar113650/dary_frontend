@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useLocale } from '../../utils/LocaleContext';
-import type { OwnerPropertyItem } from '../../services/ownerService';
-import { propertyService } from '../../services/propertyService';
+import { OwnerService, type OwnerPropertyItem } from '../../services/ownerService';
+import { propertyService, isPropertyDeletedOrArchived } from '../../services/propertyService';
 import AnimatedCounter from '../../components/common/AnimatedCounter';
 import { useOwnerMyProperties } from '../../hooks/useDashboardQueries';
 import { useQueryClient } from '../../lib/queryClient';
@@ -21,6 +21,13 @@ export default function OwnerPropertiesPage() {
   // Action states
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [pageMessage, setPageMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [locallyDeletedIds, setLocallyDeletedIds] = useState<Set<string>>(() => new Set());
+  const [propertyBookingsMap, setPropertyBookingsMap] = useState<Record<string, any[]>>({});
+
+  // Delete Property Modal states
+  const [deleteModalProperty, setDeleteModalProperty] = useState<OwnerPropertyItem | null>(null);
+  const [deleteModalBlockedReason, setDeleteModalBlockedReason] = useState<string | null>(null);
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
 
   // Manage Rooms state
   const [manageRoomsProperty, setManageRoomsProperty] = useState<OwnerPropertyItem | null>(null);
@@ -55,7 +62,43 @@ export default function OwnerPropertiesPage() {
     fetchProperties();
   }, [fetchProperties]);
 
-  const properties: OwnerPropertyItem[] = Array.isArray(rawProperties) ? rawProperties : [];
+  const properties: OwnerPropertyItem[] = useMemo(() => {
+    const list = Array.isArray(rawProperties) ? rawProperties : [];
+    return list.filter((p) => p && !locallyDeletedIds.has(String(p.id)) && !isPropertyDeletedOrArchived(p));
+  }, [rawProperties, locallyDeletedIds]);
+
+  // Fetch bookings per property in background to accurately detect active bookings on each property
+  useEffect(() => {
+    let cancelled = false;
+    if (properties.length === 0) return;
+
+    const idsToFetch = properties
+      .map((p) => String(p.id))
+      .filter((id) => Boolean(id) && propertyBookingsMap[id] === undefined);
+
+    if (idsToFetch.length === 0) return;
+
+    Promise.all(
+      idsToFetch.map(async (id) => {
+        const bks = await OwnerService.getPropertyBookings(id).catch(() => []);
+        return [id, Array.isArray(bks) ? bks : []] as const;
+      })
+    ).then((entries) => {
+      if (cancelled) return;
+      setPropertyBookingsMap((prev) => {
+        const next = { ...prev };
+        for (const [id, bks] of entries) {
+          next[id] = bks;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [properties, propertyBookingsMap]);
+
   const error = queryError
     ? (queryError as any)?.message ||
       (locale === 'ar'
@@ -68,10 +111,87 @@ export default function OwnerPropertiesPage() {
   // Helper to reliably identify pending properties even if status is lowercase or undefined
   const isPendingStatus = (st?: string) => {
     const s = (st || '').toUpperCase();
-    if (s === 'APPROVED' || s === 'ACTIVE' || s === 'REJECTED' || s === 'SUSPENDED') {
+    if (
+      s === 'APPROVED' ||
+      s === 'ACTIVE' ||
+      s === 'REJECTED' ||
+      s === 'SUSPENDED' ||
+      s === 'ARCHIVED' ||
+      s === 'DELETED'
+    ) {
       return false;
     }
     return true; // Any other status (PENDING, PENDING_REVIEW, UNDER_REVIEW, null, undefined, empty) is treated as pending review
+  };
+
+  // Helper to inspect whether a property has any active bookings or occupied beds
+  const getPropertyBookingInfo = (propItem?: any) => {
+    if (!propItem) {
+      return { hasBooking: false, isFull: false, isPartial: false, activeBookingsCount: 0, occupiedBeds: 0 };
+    }
+    const rooms = Array.isArray(propItem?.rooms_)
+      ? propItem.rooms_
+      : Array.isArray(propItem?.rooms)
+      ? propItem.rooms
+      : [];
+    let isFull = false;
+    let isPartial = false;
+    let occupiedBeds = 0;
+
+    if (rooms.length > 0) {
+      const totalBeds = rooms.reduce((acc: number, r: any) => acc + Math.max(1, Number(r.totalBeds || 1)), 0);
+      const availBeds = rooms.reduce(
+        (acc: number, r: any) => acc + Math.max(0, Number(r.availableBeds ?? r.totalBeds ?? 1)),
+        0
+      );
+      occupiedBeds = Math.max(0, totalBeds - availBeds);
+      if (availBeds <= 0 || rooms.every((r: any) => r.status === 'FULL' || Number(r.availableBeds) <= 0)) {
+        isFull = true;
+      } else if (availBeds < totalBeds) {
+        isPartial = true;
+      }
+    } else if (
+      propItem?.status === 'RENTED' ||
+      propItem?.status === 'OCCUPIED' ||
+      propItem?.status === 'BOOKED'
+    ) {
+      isFull = true;
+    }
+
+    const isBookingCurrentlyActive = (b: any) => {
+      const st = String(b?.status || '').toUpperCase();
+      if (!['PENDING', 'CONTACTED', 'CONFIRMED', 'CLOSED'].includes(st)) return false;
+      const end = b?.endDate || b?.end_date;
+      if (!end) return true;
+      const endMs = new Date(end).getTime();
+      return Number.isNaN(endMs) ? true : endMs > Date.now();
+    };
+
+    const fetchedBookings = propertyBookingsMap[String(propItem.id)];
+    const bookingsList =
+      fetchedBookings !== undefined
+        ? fetchedBookings
+        : Array.isArray(propItem?.bookings)
+        ? propItem.bookings
+        : [];
+    const activeBookings = Array.isArray(bookingsList)
+      ? bookingsList.filter(isBookingCurrentlyActive)
+      : [];
+
+    // If live bookings have been fetched from the server, rely on activeBookings count (matching backend deletePropertyService);
+    // otherwise fall back to room bed occupancy while bookings are loading.
+    const hasBooking =
+      fetchedBookings !== undefined
+        ? activeBookings.length > 0
+        : isFull || isPartial || occupiedBeds > 0 || activeBookings.length > 0;
+
+    return {
+      hasBooking,
+      isFull,
+      isPartial,
+      activeBookingsCount: activeBookings.length,
+      occupiedBeds,
+    };
   };
 
   const filteredProperties = useMemo(() => {
@@ -136,20 +256,7 @@ export default function OwnerPropertiesPage() {
   function getStatusBadge(status?: string, propItem?: any) {
     const s = (status || '').toUpperCase();
     if (s === 'APPROVED' || s === 'ACTIVE') {
-      const rooms = Array.isArray(propItem?.rooms_) ? propItem.rooms_ : [];
-      let isFull = false;
-      let isPartial = false;
-      if (rooms.length > 0) {
-        const totalBeds = rooms.reduce((acc: number, r: any) => acc + Number(r.totalBeds || 1), 0);
-        const availBeds = rooms.reduce((acc: number, r: any) => acc + Math.max(0, Number(r.availableBeds ?? r.totalBeds ?? 1)), 0);
-        if (availBeds <= 0 || rooms.every((r: any) => r.status === 'FULL' || Number(r.availableBeds) <= 0)) {
-          isFull = true;
-        } else if (availBeds < totalBeds) {
-          isPartial = true;
-        }
-      } else if (propItem?.isAvailable === false || propItem?.status === 'RENTED' || propItem?.status === 'OCCUPIED' || propItem?.status === 'BOOKED') {
-        isFull = true;
-      }
+      const { isFull, isPartial } = getPropertyBookingInfo(propItem);
 
       if (isFull) {
         return (
@@ -219,28 +326,111 @@ export default function OwnerPropertiesPage() {
     }
   };
 
-  const handleDeleteProperty = async (propertyId: string) => {
+  const handleOpenDeleteProperty = (property: OwnerPropertyItem) => {
     if (actionLoadingId) return;
-    if (!window.confirm(locale === 'ar' ? 'هل أنت متأكد من رغبتك في حذف هذا العقار نهائياً؟ هذا الإجراء لا يمكن التراجع عنه.' : 'Are you sure you want to permanently delete this property? This cannot be undone.')) {
-      return;
+    setDeleteModalError(null);
+    const bookingInfo = getPropertyBookingInfo(property);
+    setDeleteModalProperty(property);
+
+    if (bookingInfo.hasBooking) {
+      const detailsAr = bookingInfo.isFull
+        ? 'العقار محجوز بالكامل حالياً'
+        : bookingInfo.isPartial
+        ? `العقار محجوز جزئياً (${bookingInfo.occupiedBeds} سرير مشغول)`
+        : `يوجد ${bookingInfo.activeBookingsCount} حجز نشط مرتبط بهذا العقار`;
+      const detailsEn = bookingInfo.isFull
+        ? 'This property is currently fully booked'
+        : bookingInfo.isPartial
+        ? `This property is partially booked (${bookingInfo.occupiedBeds} occupied beds)`
+        : `There are ${bookingInfo.activeBookingsCount} active bookings linked to this property`;
+
+      setDeleteModalBlockedReason(
+        locale === 'ar'
+          ? `لا يمكن حذف هذا العقار نهائياً لأن ${detailsAr}. لحماية حقوق الطلاب والمالك، يُمنع حذف أي عقار عليه حجز قائم. يمكنك بدلاً من ذلك إخفاء العقار مؤقتاً عبر زر (متاح / غير متاح) أو انتظار انتهاء/إلغاء الحجوزات المرتبطة به.`
+          : `${detailsEn}. Properties with active bookings cannot be permanently deleted. You can temporarily hide the listing using the availability toggle or wait until active bookings are completed/cancelled.`
+      );
+    } else {
+      setDeleteModalBlockedReason(null);
     }
+  };
+
+  const handleConfirmDeleteProperty = async () => {
+    if (!deleteModalProperty || actionLoadingId) return;
+    const propertyId = deleteModalProperty.id;
     setActionLoadingId(propertyId);
+    setDeleteModalError(null);
     setPageMessage(null);
+
     try {
-      await propertyService.deleteProperty(propertyId);
-      setPageMessage({
-        type: 'success',
-        text: locale === 'ar' ? 'تم حذف العقار بنجاح.' : 'Property deleted successfully.',
+      // Double-check live bookings from the server before executing permanent delete
+      const liveBookings = await OwnerService.getPropertyBookings(propertyId).catch(() => []);
+      const nowMs = Date.now();
+      const activeLiveBookings = Array.isArray(liveBookings)
+        ? liveBookings.filter((b: any) => {
+            const st = String(b?.status || '').toUpperCase();
+            if (!['PENDING', 'CONTACTED', 'CONFIRMED', 'CLOSED'].includes(st)) return false;
+            const end = b?.endDate || b?.end_date;
+            if (!end) return true;
+            const endMs = new Date(end).getTime();
+            return Number.isNaN(endMs) ? true : endMs > nowMs;
+          })
+        : [];
+
+      if (activeLiveBookings.length > 0) {
+        setPropertyBookingsMap((prev) => ({ ...prev, [propertyId]: liveBookings }));
+        setDeleteModalBlockedReason(
+          locale === 'ar'
+            ? `لا يمكن حذف هذا العقار لوجود ${activeLiveBookings.length} طلب حجز قائم عليه في النظام. يرجى إنهاء أو إلغاء الحجوزات أولاً من قسم (الحجوزات).`
+            : `Cannot delete this property because it has ${activeLiveBookings.length} active booking(s) in the system. Please complete or cancel them first.`
+        );
+        setActionLoadingId(null);
+        return;
+      }
+
+      const rooms =
+        (deleteModalProperty as any).rooms_ ||
+        (Array.isArray(deleteModalProperty.rooms) ? deleteModalProperty.rooms : []);
+      await propertyService.deleteProperty(propertyId, rooms);
+
+      // Immediately remove from local UI and query caches
+      setLocallyDeletedIds((prev) => {
+        const next = new Set(prev);
+        next.add(String(propertyId));
+        return next;
+      });
+      queryClient.setQueryData(['owner', 'properties', 'my'], (oldData: any) => {
+        if (!Array.isArray(oldData)) return oldData;
+        return oldData.filter((p: any) => String(p?.id) !== String(propertyId));
       });
       queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
+
+      setDeleteModalProperty(null);
+      setDeleteModalBlockedReason(null);
+      setPageMessage({
+        type: 'success',
+        text: locale === 'ar' ? '✓ تم حذف العقار نهائياً بنجاح.' : '✓ Property permanently deleted.',
+      });
       await fetchProperties();
     } catch (err: any) {
-      setPageMessage({
-        type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشل حذف العقار.' : 'Failed to delete property.'),
-      });
+      const rawMsg = String(err?.message || '');
+      const isBookingConstraint =
+        /booking|foreign key|constraint|rented|occupied|حجز|مرتبط/i.test(rawMsg) ||
+        err?.status === 409 ||
+        err?.status === 400;
+
+      if (isBookingConstraint) {
+        setDeleteModalBlockedReason(
+          locale === 'ar'
+            ? 'تعذر حذف العقار لوجود سجلات حجوزات مرتبطة به في قاعدة البيانات. لا يمكن حذف العقار طالما ارتبطت به حجوزات، ولكن يمكنك إيقاف عرضه للطلاب عبر زر (🟢 متاح / 🔴 غير متاح).'
+            : 'Cannot delete this property because booking records are linked to it in the database. You can hide it from students using the Availability toggle instead.'
+        );
+      } else {
+        setDeleteModalError(
+          rawMsg || (locale === 'ar' ? 'فشل حذف العقار من الخادم. يرجى المحاولة مرة أخرى.' : 'Failed to delete property.')
+        );
+      }
     } finally {
       setActionLoadingId(null);
     }
@@ -789,24 +979,38 @@ export default function OwnerPropertiesPage() {
                         </Link>
 
                         {/* Delete Property */}
-                        <button
-                          type="button"
-                          disabled={actionLoadingId === property.id}
-                          onClick={() => handleDeleteProperty(property.id)}
-                          title={locale === 'ar' ? 'حذف العقار نهائياً' : 'Delete property'}
-                          style={{
-                            padding: '0.35rem 0.55rem',
-                            borderRadius: '6px',
-                            border: '1px solid #FCA5A5',
-                            backgroundColor: '#FEF2F2',
-                            color: '#DC2626',
-                            fontSize: '0.75rem',
-                            fontWeight: 700,
-                            cursor: actionLoadingId === property.id ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          🗑️
-                        </button>
+                        {(() => {
+                          const { hasBooking } = getPropertyBookingInfo(property);
+                          return (
+                            <button
+                              type="button"
+                              disabled={actionLoadingId === property.id}
+                              onClick={() => handleOpenDeleteProperty(property)}
+                              title={
+                                hasBooking
+                                  ? locale === 'ar'
+                                    ? 'لا يمكن حذف العقار لوجود حجز قائم عليه'
+                                    : 'Cannot delete property while it has an active booking'
+                                  : locale === 'ar'
+                                  ? 'حذف العقار نهائياً'
+                                  : 'Delete property permanently'
+                              }
+                              style={{
+                                padding: '0.35rem 0.55rem',
+                                borderRadius: '6px',
+                                border: hasBooking ? '1px solid #CBD5E1' : '1px solid #FCA5A5',
+                                backgroundColor: hasBooking ? '#F8FAFC' : '#FEF2F2',
+                                color: hasBooking ? '#64748B' : '#DC2626',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: actionLoadingId === property.id ? 'not-allowed' : 'pointer',
+                                opacity: hasBooking ? 0.85 : 1,
+                              }}
+                            >
+                              {actionLoadingId === property.id ? '⏳' : hasBooking ? '🔒' : '🗑️'}
+                            </button>
+                          );
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1241,6 +1445,211 @@ export default function OwnerPropertiesPage() {
           onClose={() => setImageManagerProperty(null)}
         />
       )}
+
+      {/* ── Delete Property / Active Booking Protection Modal ─────────────── */}
+      {deleteModalProperty && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100,
+            padding: '1rem',
+          }}
+          onClick={() => {
+            if (!actionLoadingId) {
+              setDeleteModalProperty(null);
+              setDeleteModalBlockedReason(null);
+              setDeleteModalError(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '16px',
+              padding: '1.75rem',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 20px 45px rgba(15, 23, 42, 0.25)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: '2.6rem', textAlign: 'center', marginBottom: '0.6rem' }}>
+              {deleteModalBlockedReason ? '🔒' : '🗑️'}
+            </div>
+
+            <h3
+              style={{
+                margin: '0 0 0.5rem',
+                fontSize: '1.15rem',
+                fontWeight: 800,
+                color: deleteModalBlockedReason ? '#92400E' : '#991B1B',
+                textAlign: 'center',
+              }}
+            >
+              {deleteModalBlockedReason
+                ? locale === 'ar'
+                  ? 'لا يمكن حذف عقار عليه حجز قائم'
+                  : 'Cannot Delete Property With Active Booking'
+                : locale === 'ar'
+                ? 'تأكيد حذف العقار نهائياً'
+                : 'Confirm Permanent Property Deletion'}
+            </h3>
+
+            <div
+              style={{
+                backgroundColor: '#F8FAFC',
+                border: '1px solid #E2E8F0',
+                borderRadius: '10px',
+                padding: '0.65rem 0.9rem',
+                marginBottom: '1rem',
+                textAlign: 'center',
+                fontWeight: 700,
+                color: 'var(--dary-navy)',
+                fontSize: '0.92rem',
+              }}
+            >
+              🏢 {deleteModalProperty.title}
+            </div>
+
+            {deleteModalBlockedReason ? (
+              <div
+                style={{
+                  backgroundColor: '#FFFBEB',
+                  border: '1px solid #FDE68A',
+                  borderRadius: '10px',
+                  padding: '0.9rem 1rem',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.86rem',
+                  color: '#92400E',
+                  lineHeight: 1.65,
+                }}
+              >
+                {deleteModalBlockedReason}
+              </div>
+            ) : (
+              <p
+                style={{
+                  margin: '0 0 1.25rem',
+                  fontSize: '0.88rem',
+                  color: '#475569',
+                  lineHeight: 1.6,
+                  textAlign: 'center',
+                }}
+              >
+                {locale === 'ar'
+                  ? 'هل أنت متأكد من رغبتك في حذف هذا العقار نهائياً؟ لا توجد حجوزات نشطة على هذا العقار حالياً، وسيتم إزالته بالكامل من حسابك ومن نتائج البحث للطلاب.'
+                  : 'Are you sure you want to permanently delete this property? There are no active bookings on it, and it will be completely removed from your account and student search results.'}
+              </p>
+            )}
+
+            {deleteModalError && (
+              <div
+                style={{
+                  backgroundColor: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                  borderRadius: '10px',
+                  padding: '0.75rem 0.9rem',
+                  marginBottom: '1.15rem',
+                  fontSize: '0.84rem',
+                  color: '#B91C1C',
+                  lineHeight: 1.5,
+                }}
+              >
+                ⚠️ {deleteModalError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                disabled={Boolean(actionLoadingId)}
+                onClick={() => {
+                  setDeleteModalProperty(null);
+                  setDeleteModalBlockedReason(null);
+                  setDeleteModalError(null);
+                }}
+                style={{
+                  padding: '0.6rem 1.25rem',
+                  borderRadius: '10px',
+                  backgroundColor: '#F1F5F9',
+                  color: '#475569',
+                  border: '1px solid #CBD5E1',
+                  fontWeight: 700,
+                  fontSize: '0.875rem',
+                  cursor: actionLoadingId ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {deleteModalBlockedReason
+                  ? locale === 'ar'
+                    ? 'حسناً، فهمت'
+                    : 'Got it'
+                  : locale === 'ar'
+                  ? 'إلغاء'
+                  : 'Cancel'}
+              </button>
+
+              {deleteModalBlockedReason && deleteModalProperty.isAvailable !== false && (
+                <button
+                  type="button"
+                  disabled={Boolean(actionLoadingId)}
+                  onClick={async () => {
+                    const id = deleteModalProperty.id;
+                    setDeleteModalProperty(null);
+                    setDeleteModalBlockedReason(null);
+                    await handleToggleAvailability(id);
+                  }}
+                  style={{
+                    padding: '0.6rem 1.25rem',
+                    borderRadius: '10px',
+                    backgroundColor: '#0B2A4A',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {locale === 'ar' ? '🔴 إخفاء العقار مؤقتاً بدل الحذف' : '🔴 Hide Property Temporarily'}
+                </button>
+              )}
+
+              {!deleteModalBlockedReason && (
+                <button
+                  type="button"
+                  disabled={Boolean(actionLoadingId)}
+                  onClick={handleConfirmDeleteProperty}
+                  style={{
+                    padding: '0.6rem 1.35rem',
+                    borderRadius: '10px',
+                    backgroundColor: '#DC2626',
+                    color: '#FFFFFF',
+                    border: 'none',
+                    fontWeight: 700,
+                    fontSize: '0.875rem',
+                    cursor: actionLoadingId ? 'not-allowed' : 'pointer',
+                    boxShadow: '0 2px 8px rgba(220, 38, 38, 0.3)',
+                  }}
+                >
+                  {actionLoadingId === deleteModalProperty.id
+                    ? locale === 'ar'
+                      ? '⏳ جاري الحذف...'
+                      : '⏳ Deleting...'
+                    : locale === 'ar'
+                    ? '🗑️ نعم، حذف العقار نهائياً'
+                    : '🗑️ Yes, Delete Permanently'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
