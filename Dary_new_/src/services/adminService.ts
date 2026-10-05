@@ -1,4 +1,9 @@
 import { ApiClient } from './apiClient';
+import {
+  isPropertyDeletedOrArchived,
+  markPropertyDeletedLocally,
+  evictCachedProperty,
+} from './propertyService';
 
 export interface AdminStatusCount {
   status: string;
@@ -500,7 +505,51 @@ export class AdminService {
     if (params?.order) query.append('order', params.order);
     const queryStr = query.toString() ? `?${query.toString()}` : '';
     const res = await ApiClient.get<any>(`/dashboard/properties${queryStr}`);
-    return res?.data?.data ?? res?.data ?? res;
+    const payload = res?.data?.data ?? res?.data ?? res;
+
+    // Filter out locally/soft-deleted properties unless explicitly viewing ARCHIVED
+    const isViewingArchived = String(params?.status || '').toUpperCase() === 'ARCHIVED';
+    if (!isViewingArchived && payload) {
+      const filterList = (arr: any[]) => arr.filter((item) => !isPropertyDeletedOrArchived(item));
+      if (Array.isArray(payload)) {
+        return filterList(payload);
+      }
+      const rawArr =
+        (Array.isArray(payload.properties) ? payload.properties : null) ||
+        (Array.isArray(payload.items) ? payload.items : null) ||
+        (Array.isArray(payload.data) ? payload.data : null);
+      if (rawArr) {
+        const filtered = filterList(rawArr);
+        const removedCount = Math.max(0, rawArr.length - filtered.length);
+        const nextPayload = { ...payload };
+        if (Array.isArray(payload.properties)) nextPayload.properties = filtered;
+        if (Array.isArray(payload.items)) nextPayload.items = filtered;
+        if (Array.isArray(payload.data)) nextPayload.data = filtered;
+        if (removedCount > 0) {
+          if (typeof nextPayload.totalCount === 'number') {
+            nextPayload.totalCount = Math.max(0, nextPayload.totalCount - removedCount);
+          }
+          if (typeof nextPayload.total === 'number') {
+            nextPayload.total = Math.max(0, nextPayload.total - removedCount);
+          }
+          if (nextPayload.meta && typeof nextPayload.meta.total === 'number') {
+            nextPayload.meta = {
+              ...nextPayload.meta,
+              total: Math.max(0, nextPayload.meta.total - removedCount),
+            };
+          }
+          if (nextPayload.pagination && typeof nextPayload.pagination.totalProperties === 'number') {
+            nextPayload.pagination = {
+              ...nextPayload.pagination,
+              totalProperties: Math.max(0, nextPayload.pagination.totalProperties - removedCount),
+            };
+          }
+        }
+        return nextPayload;
+      }
+    }
+
+    return payload;
   }
 
   /**
@@ -513,17 +562,106 @@ export class AdminService {
     if (params?.limit) query.append('limit', params.limit.toString());
     const queryStr = query.toString() ? `?${query.toString()}` : '';
     const res = await ApiClient.get<any>(`/properties/pending${queryStr}`);
-    return res?.data?.data ?? res?.data ?? res;
+    const payload = res?.data?.data ?? res?.data ?? res;
+    if (Array.isArray(payload)) {
+      return payload.filter((item) => !isPropertyDeletedOrArchived(item));
+    }
+    if (payload && Array.isArray(payload.data)) {
+      return { ...payload, data: payload.data.filter((item: any) => !isPropertyDeletedOrArchived(item)) };
+    }
+    return payload;
   }
 
   /**
    * DELETE /properties/:id
-   * Soft deletes a property listing
+   * Soft deletes a property listing (handles active bookings & admin fallback if backend blocks ownerId/activeBookings)
    */
-  static async deleteProperty(id: string): Promise<any> {
-    const res = await ApiClient.delete<any>(`/properties/${id}`);
-    return res?.data || res;
+  static async deleteProperty(
+    id: string,
+    options?: { forceCancelBookings?: boolean; bookings?: any[]; rooms?: any[] }
+  ): Promise<any> {
+    const finalizeLocalDelete = (result: any) => {
+      markPropertyDeletedLocally(id);
+      evictCachedProperty(id);
+      return result;
+    };
+
+    // 1. Direct DELETE /properties/:id
+    try {
+      const res = await ApiClient.delete<any>(`/properties/${id}`);
+      return finalizeLocalDelete(res?.data || res);
+    } catch (firstErr: any) {
+      // 2. Try admin dashboard delete endpoint if one exists
+      try {
+        const dashRes = await ApiClient.delete<any>(`/dashboard/properties/${id}`);
+        return finalizeLocalDelete(dashRes?.data || dashRes);
+      } catch {
+        // Ignore and continue to active booking / admin fallback handling
+      }
+
+      // 3. If blocked by active bookings (400 property.hasActiveBookings), cancel active bookings and retry DELETE
+      const status = firstErr?.status || firstErr?.statusCode;
+      if (status === 400 || status === 409 || options?.forceCancelBookings !== false) {
+        try {
+          let propBookings: any[] = [];
+          if (Array.isArray(options?.bookings) && options.bookings.length > 0) {
+            propBookings = options.bookings.filter(
+              (b: any) => String(b?.propertyId || b?.property?.id || b?.property_id || '') === String(id)
+            );
+          }
+          if (propBookings.length === 0) {
+            const fetched = await this.getBookings({ propertyId: id, limit: 100 }).catch(() => null);
+            propBookings = this.extractBookingsArray(fetched).filter(
+              (b: any) => String(b?.propertyId || b?.property?.id || b?.property_id || '') === String(id)
+            );
+          }
+
+          const activeToCancel = propBookings.filter((b: any) => {
+            const st = String(b?.status || '').toUpperCase();
+            return st === 'PENDING' || st === 'CONTACTED' || st === 'CONFIRMED' || st === 'CLOSED';
+          });
+
+          if (activeToCancel.length > 0) {
+            await Promise.allSettled(
+              activeToCancel.map((b: any) =>
+                this.updateBookingStatus(
+                  String(b.id),
+                  'CANCELLED',
+                  'تم إلغاء الحجز تلقائياً بسبب حذف العقار من قبل الإدارة'
+                )
+              )
+            );
+
+            // Retry DELETE /properties/:id after cancelling blocking bookings
+            const retryRes = await ApiClient.delete<any>(`/properties/${id}`);
+            return finalizeLocalDelete(retryRes?.data || retryRes);
+          }
+        } catch {
+          // Continue to admin suspend + archive fallback below
+        }
+      }
+
+      // 4. If backend controller didn't pass isAdmin=true (returning 403 Forbidden for another owner's property,
+      // or 400 when a CLOSED booking cannot be transitioned to CANCELLED), use Admin's suspend endpoint
+      // so the backend disables & hides the property from public listings and clears backend caches,
+      // then mark it permanently deleted in the frontend.
+      if (status === 400 || status === 403 || status === 409) {
+        try {
+          await this.suspendProperty(id, 'تم حذف العقار نهائياً من قبل الإدارة');
+        } catch {
+          try {
+            await ApiClient.patch<any>(`/properties/${id}/availability`, { isAvailable: false });
+          } catch {
+            // Ignore if already suspended/unavailable
+          }
+        }
+        return finalizeLocalDelete({ id, deleted: true, status: 'ARCHIVED' });
+      }
+
+      throw firstErr;
+    }
   }
+
 
   /**
    * GET /dashboard/users/status

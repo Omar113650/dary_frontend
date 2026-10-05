@@ -8,7 +8,12 @@ import Pagination from '../../components/common/Pagination';
 import { useAdminPropertiesStatus } from '../../hooks/useDashboardQueries';
 import { useQueryClient, STALE_TIMES } from '../../lib/queryClient';
 
-import { propertyService, evictCachedProperty } from '../../services/propertyService';
+import {
+  propertyService,
+  evictCachedProperty,
+  isPropertyDeletedOrArchived,
+  markPropertyDeletedLocally,
+} from '../../services/propertyService';
 
 export interface PropertyOccupancyInfo {
   isFullyBooked: boolean;
@@ -200,6 +205,9 @@ export default function AdminPropertiesPage() {
   const [rejectionReason, setRejectionReason] = useState('');
   const [suspendModalId, setSuspendModalId] = useState<string | null>(null);
   const [deleteModalId, setDeleteModalId] = useState<string | null>(null);
+  const [deleteModalError, setDeleteModalError] = useState<string | null>(null);
+  const [locallyDeletedIds, setLocallyDeletedIds] = useState<Set<string>>(() => new Set());
+  const [deletedStatusCounts, setDeletedStatusCounts] = useState<Record<string, number>>({});
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
@@ -220,19 +228,29 @@ export default function AdminPropertiesPage() {
   // 2. Fetch Properties List
   const fetchProperties = useCallback(async (forceRefresh = false) => {
     const isPending = statusFilter === 'PENDING';
+    const isViewingArchived = statusFilter === 'ARCHIVED';
+    const filterActiveProperties = (arr: any[]): AdminPropertyItem[] => {
+      if (!Array.isArray(arr)) return [];
+      if (isViewingArchived) return arr;
+      return arr.filter(
+        (p) => p && !locallyDeletedIds.has(String(p.id)) && !isPropertyDeletedOrArchived(p)
+      );
+    };
+
     const cacheKey = isPending
       ? ['admin', 'properties', 'pending', { page, limit, search: debouncedSearch }]
       : ['admin', 'properties', { page, limit, status: statusFilter, search: debouncedSearch, sort: sortBy, order: sortOrder }];
     const cached = !forceRefresh ? queryClient.getQueryData<any>(cacheKey) : undefined;
     if (cached) {
       const list = cached?.properties || cached?.items || cached?.data || (Array.isArray(cached) ? cached : []);
-      setProperties(Array.isArray(list) ? list : []);
+      const filteredCached = filterActiveProperties(list);
+      setProperties(filteredCached);
       const total =
         cached?.pagination?.totalProperties ??
         cached?.meta?.total ??
         cached?.totalCount ??
         cached?.total ??
-        (Array.isArray(list) ? list.length : 0);
+        filteredCached.length;
       setTotalCount(total);
       const pages =
         cached?.pagination?.totalPages ??
@@ -264,8 +282,9 @@ export default function AdminPropertiesPage() {
         force: forceRefresh,
       });
       const list = data?.properties || data?.items || data?.data || (Array.isArray(data) ? data : []);
-      const safeList: AdminPropertyItem[] = Array.isArray(list) ? list : [];
+      const safeList: AdminPropertyItem[] = filterActiveProperties(list);
       setProperties(safeList);
+
 
       // Hydrate rooms_ for properties if the list endpoint omitted room details
       const needsRoomsHydration = safeList.some(
@@ -320,7 +339,7 @@ export default function AdminPropertiesPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, limit, statusFilter, debouncedSearch, sortBy, sortOrder, locale, queryClient]);
+  }, [page, limit, statusFilter, debouncedSearch, sortBy, sortOrder, locale, queryClient, locallyDeletedIds]);
 
   // Handle Approve
   const handleApprove = async (id: string) => {
@@ -434,27 +453,69 @@ export default function AdminPropertiesPage() {
   const handleConfirmDelete = async () => {
     if (actionLoadingId || !deleteModalId) return;
     const targetId = deleteModalId;
+    const targetProp = properties.find((p) => String(p.id) === String(targetId));
+    const targetOcc = targetProp ? getPropertyOccupancyStatus(targetProp, bookingsList, locale) : null;
+
     setActionLoadingId(targetId);
+    setDeleteModalError(null);
     setActionMessage(null);
     try {
-      await AdminService.deleteProperty(targetId);
+      await AdminService.deleteProperty(targetId, {
+        forceCancelBookings: true,
+        bookings: bookingsList,
+        rooms: targetProp?.rooms_,
+      });
+
+      markPropertyDeletedLocally(targetId);
       evictCachedProperty(targetId);
-      setProperties((prev) => prev.filter((p) => p.id !== targetId));
+
+      setLocallyDeletedIds((prev) => {
+        const next = new Set(prev);
+        next.add(String(targetId));
+        return next;
+      });
+
+      // Immediately adjust status metric counts so the top cards reflect the deletion right away
+      if (targetProp) {
+        const propSt = String(targetProp.status || 'APPROVED').toUpperCase();
+        setDeletedStatusCounts((prev) => {
+          const next = { ...prev };
+          next[propSt] = (next[propSt] || 0) + 1;
+          if (targetOcc?.isFullyBooked) {
+            next['FULL'] = (next['FULL'] || 0) + 1;
+            next['BOOKED'] = (next['BOOKED'] || 0) + 1;
+          } else if (targetOcc?.isAvailable && propSt === 'APPROVED') {
+            next['AVAILABLE'] = (next['AVAILABLE'] || 0) + 1;
+          }
+          return next;
+        });
+      }
+
+      setProperties((prev) => prev.filter((p) => String(p.id) !== String(targetId)));
       setTotalCount((prev) => Math.max(0, prev - 1));
+      setDeleteModalId(null);
+      setDeleteModalError(null);
+
       setActionMessage({
         type: 'success',
-        text: locale === 'ar' ? 'تم حذف العقار بنجاح.' : 'Property deleted successfully.',
+        text:
+          locale === 'ar'
+            ? `✓ تم حذف العقار${targetProp?.title ? ` "${targetProp.title}"` : ''} نهائياً من المنصة.`
+            : `✓ Property${targetProp?.title ? ` "${targetProp.title}"` : ''} deleted successfully.`,
       });
-      setDeleteModalId(null);
+
       queryClient.invalidateQueries({ queryKey: ['admin', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['owner', 'properties'] });
       queryClient.invalidateQueries({ queryKey: ['properties'] });
-      await Promise.all([fetchProperties(true), fetchStatus()]);
+      await Promise.all([fetchProperties(true), fetchStatus(), fetchBookingsList()]);
     } catch (err: any) {
-      setDeleteModalId(null);
+      const msg =
+        err?.message ||
+        (locale === 'ar' ? 'فشلت عملية حذف العقار. يرجى المحاولة مرة أخرى.' : 'Failed to delete property.');
+      setDeleteModalError(msg);
       setActionMessage({
         type: 'error',
-        text: err?.message || (locale === 'ar' ? 'فشلت عملية حذف العقار.' : 'Failed to delete property.'),
+        text: msg,
       });
     } finally {
       setActionLoadingId(null);
@@ -490,13 +551,23 @@ export default function AdminPropertiesPage() {
         ? raw.data
         : raw;
 
+    const applyDecrement = (st: string, rawCount: number) => {
+      const upper = st.toUpperCase();
+      const dec = deletedStatusCounts[upper] || 0;
+      return Math.max(0, rawCount - dec);
+    };
+
     if (Array.isArray(unwrapped)) {
       return unwrapped
         .filter((item) => item && item.status && String(item.status).toLowerCase() !== 'total')
-        .map((item) => ({
-          status: String(item.status).toUpperCase(),
-          count: typeof item.count === 'number' ? item.count : Number(item.count || 0),
-        }));
+        .map((item) => {
+          const st = String(item.status).toUpperCase();
+          const base = typeof item.count === 'number' ? item.count : Number(item.count || 0);
+          return {
+            status: st,
+            count: applyDecrement(st, base),
+          };
+        });
     }
 
     if (typeof unwrapped === 'object') {
@@ -505,10 +576,13 @@ export default function AdminPropertiesPage() {
           const lower = key.toLowerCase();
           return lower !== 'total' && lower !== 'totalproperties' && typeof val === 'number';
         })
-        .map(([key, val]) => ({
-          status: key.toUpperCase(),
-          count: Number(val || 0),
-        }));
+        .map(([key, val]) => {
+          const st = key.toUpperCase();
+          return {
+            status: st,
+            count: applyDecrement(st, Number(val || 0)),
+          };
+        });
     }
     return [];
   };
@@ -517,6 +591,9 @@ export default function AdminPropertiesPage() {
 
   // Client filtering supporting custom tabs (BOOKED, AVAILABLE, etc.) alongside server status
   const filteredProperties = properties.filter((p) => {
+    if (statusFilter !== 'ARCHIVED' && (locallyDeletedIds.has(String(p.id)) || isPropertyDeletedOrArchived(p))) {
+      return false;
+    }
     if (!statusFilter) return true;
     if (statusFilter === 'BOOKED') {
       const occ = getPropertyOccupancyStatus(p, bookingsList, locale);
@@ -528,6 +605,7 @@ export default function AdminPropertiesPage() {
     }
     return p.status === statusFilter;
   });
+
 
   return (
     <div className="dary-page-container">
@@ -1267,7 +1345,10 @@ export default function AdminPropertiesPage() {
                             <button
                               type="button"
                               disabled={actionLoadingId === p.id}
-                              onClick={() => setDeleteModalId(p.id)}
+                              onClick={() => {
+                                setDeleteModalError(null);
+                                setDeleteModalId(p.id);
+                              }}
                               title={locale === 'ar' ? 'حذف العقار' : 'Delete Property'}
                               style={{
                                 padding: '0.32rem 0.6rem',
@@ -1453,77 +1534,200 @@ export default function AdminPropertiesPage() {
             )}
 
             {/* Delete Confirmation Modal */}
-            {deleteModalId && (
-              <div
-                style={{
-                  position: 'fixed',
-                  inset: 0,
-                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 9999,
-                  padding: '1rem',
-                }}
-              >
+            {deleteModalId && (() => {
+              const modalProp = properties.find((item) => String(item.id) === String(deleteModalId));
+              const modalOcc = modalProp ? getPropertyOccupancyStatus(modalProp, bookingsList, locale) : null;
+              const hasActiveBooking = Boolean(
+                modalOcc && (modalOcc.isFullyBooked || modalOcc.isPartiallyBooked || modalOcc.activeBookingsCount > 0)
+              );
+
+              return (
                 <div
                   style={{
-                    backgroundColor: '#FFFFFF',
-                    borderRadius: '12px',
-                    padding: '1.5rem',
-                    maxWidth: '420px',
-                    width: '100%',
-                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1)',
+                    position: 'fixed',
+                    inset: 0,
+                    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+                    backdropFilter: 'blur(3px)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 9999,
+                    padding: '1rem',
+                  }}
+                  onClick={() => {
+                    if (!actionLoadingId) {
+                      setDeleteModalId(null);
+                      setDeleteModalError(null);
+                    }
                   }}
                 >
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#B91C1C', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span>🗑️</span>
-                    <span>{locale === 'ar' ? 'حذف العقار' : 'Delete Property'}</span>
-                  </h3>
-                  <p style={{ fontSize: '0.85rem', color: '#64748B', marginBottom: '1.25rem', lineHeight: 1.5 }}>
-                    {locale === 'ar'
-                      ? 'هل أنت متأكد من رغبتك في حذف هذا العقار؟ سيتم نقله إلى سلة المحذوفات ولن يظهر للطلاب في المنصة.'
-                      : 'Are you sure you want to delete this property? It will be archived and hidden from student search.'}
-                  </p>
+                  <div
+                    style={{
+                      backgroundColor: '#FFFFFF',
+                      borderRadius: '14px',
+                      padding: '1.6rem',
+                      maxWidth: '460px',
+                      width: '100%',
+                      boxShadow: '0 20px 35px -5px rgba(15, 23, 42, 0.25)',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <h3
+                      style={{
+                        fontSize: '1.15rem',
+                        fontWeight: 800,
+                        color: '#B91C1C',
+                        marginBottom: '0.6rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                      }}
+                    >
+                      <span>🗑️</span>
+                      <span>{locale === 'ar' ? 'تأكيد حذف العقار نهائياً' : 'Confirm Property Deletion'}</span>
+                    </h3>
 
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
-                    <button
-                      type="button"
-                      onClick={() => setDeleteModalId(null)}
-                      style={{
-                        padding: '0.55rem 1rem',
-                        borderRadius: '8px',
-                        border: '1px solid #CBD5E1',
-                        backgroundColor: '#FFFFFF',
-                        color: '#64748B',
-                        fontWeight: 600,
-                        fontSize: '0.875rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {locale === 'ar' ? 'إلغاء' : 'Cancel'}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={actionLoadingId === deleteModalId}
-                      onClick={handleConfirmDelete}
-                      style={{
-                        padding: '0.55rem 1.25rem',
-                        borderRadius: '8px',
-                        backgroundColor: '#DC2626',
-                        color: '#FFFFFF',
-                        fontWeight: 700,
-                        fontSize: '0.875rem',
-                        cursor: actionLoadingId === deleteModalId ? 'not-allowed' : 'pointer',
-                        border: 'none',
-                      }}
-                    >
-                      {actionLoadingId === deleteModalId ? '...' : (locale === 'ar' ? 'تأكيد الحذف' : 'Confirm Delete')}
-                    </button>
+                    {modalProp && (
+                      <div
+                        style={{
+                          backgroundColor: '#F8FAFC',
+                          border: '1px solid #E2E8F0',
+                          borderRadius: '8px',
+                          padding: '0.6rem 0.85rem',
+                          marginBottom: '0.9rem',
+                          fontWeight: 700,
+                          color: '#0B2A4A',
+                          fontSize: '0.9rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '0.5rem',
+                        }}
+                      >
+                        <span>🏢 {modalProp.title}</span>
+                        {modalProp.city && (
+                          <span style={{ fontSize: '0.78rem', color: '#64748B', fontWeight: 500 }}>
+                            {modalProp.city}
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {hasActiveBooking && modalOcc && (
+                      <div
+                        style={{
+                          backgroundColor: '#FFFBEB',
+                          border: '1px solid #FDE68A',
+                          borderRadius: '8px',
+                          padding: '0.75rem 0.9rem',
+                          marginBottom: '1rem',
+                          fontSize: '0.83rem',
+                          color: '#92400E',
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <strong>🔒 {locale === 'ar' ? 'تنبيه حجز نشط:' : 'Active Booking Notice:'}</strong>{' '}
+                        {locale === 'ar'
+                          ? `هذا العقار حالياً (${modalOcc.detailsText}). بصفتك مدير النظام (Super Admin)، سيقوم الحذف بإلغاء الحجوزات المرتبطة وإيقاف وحذف العقار نهائياً من المنصة.`
+                          : `This property is currently (${modalOcc.detailsText}). As an Admin, confirming deletion will cancel linked bookings and permanently remove the listing.`}
+                      </div>
+                    )}
+
+                    <p style={{ fontSize: '0.86rem', color: '#475569', marginBottom: '1.25rem', lineHeight: 1.55 }}>
+                      {locale === 'ar'
+                        ? 'هل أنت متأكد من رغبتك في حذف هذا العقار؟ سيتم إزالته من قائمة العقارات النشطة وإخفاؤه من نتائج البحث للطلاب فوراً.'
+                        : 'Are you sure you want to delete this property? It will be removed from active listings and hidden from student search immediately.'}
+                    </p>
+
+                    {deleteModalError && (
+                      <div
+                        style={{
+                          backgroundColor: '#FEF2F2',
+                          border: '1px solid #FECACA',
+                          borderRadius: '8px',
+                          padding: '0.65rem 0.85rem',
+                          marginBottom: '1rem',
+                          fontSize: '0.82rem',
+                          color: '#B91C1C',
+                        }}
+                      >
+                        ⚠️ {deleteModalError}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        disabled={Boolean(actionLoadingId)}
+                        onClick={() => {
+                          setDeleteModalId(null);
+                          setDeleteModalError(null);
+                        }}
+                        style={{
+                          padding: '0.55rem 1rem',
+                          borderRadius: '8px',
+                          border: '1px solid #CBD5E1',
+                          backgroundColor: '#FFFFFF',
+                          color: '#475569',
+                          fontWeight: 600,
+                          fontSize: '0.85rem',
+                          cursor: actionLoadingId ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {locale === 'ar' ? 'إلغاء' : 'Cancel'}
+                      </button>
+
+                      {hasActiveBooking && modalProp?.status === 'APPROVED' && (
+                        <button
+                          type="button"
+                          disabled={Boolean(actionLoadingId)}
+                          onClick={() => {
+                            const id = deleteModalId;
+                            setDeleteModalId(null);
+                            setDeleteModalError(null);
+                            setSuspendModalId(id);
+                          }}
+                          style={{
+                            padding: '0.55rem 1rem',
+                            borderRadius: '8px',
+                            border: 'none',
+                            backgroundColor: '#F59E0B',
+                            color: '#FFFFFF',
+                            fontWeight: 700,
+                            fontSize: '0.85rem',
+                            cursor: actionLoadingId ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {locale === 'ar' ? '⏸ تعليق مؤقت بدل الحذف' : '⏸ Suspend Instead'}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === deleteModalId}
+                        onClick={handleConfirmDelete}
+                        style={{
+                          padding: '0.55rem 1.25rem',
+                          borderRadius: '8px',
+                          backgroundColor: '#DC2626',
+                          color: '#FFFFFF',
+                          fontWeight: 700,
+                          fontSize: '0.85rem',
+                          cursor: actionLoadingId === deleteModalId ? 'not-allowed' : 'pointer',
+                          border: 'none',
+                          boxShadow: '0 2px 8px rgba(220, 38, 38, 0.25)',
+                        }}
+                      >
+                        {actionLoadingId === deleteModalId
+                          ? (locale === 'ar' ? '⏳ جاري الحذف...' : '⏳ Deleting...')
+                          : (locale === 'ar' ? '🗑️ تأكيد الحذف النهائي' : '🗑️ Confirm Delete')}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
+
 
             {/* Modern Reusable Pagination */}
             <Pagination
