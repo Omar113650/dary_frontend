@@ -137,13 +137,14 @@ export default function AddPropertyPage() {
   };
 
   const handleSelectSmartSuggestion = async (item: AddressSuggestion) => {
+    const labelText = item.fullAddress || item.displayName || item.title;
     setShowSmartSuggestions(false);
-    setSmartAddressQuery(item.displayName);
+    setSmartAddressQuery(labelText);
     setResolvingAddress(true);
     setAddressResolveMsg(null);
     try {
       await applyResolvedLocation(item.latitude, item.longitude, {
-        address: item.address || item.displayName,
+        address: item.address || item.fullAddress || item.title,
         district: item.district,
         city: item.city,
         governorate: item.governorate,
@@ -154,8 +155,8 @@ export default function AddPropertyPage() {
         type: 'success',
         text:
           locale === 'ar'
-            ? `✅ تم تحديد الموقع على الخريطة وملء جميع الحقول تلقائياً: ${item.displayName}`
-            : `✅ Pinned on GPS and auto-filled all fields: ${item.displayName}`,
+            ? `✅ تم تحديد الموقع على الخريطة وملء جميع الحقول تلقائياً: ${labelText}`
+            : `✅ Pinned on GPS and auto-filled all fields: ${labelText}`,
       });
     } finally {
       setResolvingAddress(false);

@@ -27,6 +27,8 @@ export interface AddressSuggestion {
   title: string;
   subtitle: string;
   fullAddress: string;
+  displayName?: string;
+  address?: string;
   latitude: number;
   longitude: number;
   governorate: string;

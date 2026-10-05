@@ -1280,8 +1280,8 @@ export default function NotificationsPage() {
               }}
             >
               {locale === 'ar'
-                ? `سيتم مسح كافة الإشعارات (${localNotifications.length} إشعار) وتصفير عدّاد الإشعارات فوراً.`
-                : `This will permanently remove all ${localNotifications.length} notifications and reset your unread badge count to 0.`}
+                ? `سيتم مسح كافة الإشعارات (${notifications.length} إشعار) وتصفير عدّاد الإشعارات فوراً.`
+                : `This will permanently remove all ${notifications.length} notifications and reset your unread badge count to 0.`}
             </p>
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
               <button
